@@ -39,7 +39,8 @@ import {
 // hiding this key.
 // ---------------------------------------------------------------------------
 const SUPABASE_URL = "https://lhmcrbzdjkihmbubmpcw.supabase.co";
-const SUPABASE_KEY = "sb_publishable_YzL7Kv0vbr82LFx-Qi8nXQ_uOgzm-OQ";
+const SUPABASE_KEY = const SUPABASE_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxobWNyYnpkamtpaG1idWJtcGN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwMDk4NjAsImV4cCI6MjEwNTU4NTg2MH0.RbC31c3BhDdSv2FyZvWa7OTcHMFC_QZ1fK7UVwGLVX0";
 
 async function supabaseAuthRequest(path, options = {}) {
   try {
