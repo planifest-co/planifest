@@ -28,6 +28,9 @@ import {
   Shield,
   Instagram,
   MessageCircle,
+  Eye,
+  EyeOff,
+  Search,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -39,7 +42,31 @@ import {
 // hiding this key.
 // ---------------------------------------------------------------------------
 const SUPABASE_URL = "https://lhmcrbzdjkihmbubmpcw.supabase.co";
-const SUPABASE_KEY =  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxobWNyYnpkamtpaG1idWJtcGN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwMDk4NjAsImV4cCI6MjEwNTU4NTg2MH0.RbC31c3BhDdSv2FyZvWa7OTcHMFC_QZ1fK7UVwGLVX0";
+const SUPABASE_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxobWNyYnpkamtpaG1idWJtcGN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwMDk4NjAsImV4cCI6MjEwNTU4NTg2MH0.RbC31c3BhDdSv2FyZvWa7OTcHMFC_QZ1fK7UVwGLVX0"; // legacy anon key — the newer sb_publishable_ key isn't fully rolled out for REST on this project yet
+
+// Session persistence — now that this runs on real hosting (not the old
+// artifact preview sandbox), localStorage works fine and is the right place
+// for this: per-browser, never shared between visitors.
+const SESSION_STORAGE_KEY = "planifest-session";
+
+function loadStoredSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function storeSession(sessionData) {
+  try {
+    if (sessionData) localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionData));
+    else localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch (e) {
+    // ignore — e.g. private browsing; session just won't persist across reloads
+  }
+}
 
 async function supabaseAuthRequest(path, options = {}) {
   try {
@@ -71,6 +98,208 @@ async function supabaseRestRequest(path, accessToken, options = {}) {
     return { data };
   } catch (e) {
     return { error: { message: "Nådde inte Supabase (nätverksanropet blockerades eller misslyckades): " + (e?.message || "okänt fel") } };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Vendor data layer (Fas 6) — maps between the DB's shape (vendors +
+// vendor_categories + services + addons + blocked_times) and the local
+// object shape the rest of the app already expects (vendor.profile.services
+// etc.), so the view components below didn't need to change, only where the
+// data comes from and goes to.
+// ---------------------------------------------------------------------------
+function mapDbVendorToLocal(dbVendor) {
+  return {
+    id: dbVendor.id,
+    companyName: dbVendor.company_name,
+    organizationNumber: dbVendor.organization_number,
+    contactPerson: dbVendor.contact_person,
+    email: dbVendor.email,
+    phone: dbVendor.phone,
+    baseLocation: dbVendor.base_location,
+    serviceArea: dbVendor.service_area_type ? { type: dbVendor.service_area_type, value: dbVendor.service_area_value } : null,
+    categories: (dbVendor.vendor_categories || []).map((vc) => vc.category_id),
+    status: dbVendor.status,
+    blockedTimes: (dbVendor.blocked_times || []).map((bt) => ({
+      id: bt.id,
+      date: bt.date,
+      startTime: bt.start_time,
+      endTime: bt.end_time,
+      note: bt.note || "",
+    })),
+    profile: {
+      tagline: dbVendor.tagline || "",
+      description: dbVendor.description || "",
+      images: dbVendor.images || [],
+      services: (dbVendor.services || []).map((s) => ({
+        id: s.id,
+        name: s.name || "",
+        description: s.description || "",
+        priceType: s.price_type,
+        price: s.price,
+        priceNote: s.price_note || "",
+        category: s.category_id || "",
+      })),
+      addons: (dbVendor.addons || []).map((a) => ({ id: a.id, name: a.name || "", price: a.price })),
+    },
+  };
+}
+
+const VENDOR_SELECT = "select=*,vendor_categories(category_id),services(*),addons(*),blocked_times(*)";
+
+async function fetchVendorByProfileId(profileId, accessToken) {
+  return supabaseRestRequest(`/vendors?profile_id=eq.${profileId}&${VENDOR_SELECT}`, accessToken);
+}
+
+async function fetchApprovedVendors(accessToken) {
+  return supabaseRestRequest(`/vendors?status=eq.approved&${VENDOR_SELECT}`, accessToken);
+}
+
+async function fetchAllVendorsForAdmin(accessToken) {
+  return supabaseRestRequest(`/vendors?${VENDOR_SELECT}&order=created_at.desc`, accessToken);
+}
+
+// ---------------------------------------------------------------------------
+// Real chat + quotes (Fas 8) — one conversation per (vendor, customer,
+// category), whether it started before or after a booking. Mock/demo
+// listings (no real vendorDbId) never reach this — they keep using the
+// simulated local-only chat, same as before.
+// ---------------------------------------------------------------------------
+async function findOrCreateConversation({ vendorId, customerId, categoryId, accessToken }) {
+  const { data: existing, error: findError } = await supabaseRestRequest(
+    `/conversations?vendor_id=eq.${vendorId}&customer_id=eq.${customerId}&category_id=eq.${categoryId}&select=*`,
+    accessToken
+  );
+  if (findError) return { error: findError };
+  if (existing && existing[0]) return { data: existing[0] };
+  return supabaseRestRequest("/conversations", accessToken, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ vendor_id: vendorId, customer_id: customerId, category_id: categoryId }),
+  }).then(({ data, error }) => (error || !data?.[0] ? { error } : { data: data[0] }));
+}
+
+// Creates the vendors row plus its vendor_categories rows for a freshly
+// confirmed account. Returns the mapped local-shape vendor on success.
+async function createVendorApplication(session, form) {
+  const areaOption = SERVICE_AREA_OPTIONS.find((o) => o.type === form.serviceArea);
+  const { data, error } = await supabaseRestRequest("/vendors", session.access_token, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({
+      profile_id: session.user.id,
+      company_name: form.companyName,
+      organization_number: form.organizationNumber,
+      contact_person: form.contactPerson,
+      email: form.email,
+      phone: form.phone,
+      base_location: form.baseLocation,
+      service_area_type: areaOption?.type || null,
+      service_area_value: areaOption?.label || null,
+      status: "pending",
+    }),
+  });
+  if (error || !data?.[0]) return { error: error || { message: "Kunde inte skapa leverantörsprofilen." } };
+  const vendorRow = data[0];
+  if (form.categories.length > 0) {
+    await supabaseRestRequest("/vendor_categories", session.access_token, {
+      method: "POST",
+      body: JSON.stringify(form.categories.map((catId) => ({ vendor_id: vendorRow.id, category_id: catId }))),
+    });
+  }
+  return {
+    data: mapDbVendorToLocal({
+      ...vendorRow,
+      vendor_categories: form.categories.map((c) => ({ category_id: c })),
+      services: [],
+      addons: [],
+      blocked_times: [],
+    }),
+  };
+}
+
+// Batch-saves the editable parts of a vendor profile: replaces categories,
+// services and addons wholesale (simplest correct approach at this scale)
+// and patches the main row's own fields.
+async function saveVendorProfile(vendor, accessToken) {
+  await supabaseRestRequest(`/vendors?id=eq.${vendor.id}`, accessToken, {
+    method: "PATCH",
+    body: JSON.stringify({
+      company_name: vendor.companyName,
+      contact_person: vendor.contactPerson,
+      email: vendor.email,
+      phone: vendor.phone,
+      base_location: vendor.baseLocation,
+      service_area_type: vendor.serviceArea?.type || null,
+      service_area_value: vendor.serviceArea?.value || null,
+      tagline: vendor.profile.tagline,
+      description: vendor.profile.description,
+      images: vendor.profile.images,
+    }),
+  });
+
+  await supabaseRestRequest(`/vendor_categories?vendor_id=eq.${vendor.id}`, accessToken, { method: "DELETE" });
+  if (vendor.categories.length > 0) {
+    await supabaseRestRequest("/vendor_categories", accessToken, {
+      method: "POST",
+      body: JSON.stringify(vendor.categories.map((c) => ({ vendor_id: vendor.id, category_id: c }))),
+    });
+  }
+
+  await supabaseRestRequest(`/services?vendor_id=eq.${vendor.id}`, accessToken, { method: "DELETE" });
+  if (vendor.profile.services.length > 0) {
+    await supabaseRestRequest("/services", accessToken, {
+      method: "POST",
+      body: JSON.stringify(
+        vendor.profile.services.map((s) => ({
+          vendor_id: vendor.id,
+          category_id: s.category || null,
+          name: s.name,
+          description: s.description,
+          price_type: s.priceType,
+          price: Number(s.price) || 0,
+          price_note: s.priceNote,
+        }))
+      ),
+    });
+  }
+
+  await supabaseRestRequest(`/addons?vendor_id=eq.${vendor.id}`, accessToken, { method: "DELETE" });
+  if (vendor.profile.addons.length > 0) {
+    await supabaseRestRequest("/addons", accessToken, {
+      method: "POST",
+      body: JSON.stringify(vendor.profile.addons.map((a) => ({ vendor_id: vendor.id, name: a.name, price: Number(a.price) || 0 }))),
+    });
+  }
+}
+
+// A vendor signup requiring email confirmation can't insert its vendors row
+// right away (no session yet) — the collected form data is stashed here and
+// picked back up the first time this email successfully logs in.
+const PENDING_VENDOR_KEY = "planifest-pending-vendor";
+function stashPendingVendorApplication(email, form) {
+  try {
+    const { password, confirmPassword, ...rest } = form;
+    localStorage.setItem(PENDING_VENDOR_KEY, JSON.stringify({ email, form: rest }));
+  } catch (e) {
+    // ignore — worst case they just need to redo the vendor form after confirming
+  }
+}
+function loadPendingVendorApplication(email) {
+  try {
+    const raw = localStorage.getItem(PENDING_VENDOR_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed.email === email ? parsed.form : null;
+  } catch (e) {
+    return null;
+  }
+}
+function clearPendingVendorApplication() {
+  try {
+    localStorage.removeItem(PENDING_VENDOR_KEY);
+  } catch (e) {
+    // ignore
   }
 }
 
@@ -484,6 +713,7 @@ function mapVendorToProviders(vendor, bookings) {
 
     return {
       id: `${vendor.id}-${categoryId}`,
+      vendorDbId: vendor.id.startsWith("VND-") ? null : vendor.id, // only real (Supabase) vendors get a real FK id
       category: categoryId,
       name: vendor.companyName,
       tagline: vendor.profile.tagline || "Ny leverantör på Planifest",
@@ -613,6 +843,7 @@ function validateVendorGeography(form) {
 function validateVendorCategories(form) {
   const errors = {};
   if (form.categories.length === 0) errors.categories = "Välj minst en kategori";
+  if (!form.acceptedTerms) errors.acceptedTerms = "Du måste godkänna villkoren för leverantörer för att skicka in ansökan";
   return errors;
 }
 
@@ -1162,7 +1393,24 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef }) {
   );
 }
 
-function ResultsView({ party, setParty, groups, swapProviders, cart, onView, onAdd, onRemove, sortBy, setSortBy, distanceFilter, setDistanceFilter, swapContext, onCancelSwap }) {
+function ResultsView({
+  party,
+  setParty,
+  groups,
+  swapProviders,
+  cart,
+  onView,
+  onAdd,
+  onRemove,
+  sortBy,
+  setSortBy,
+  distanceFilter,
+  setDistanceFilter,
+  swapContext,
+  onCancelSwap,
+  searchQuery,
+  setSearchQuery,
+}) {
   const toggleCategory = (id) => {
     setParty((p) => ({
       ...p,
@@ -1209,6 +1457,19 @@ function ResultsView({ party, setParty, groups, swapProviders, cart, onView, onA
             )}
           </div>
         </>
+      )}
+
+      {!swapContext && (
+        <div className="relative mt-5 max-w-sm">
+          <Search size={15} color={colors.plumSoft} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Sök leverantör..."
+            className="w-full rounded-full py-2 pl-9 pr-4 text-sm"
+            style={{ border: `1px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}
+          />
+        </div>
       )}
 
       {!swapContext && (
@@ -1320,7 +1581,7 @@ function ResultsView({ party, setParty, groups, swapProviders, cart, onView, onA
   );
 }
 
-function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat }) {
+function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty }) {
   const cat = catMap[provider.category];
   const [pendingAddons, setPendingAddons] = useState([]);
   const initialCalDate = party.date ? new Date(party.date) : new Date();
@@ -1406,13 +1667,17 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
               <h2 className="mb-2 font-semibold" style={{ color: colors.plum }}>
                 Tillgänglighet
               </h2>
+              <p className="mb-2 text-xs" style={{ color: colors.plumSoft }}>
+                Klicka på en ledig dag för att välja den och boka direkt.
+              </p>
               <MonthCalendar
                 year={calYear}
                 month={calMonthIdx}
                 onPrevMonth={prevMonth}
                 onNextMonth={nextMonth}
                 getDayStatus={getDayStatus}
-                interactive={false}
+                onDayClick={(ds, status) => status === "open" && onSelectDate(ds)}
+                interactive
                 highlightDate={null}
                 compact
               />
@@ -1518,6 +1783,47 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                   : `Tillgänglig ${party.date}, ${party.startTime}–${party.endTime}`
                 : "Se hela kalendern ovan för tillgänglighet"}
             </div>
+
+            {party.date && (
+              <div className="mt-3 space-y-2 rounded-xl p-3" style={{ backgroundColor: colors.cream }}>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                    Start
+                    <input
+                      type="time"
+                      value={party.startTime}
+                      onChange={(e) => onUpdateParty({ startTime: e.target.value })}
+                      className="rounded-lg px-2 py-1.5 text-sm"
+                      style={{ border: `1px solid ${colors.beige}`, color: colors.plum }}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                    Slut
+                    <input
+                      type="time"
+                      value={party.endTime}
+                      onChange={(e) => onUpdateParty({ endTime: e.target.value })}
+                      className="rounded-lg px-2 py-1.5 text-sm"
+                      style={{ border: `1px solid ${colors.beige}`, color: colors.plum }}
+                    />
+                  </label>
+                </div>
+                <label className="flex flex-col gap-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                  Gäster
+                  <input
+                    type="number"
+                    min={1}
+                    value={party.guests}
+                    onChange={(e) => onUpdateParty({ guests: Number(e.target.value) || 1 })}
+                    className="rounded-lg px-2 py-1.5 text-sm"
+                    style={{ border: `1px solid ${colors.beige}`, color: colors.plum }}
+                  />
+                </label>
+                <button onClick={() => onUpdateParty({ date: "" })} className="text-xs font-medium underline" style={{ color: colors.lilacDeep }}>
+                  Byt datum
+                </button>
+              </div>
+            )}
             {inCart ? (
               <button
                 onClick={() => onRemove(provider.id)}
@@ -2118,7 +2424,7 @@ function containsContactInfo(text) {
   return CONTACT_INFO_PATTERNS.some((re) => re.test(text));
 }
 
-function ChatModal({ target, messages, vendorTyping, onSend, onClose }) {
+function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQuote, onDeclineQuote }) {
   const [text, setText] = useState("");
   const [blocked, setBlocked] = useState(false);
   const scrollRef = useRef(null);
@@ -2128,6 +2434,8 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose }) {
   }, [messages, vendorTyping, target]);
 
   if (!target) return null;
+
+  const vendorName = target.kind === "booking" ? target.item.name : target.provider.name;
 
   const submit = () => {
     if (!text.trim()) return;
@@ -2157,9 +2465,7 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose }) {
       >
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1.5px solid ${colors.lilacSoft}` }}>
           <div>
-            <p style={{ fontFamily: serif, fontSize: 18, color: colors.plum }}>
-              {target.kind === "booking" ? target.item.name : target.provider.name}
-            </p>
+            <p style={{ fontFamily: serif, fontSize: 18, color: colors.plum }}>{vendorName}</p>
             <p className="text-xs" style={{ color: colors.plumSoft }}>
               {target.kind === "booking" ? target.bookingNumber : "Fråga innan du bokar"}
             </p>
@@ -2174,23 +2480,70 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose }) {
             <p className="py-8 text-center text-sm" style={{ color: colors.plumSoft }}>
               {target.kind === "booking"
                 ? `Skriv ett meddelande till ${target.item.name} om er bokning.`
-                : `Skriv en fråga till ${target.provider.name} — kolla t.ex. om de har det du behöver innan du bokar.`}
+                : `Skriv en fråga till ${vendorName} — kolla t.ex. om de har det du behöver innan du bokar.`}
             </p>
           )}
-          {messages.map((m) => (
-            <div key={m.id} className="flex" style={{ justifyContent: m.sender === "customer" ? "flex-end" : "flex-start" }}>
-              <div
-                className="max-w-[75%] rounded-2xl px-3.5 py-2 text-sm"
-                style={{
-                  backgroundColor: m.sender === "customer" ? colors.coral : colors.white,
-                  color: m.sender === "customer" ? colors.white : colors.plum,
-                  border: m.sender === "customer" ? "none" : `1px solid ${colors.beige}`,
-                }}
-              >
-                {m.text}
+          {messages.map((m) =>
+            m.message_type === "quote" ? (
+              <div key={m.id} className="flex" style={{ justifyContent: "flex-start" }}>
+                <div className="max-w-[85%] rounded-2xl p-3.5 text-sm" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+                  <p className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: colors.lilacDeep }}>
+                    <Sparkles size={13} /> Offert
+                  </p>
+                  <p className="mt-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
+                    {formatKr(m.quote_amount)}
+                  </p>
+                  {m.quote_description && (
+                    <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
+                      {m.quote_description}
+                    </p>
+                  )}
+                  {m.quote_status === "pending" ? (
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => onDeclineQuote(m)}
+                        className="flex-1 rounded-full px-3 py-2 text-xs font-medium"
+                        style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}
+                      >
+                        Tacka nej
+                      </button>
+                      <button
+                        onClick={() => onAcceptQuote(m)}
+                        className="flex-1 rounded-full px-3 py-2 text-xs font-semibold"
+                        style={{ backgroundColor: colors.coral, color: colors.white }}
+                      >
+                        Acceptera
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      className="mt-3 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
+                      style={{
+                        backgroundColor: m.quote_status === "accepted" ? "#E3F3E9" : colors.beige,
+                        color: m.quote_status === "accepted" ? colors.green : colors.plumSoft,
+                      }}
+                    >
+                      {m.quote_status === "accepted" ? <Check size={12} /> : <X size={12} />}
+                      {m.quote_status === "accepted" ? "Accepterad — tillagd i Min fest" : "Tackade nej"}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            ) : (
+              <div key={m.id} className="flex" style={{ justifyContent: m.sender === "customer" ? "flex-end" : "flex-start" }}>
+                <div
+                  className="max-w-[75%] rounded-2xl px-3.5 py-2 text-sm"
+                  style={{
+                    backgroundColor: m.sender === "customer" ? colors.coral : colors.white,
+                    color: m.sender === "customer" ? colors.white : colors.plum,
+                    border: m.sender === "customer" ? "none" : `1px solid ${colors.beige}`,
+                  }}
+                >
+                  {m.text}
+                </div>
+              </div>
+            )
+          )}
           {vendorTyping && (
             <div className="flex" style={{ justifyContent: "flex-start" }}>
               <div
@@ -2456,19 +2809,34 @@ function SupportModal({ open, onClose, onSubmit }) {
 // Vendor signup (Fas 2A)
 // ---------------------------------------------------------------------------
 function VendorTextField({ label, value, onChange, error, type = "text", placeholder }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const isPassword = type === "password";
+  const resolvedType = isPassword && showPassword ? "text" : type;
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="font-medium" style={{ color: colors.plum }}>
         {label}
       </span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="rounded-xl px-3 py-2 text-sm"
-        style={{ border: `1.5px solid ${error ? colors.coral : colors.beige}`, color: colors.plum }}
-      />
+      <div className="relative">
+        <input
+          type={resolvedType}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full rounded-xl px-3 py-2 text-sm"
+          style={{ border: `1.5px solid ${error ? colors.coral : colors.beige}`, color: colors.plum, paddingRight: isPassword ? 38 : undefined }}
+        />
+        {isPassword && (
+          <button
+            type="button"
+            onClick={() => setShowPassword((s) => !s)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1"
+            aria-label={showPassword ? "Dölj lösenord" : "Visa lösenord"}
+          >
+            {showPassword ? <EyeOff size={16} color={colors.plumSoft} /> : <Eye size={16} color={colors.plumSoft} />}
+          </button>
+        )}
+      </div>
       {error && (
         <span className="text-xs" style={{ color: colors.coralDeep }}>
           {error}
@@ -2612,7 +2980,7 @@ function GeographyPicker({ baseLocation, serviceAreaType, onBaseLocation, onServ
   );
 }
 
-function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNext, onBack, onSubmit, onShowToast }) {
+function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNext, onBack, onSubmit, onShowToast, submitError, submitting, onOpenTerms }) {
   const stepTitles = { 1: "Skapa konto", 2: "Geografi", 3: "Vad erbjuder du?" };
 
   return (
@@ -2690,7 +3058,29 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
                 {errors.categories}
               </p>
             )}
+
+            <label className="mt-2 flex items-start gap-3 text-sm" style={{ color: colors.plum, borderTop: `1px solid ${colors.beige}`, paddingTop: 16 }}>
+              <input type="checkbox" checked={form.acceptedTerms} onChange={(e) => onField("acceptedTerms", e.target.checked)} className="mt-1" />
+              <span>
+                Jag har läst och godkänner{" "}
+                <button type="button" onClick={onOpenTerms} className="font-semibold underline" style={{ color: colors.lilacDeep }}>
+                  Planifests villkor för leverantörer
+                </button>
+                , inklusive reglerna om avbokning och att inte kringgå plattformen.
+              </span>
+            </label>
+            {errors.acceptedTerms && (
+              <p className="text-xs" style={{ color: colors.coralDeep }}>
+                {errors.acceptedTerms}
+              </p>
+            )}
           </div>
+        )}
+
+        {step === 3 && submitError && (
+          <p className="mt-3 text-xs" style={{ color: colors.coralDeep }}>
+            {submitError}
+          </p>
         )}
 
         <div className="mt-8 flex gap-3">
@@ -2708,12 +3098,34 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
               Nästa
             </button>
           ) : (
-            <button onClick={onSubmit} className="flex-1 rounded-full px-4 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
-              Skicka ansökan
+            <button
+              onClick={onSubmit}
+              disabled={submitting}
+              className="flex-1 rounded-full px-4 py-3 text-sm font-semibold"
+              style={{ backgroundColor: colors.coral, color: colors.white, opacity: submitting ? 0.6 : 1 }}
+            >
+              {submitting ? "Skickar..." : "Skicka ansökan"}
             </button>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function VendorAwaitingConfirmationView({ email, onHome }) {
+  return (
+    <div className="mx-auto max-w-xl px-6 pb-24 pt-14 text-center sm:px-10">
+      <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full" style={{ backgroundColor: colors.coralSoft }}>
+        <Check size={28} color={colors.coral} />
+      </div>
+      <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Kolla din mejl!</h1>
+      <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
+        Vi har skickat en bekräftelselänk till <strong>{email}</strong>. Klicka på den, kom sedan tillbaka hit och logga in — då slutförs din leverantörsansökan automatiskt.
+      </p>
+      <button onClick={onHome} className="mt-6 w-full rounded-full py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+        Till startsidan
+      </button>
     </div>
   );
 }
@@ -2867,7 +3279,7 @@ const SEED_BOOKINGS = [
   },
 ];
 
-function VendorDashboardView({ vendor, bookingItems, onEditProfile, onPreview, onBookings }) {
+function VendorDashboardView({ vendor, bookingItems, onEditProfile, onPreview, onBookings, onInbox }) {
   if (!vendor) return null;
   const { percent, missing } = getVendorCompleteness(vendor);
   const locationName = locationMap[vendor.baseLocation]?.name || vendor.baseLocation;
@@ -2885,6 +3297,7 @@ function VendorDashboardView({ vendor, bookingItems, onEditProfile, onPreview, o
       icon: Calendar,
       action: onBookings,
     },
+    { title: "Meddelanden", desc: "Frågor och offerter till kunder", icon: MessageCircle, action: onInbox },
     { title: "Förhandsvisning", desc: "Se hur kunder kommer se er profil", icon: Star, action: onPreview },
   ];
 
@@ -3448,6 +3861,204 @@ function VendorProfilePreviewView({ vendor, onBack }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Vendor inbox (Fas 8) — a full page (not a modal, unlike the customer-side
+// chat) since a vendor spends more focused time here. Reuses the same quote
+// bubble treatment as the customer's ChatModal.
+// ---------------------------------------------------------------------------
+function VendorInboxView({ conversations, activeConversationId, messages, onOpenConversation, onSendMessage, onSendQuote, onBack }) {
+  const [text, setText] = useState("");
+  const [quoteMode, setQuoteMode] = useState(false);
+  const [quoteAmount, setQuoteAmount] = useState("");
+  const [quoteDescription, setQuoteDescription] = useState("");
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, activeConversationId]);
+
+  const active = conversations.find((c) => c.id === activeConversationId) || null;
+
+  const submitMessage = () => {
+    if (!text.trim()) return;
+    onSendMessage(text.trim());
+    setText("");
+  };
+
+  const submitQuote = () => {
+    const amount = Number(quoteAmount);
+    if (!amount || amount <= 0) return;
+    onSendQuote(amount, quoteDescription.trim());
+    setQuoteAmount("");
+    setQuoteDescription("");
+    setQuoteMode(false);
+  };
+
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+
+  if (active) {
+    return (
+      <div className="mx-auto flex max-w-3xl flex-col px-6 pb-10 pt-8 sm:px-10" style={{ height: "calc(100vh - 90px)" }}>
+        <button onClick={onBack} className="-ml-2 mb-4 flex items-center gap-1 px-2 py-1.5 text-sm font-medium" style={{ color: colors.plumSoft }}>
+          <ChevronLeft size={16} /> Alla konversationer
+        </button>
+        <div className="mb-3">
+          <p style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>{catMap[active.category_id]?.label || "Fråga"}</p>
+          <p className="text-xs" style={{ color: colors.plumSoft }}>Kund</p>
+        </div>
+        <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto rounded-3xl p-4" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+          {messages.length === 0 && (
+            <p className="py-8 text-center text-sm" style={{ color: colors.plumSoft }}>
+              Inga meddelanden än.
+            </p>
+          )}
+          {messages.map((m) =>
+            m.message_type === "quote" ? (
+              <div key={m.id} className="flex" style={{ justifyContent: m.sender === "vendor" ? "flex-end" : "flex-start" }}>
+                <div className="max-w-[80%] rounded-2xl p-3.5 text-sm" style={{ backgroundColor: colors.lilacSoft }}>
+                  <p className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: colors.lilacDeep }}>
+                    <Sparkles size={13} /> Din offert
+                  </p>
+                  <p className="mt-1" style={{ fontFamily: serif, fontSize: 18, color: colors.plum }}>
+                    {formatKr(m.quote_amount)}
+                  </p>
+                  {m.quote_description && (
+                    <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
+                      {m.quote_description}
+                    </p>
+                  )}
+                  <span
+                    className="mt-2 inline-block rounded-full px-2 py-0.5 text-xs font-medium"
+                    style={{
+                      backgroundColor: m.quote_status === "accepted" ? "#E3F3E9" : m.quote_status === "declined" ? colors.beige : colors.white,
+                      color: m.quote_status === "accepted" ? colors.green : colors.plumSoft,
+                    }}
+                  >
+                    {m.quote_status === "accepted" ? "Accepterad" : m.quote_status === "declined" ? "Nekad" : "Väntar på svar"}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div key={m.id} className="flex" style={{ justifyContent: m.sender === "vendor" ? "flex-end" : "flex-start" }}>
+                <div
+                  className="max-w-[75%] rounded-2xl px-3.5 py-2 text-sm"
+                  style={{
+                    backgroundColor: m.sender === "vendor" ? colors.coral : colors.cream,
+                    color: m.sender === "vendor" ? colors.white : colors.plum,
+                  }}
+                >
+                  {m.text}
+                </div>
+              </div>
+            )
+          )}
+        </div>
+
+        {quoteMode ? (
+          <div className="mt-3 rounded-2xl p-4" style={{ backgroundColor: colors.lilacSoft }}>
+            <p className="mb-2 text-sm font-semibold" style={{ color: colors.plum }}>
+              Skicka offert
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="number"
+                value={quoteAmount}
+                onChange={(e) => setQuoteAmount(e.target.value)}
+                placeholder="Pris (kr)"
+                className="col-span-2 rounded-lg px-3 py-2 text-sm sm:col-span-1"
+                style={fieldStyle}
+              />
+              <input
+                value={quoteDescription}
+                onChange={(e) => setQuoteDescription(e.target.value)}
+                placeholder="Vad ingår? (valfritt)"
+                className="col-span-2 rounded-lg px-3 py-2 text-sm sm:col-span-1"
+                style={fieldStyle}
+              />
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => setQuoteMode(false)}
+                className="flex-1 rounded-full px-4 py-2 text-sm font-medium"
+                style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}
+              >
+                Avbryt
+              </button>
+              <button onClick={submitQuote} className="flex-1 rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+                Skicka offert
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={() => setQuoteMode(true)}
+              className="flex flex-shrink-0 items-center gap-1 rounded-full px-3 py-2.5 text-xs font-semibold"
+              style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}
+            >
+              <Sparkles size={14} /> Offert
+            </button>
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitMessage()}
+              placeholder="Skriv ett meddelande..."
+              className="flex-1 rounded-full px-4 py-2.5 text-sm"
+              style={fieldStyle}
+            />
+            <button
+              onClick={submitMessage}
+              disabled={!text.trim()}
+              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full"
+              style={{ backgroundColor: colors.coral, color: colors.white, opacity: text.trim() ? 1 : 0.5 }}
+              aria-label="Skicka"
+            >
+              <ArrowRight size={16} />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl px-6 pb-24 pt-10 sm:px-10">
+      <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Meddelanden</h1>
+      <div className="mt-5 space-y-2">
+        {conversations.length === 0 && (
+          <p className="py-16 text-center text-sm" style={{ color: colors.plumSoft }}>
+            Inga konversationer än.
+          </p>
+        )}
+        {conversations.map((c) => {
+          const Icon = catMap[c.category_id]?.icon;
+          return (
+            <button
+              key={c.id}
+              onClick={() => onOpenConversation(c.id)}
+              className="flex w-full items-center gap-3 rounded-2xl p-4 text-left"
+              style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}
+            >
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: colors.lilacSoft }}>
+                {Icon && <Icon size={16} color={colors.lilacDeep} />}
+              </div>
+              <div className="flex-1">
+                <p className="font-semibold" style={{ color: colors.plum }}>
+                  {catMap[c.category_id]?.label || "Fråga"}
+                </p>
+                <p className="text-xs" style={{ color: colors.plumSoft }}>
+                  Kund
+                </p>
+              </div>
+              <ChevronRight size={16} color={colors.plumSoft} />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime, onRemoveBlockedTime, onShowToast }) {
   const [blockDate, setBlockDate] = useState("");
   const [blockStart, setBlockStart] = useState("09:00");
@@ -3932,7 +4543,7 @@ const PRIVACY_POLICY_SECTIONS = [
     heading: "1. Vem är personuppgiftsansvarig?",
     paragraphs: [
       "Planifest drivs som enskild firma av Kristina Onus (\"Planifest\", \"vi\" eller \"oss\"). Kristina Onus är personuppgiftsansvarig för den behandling av personuppgifter som beskrivs i denna policy.",
-      "Kontaktuppgifter: [DIN KONTAKT-E-POST], [DIN REGISTRERADE FÖRETAGSADRESS].",
+      "Kontaktuppgifter: info@planifest.se, [DIN REGISTRERADE FÖRETAGSADRESS].",
     ],
   },
   {
@@ -3995,7 +4606,7 @@ const PRIVACY_POLICY_SECTIONS = [
   },
   {
     heading: "10. Kontakt",
-    paragraphs: ["Har du frågor om hur vi behandlar dina personuppgifter? Kontakta oss på [DIN KONTAKT-E-POST].", "Senast uppdaterad: [DATUM]"],
+    paragraphs: ["Har du frågor om hur vi behandlar dina personuppgifter? Kontakta oss på info@planifest.se.", "Senast uppdaterad: [DATUM]"],
   },
 ];
 
@@ -4028,37 +4639,56 @@ const TERMS_SECTIONS = [
   {
     heading: "6. Leverantörens ansvar",
     paragraphs: ["Leverantören ansvarar för att informationen om tjänster, priser och tillgänglighet är korrekt, och för att tjänsten utförs med den kvalitet och vid den tidpunkt som avtalats med Kunden."],
+    bullets: [
+      "För skräddarsydda beställningar (t.ex. tårtdesign, anpassad dekoration) anger Leverantören ett grundpris. Tillägg som chattas fram med Kunden läggs till som en offert som Kunden godkänner innan bokningen bekräftas.",
+      "Leverantören bekräftar eller avböjer bokningsförfrågningar inom 24 timmar.",
+      "Leverantören ansvarar själv för de tillstånd och licenser som krävs för sin verksamhet.",
+      "Kunduppgifter som delas via Planifest får endast användas för att genomföra den aktuella bokningen.",
+      "Leverantören ska bemöta kunder professionellt, utan diskriminering eller trakasserier.",
+      "Leverantören är ensam ansvarig för den bokade tjänstens genomförande. Planifest är enbart förmedlare och part inte i avtalet mellan Leverantör och Kund.",
+      "Leverantören godkänner att betala Planifests förmedlingsavgift (för närvarande cirka 10 %) när betalfunktionen är i drift.",
+    ],
   },
   {
     heading: "7. Kundens ansvar",
     paragraphs: ["Kunden ansvarar för att lämnade uppgifter (datum, antal gäster, plats m.m.) är korrekta och för att i tid meddela ändringar som påverkar bokningen."],
   },
   {
-    heading: "8. Kringgående av plattformen",
+    heading: "8. Leverantörens avbokning",
+    paragraphs: [
+      "Leverantören kan avboka en bekräftad bokning avgiftsfritt fram till 30 dagar innan eventet.",
+      "Avbokning senare än så innebär att Kunden inte behöver betala för tjänsten, oavsett om Planifest lyckas hitta en ersättare. Planifest hjälper aktivt till att hitta en ny leverantör i samma prisklass.",
+      "En sen avbokning registreras som en varning på Leverantörens konto. Avbokningar som beror på samma händelse eller orsak, inom en kort tidsperiod, räknas som en varning. Planifest avgör vad som räknas som samma orsak.",
+      "Upprepade sena avbokningar kan leda till att kontot stängs av från Planifest.",
+      "När betalfunktionen är på plats kan en avgift motsvarande förmedlingsavgiften komma att dras från Leverantörens nästa utbetalning vid upprepade sena avbokningar.",
+    ],
+  },
+  {
+    heading: "9. Kringgående av plattformen",
     paragraphs: [
       "Kund och Leverantör som kommit i kontakt via Planifest förbinder sig att inte, under pågående bokningsprocess eller inom [12] månader efter första kontakt via plattformen, ingå avtal om samma eller liknande tjänst direkt med varandra i syfte att kringgå Planifests förmedlingsavgift.",
       "Vid brott mot denna bestämmelse har Planifest rätt att fakturera den ansvariga parten ett belopp motsvarande den förmedlingsavgift som skulle ha utgått vid bokning via plattformen, samt att stänga av kontot.",
     ],
   },
   {
-    heading: "9. Immateriella rättigheter",
+    heading: "10. Immateriella rättigheter",
     paragraphs: ["Allt innehåll på Planifest (varumärke, design och texter som tillhör Planifest) ägs av Planifest eller våra licensgivare. Leverantörer behåller rättigheterna till sina egna bilder och texter men ger Planifest rätt att visa dem på plattformen."],
   },
   {
-    heading: "10. Ansvarsbegränsning",
+    heading: "11. Ansvarsbegränsning",
     paragraphs: ["Planifest ansvarar inte för Leverantörens utförande av bokade tjänster eller för skador i samband med ett event. Planifests ansvar är i alla händelser begränsat till den förmedlingsavgift som betalats för den aktuella bokningen."],
   },
   {
-    heading: "11. Reklamation och tvist",
+    heading: "12. Reklamation och tvist",
     paragraphs: ["Klagomål på en utförd tjänst riktas i första hand till Leverantören. Kan tvisten inte lösas kan Kund vända sig till Allmänna reklamationsnämnden (ARN) eller allmän domstol. Svensk lag tillämpas."],
   },
   {
-    heading: "12. Ändringar av villkoren",
+    heading: "13. Ändringar av villkoren",
     paragraphs: ["Vi kan komma att ändra dessa villkor. Väsentliga ändringar meddelas via webbplatsen eller e-post i god tid innan de träder i kraft."],
   },
   {
-    heading: "13. Kontakt",
-    paragraphs: ["Frågor om dessa villkor? Kontakta oss på [DIN KONTAKT-E-POST].", "Senast uppdaterad: [DATUM]"],
+    heading: "14. Kontakt",
+    paragraphs: ["Frågor om dessa villkor? Kontakta oss på info@planifest.se.", "Senast uppdaterad: [DATUM]"],
   },
 ];
 
@@ -4087,7 +4717,7 @@ const COOKIE_POLICY_SECTIONS = [
   },
   {
     heading: "5. Kontakt",
-    paragraphs: ["Frågor om cookies? Kontakta oss på [DIN KONTAKT-E-POST].", "Senast uppdaterad: [DATUM]"],
+    paragraphs: ["Frågor om cookies? Kontakta oss på info@planifest.se.", "Senast uppdaterad: [DATUM]"],
   },
 ];
 
@@ -4214,7 +4844,7 @@ function Footer({ onGoHome, onBrowse, onHowItWorks, onBecomeVendor, onOpenTerms,
             </h3>
             <ul className="space-y-2 text-sm" style={{ color: colors.plumSoft }}>
               <li>
-                <button onClick={() => onShowToast("Kontaktsida läggs till i nästa steg.")}>Kontakt</button>
+                <a href="mailto:info@planifest.se">Kontakt</a>
               </li>
               <li>
                 <button onClick={onOpenTerms}>Villkor</button>
@@ -4257,6 +4887,7 @@ const emptyVendorForm = () => ({
   baseLocation: "goteborg",
   serviceArea: null,
   categories: [],
+  acceptedTerms: false,
 });
 
 export default function App() {
@@ -4268,11 +4899,14 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sortBy, setSortBy] = useState("recommended");
   const [distanceFilter, setDistanceFilter] = useState("all"); // "all" | 5 | 10 | 25 | 50 (km)
+  const [searchQuery, setSearchQuery] = useState("");
   const [swapContext, setSwapContext] = useState(null); // { oldId, oldName, category }
   const [toast, setToast] = useState("");
   const [vendorStep, setVendorStep] = useState(1);
   const [vendorForm, setVendorForm] = useState(emptyVendorForm);
   const [vendorErrors, setVendorErrors] = useState({});
+  const [vendorSubmitError, setVendorSubmitError] = useState("");
+  const [vendorSubmitting, setVendorSubmitting] = useState(false);
   const [vendorApplications, setVendorApplications] = useState(SEED_VENDOR_APPLICATIONS);
   const [submittedVendorId, setSubmittedVendorId] = useState(null);
   const [activeAdminVendorId, setActiveAdminVendorId] = useState(null);
@@ -4282,8 +4916,12 @@ export default function App() {
   const [customerReviews, setCustomerReviews] = useState([]);
   const [reviewTarget, setReviewTarget] = useState(null); // { bookingNumber, item }
   const [chats, setChats] = useState({}); // { [bookingNumber-itemId]: [{ id, sender, text, ts }] }
-  const [chatTarget, setChatTarget] = useState(null); // { kind: "booking", bookingNumber, item } | { kind: "provider", provider }
+  const [chatTarget, setChatTarget] = useState(null); // { kind: "booking", bookingNumber, item } | { kind: "provider", provider } | { kind: "real", conversationId, provider }
   const [vendorTyping, setVendorTyping] = useState(false);
+  const [realMessages, setRealMessages] = useState({}); // conversationId -> messages[]
+  const [vendorConversations, setVendorConversations] = useState([]);
+  const [activeVendorConversationId, setActiveVendorConversationId] = useState(null);
+  const [acceptedQuotes, setAcceptedQuotes] = useState([]); // synthetic cart-able listings from accepted quotes
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportMessages, setSupportMessages] = useState([]);
   const [cookieConsent, setCookieConsent] = useState(null); // null = undecided, "all" | "necessary"
@@ -4301,10 +4939,44 @@ export default function App() {
   };
   useEffect(() => () => toastTimer.current && clearTimeout(toastTimer.current), []);
 
-  // --- Auth (Fas 5) — session lives only in React state (no localStorage),
-  // since this runs inside an artifact preview: it resets on reload, which
-  // is fine for testing now and stops being a limitation once this moves to
-  // a real hosted site later.
+  // --- Auth (Fas 5) — session now persists in localStorage across reloads,
+  // since this runs on real hosting.
+  useEffect(() => {
+    const stored = loadStoredSession();
+    if (!stored) return;
+    if (stored._expiresAtMs && stored._expiresAtMs > Date.now() + 60000) {
+      setSession(stored);
+      return;
+    }
+    if (stored.refresh_token) {
+      supabaseAuthRequest("/token?grant_type=refresh_token", {
+        method: "POST",
+        body: JSON.stringify({ refresh_token: stored.refresh_token }),
+      }).then(({ data, error }) => {
+        if (!error && data?.access_token) {
+          const enriched = { ...data, _expiresAtMs: Date.now() + (data.expires_in || 3600) * 1000 };
+          setSession(enriched);
+          storeSession(enriched);
+        } else {
+          storeSession(null);
+        }
+      });
+    } else {
+      storeSession(null);
+    }
+  }, []);
+
+  const setSessionPersist = (data) => {
+    if (data) {
+      const enriched = { ...data, _expiresAtMs: Date.now() + (data.expires_in || 3600) * 1000 };
+      setSession(enriched);
+      storeSession(enriched);
+    } else {
+      setSession(null);
+      storeSession(null);
+    }
+  };
+
   useEffect(() => {
     if (!session?.user) {
       setProfile(null);
@@ -4314,6 +4986,173 @@ export default function App() {
       if (!error && data && data[0]) setProfile(data[0]);
     });
   }, [session]);
+
+  // Load this visitor's own vendor row, if any, so returning vendors land
+  // back on their dashboard instead of the signup flow.
+  useEffect(() => {
+    if (!session?.user) return;
+    fetchVendorByProfileId(session.user.id, session.access_token).then(({ data, error }) => {
+      if (error || !data || data.length === 0) return;
+      const local = mapDbVendorToLocal(data[0]);
+      setVendorApplications((apps) => {
+        const idx = apps.findIndex((v) => v.id === local.id);
+        if (idx >= 0) {
+          const next = [...apps];
+          next[idx] = local;
+          return next;
+        }
+        return [...apps, local];
+      });
+      setSubmittedVendorId(local.id);
+    });
+  }, [session]);
+
+  // Approved vendors are publicly readable — load them for anyone browsing,
+  // logged in or not, and merge them in alongside the seed/demo listings.
+  useEffect(() => {
+    fetchApprovedVendors(session?.access_token).then(({ data, error }) => {
+      if (error || !data) return;
+      const localList = data.map(mapDbVendorToLocal);
+      setVendorApplications((apps) => {
+        const next = [...apps];
+        localList.forEach((l) => {
+          const idx = next.findIndex((v) => v.id === l.id);
+          if (idx >= 0) next[idx] = l;
+          else next.push(l);
+        });
+        return next;
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Admins additionally need to see pending/rejected applications, not just approved ones.
+  useEffect(() => {
+    if (profile?.role !== "admin" || !session?.access_token) return;
+    fetchAllVendorsForAdmin(session.access_token).then(({ data, error }) => {
+      if (error || !data) return;
+      const localList = data.map(mapDbVendorToLocal);
+      setVendorApplications((apps) => {
+        const next = [...apps];
+        localList.forEach((l) => {
+          const idx = next.findIndex((v) => v.id === l.id);
+          if (idx >= 0) next[idx] = l;
+          else next.push(l);
+        });
+        return next;
+      });
+    });
+  }, [profile, session]);
+
+  // A logged-in customer's own real bookings (Fas 7).
+  useEffect(() => {
+    if (!session?.user) return;
+    supabaseRestRequest(`/bookings?customer_id=eq.${session.user.id}&select=*,booking_items(*)&order=created_at.desc`, session.access_token).then(
+      ({ data, error }) => {
+        if (error || !data) return;
+        const real = data.map((b) => ({
+          bookingNumber: b.booking_number,
+          date: b.date,
+          startTime: b.start_time,
+          endTime: b.end_time,
+          guests: b.guests,
+          occasion: b.occasion,
+          cancelled: b.cancelled,
+          completed: b.completed,
+          items: (b.booking_items || []).map((i) => ({
+            id: i.id,
+            providerId: i.vendor_id ? `${i.vendor_id}-${i.category_id}` : i.id,
+            vendorId: i.vendor_id,
+            name: i.name,
+            category: i.category_id,
+            price: i.price,
+            status: i.status,
+            reviewed: i.reviewed,
+          })),
+        }));
+        setBookings((bs) => {
+          const next = [...bs];
+          real.forEach((r) => {
+            const idx = next.findIndex((b) => b.bookingNumber === r.bookingNumber);
+            if (idx >= 0) next[idx] = r;
+            else next.push(r);
+          });
+          return next;
+        });
+      }
+    );
+  }, [session]);
+
+  // A vendor's own incoming booking requests (Fas 7) — folded into the same
+  // `bookings` array so the existing getVendorBookingItems() keeps working.
+  useEffect(() => {
+    const vendorId = submittedVendor?.id;
+    if (!vendorId || vendorId.startsWith("VND-") || !session?.access_token) return;
+    supabaseRestRequest(
+      `/booking_items?vendor_id=eq.${vendorId}&select=*,bookings(booking_number,date,start_time,end_time,guests,occasion,cancelled)`,
+      session.access_token
+    ).then(({ data, error }) => {
+      if (error || !data) return;
+      setBookings((bs) => {
+        const next = [...bs];
+        data.forEach((item) => {
+          const b = item.bookings;
+          if (!b) return;
+          const localItem = {
+            id: item.id,
+            providerId: `${item.vendor_id}-${item.category_id}`,
+            vendorId: item.vendor_id,
+            name: item.name,
+            category: item.category_id,
+            price: item.price,
+            status: item.status,
+            reviewed: item.reviewed,
+          };
+          const idx = next.findIndex((m) => m.bookingNumber === b.booking_number);
+          if (idx >= 0) {
+            const itemIdx = next[idx].items.findIndex((i) => i.id === item.id);
+            const newItems = [...next[idx].items];
+            if (itemIdx >= 0) newItems[itemIdx] = localItem;
+            else newItems.push(localItem);
+            next[idx] = { ...next[idx], items: newItems, cancelled: b.cancelled };
+          } else {
+            next.push({
+              bookingNumber: b.booking_number,
+              date: b.date,
+              startTime: b.start_time,
+              endTime: b.end_time,
+              guests: b.guests,
+              occasion: b.occasion,
+              cancelled: b.cancelled,
+              completed: false,
+              items: [localItem],
+            });
+          }
+        });
+        return next;
+      });
+    });
+  }, [submittedVendor?.id, session]);
+
+  // Real reviews, publicly readable — merged in the same shape applyCustomerReviews() already expects.
+  useEffect(() => {
+    supabaseRestRequest(`/reviews?select=*,booking_items(category_id)`, session?.access_token).then(({ data, error }) => {
+      if (error || !data) return;
+      const mapped = data.map((r) => ({
+        id: r.id,
+        providerId: r.booking_items ? `${r.vendor_id}-${r.booking_items.category_id}` : null,
+        name: "Kund",
+        stars: r.stars,
+        text: r.text || "",
+      }));
+      setCustomerReviews((existing) => {
+        const ids = new Set(existing.map((e) => e.id));
+        const fresh = mapped.filter((m) => m.providerId && !ids.has(m.id));
+        return [...existing, ...fresh];
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openAuthModal = (mode) => {
     setAuthModalMode(mode);
@@ -4327,8 +5166,22 @@ export default function App() {
       body: JSON.stringify({ email, password }),
     });
     if (error) return error;
-    setSession(data);
+    setSessionPersist(data);
     showToast("Inloggad ✓");
+
+    // Finish a vendor application that was waiting on email confirmation.
+    const pendingForm = loadPendingVendorApplication(email);
+    if (pendingForm) {
+      const { data: newVendor, error: vendorError } = await createVendorApplication(data, pendingForm);
+      clearPendingVendorApplication();
+      if (!vendorError && newVendor) {
+        setVendorApplications((apps) => [...apps, newVendor]);
+        setSubmittedVendorId(newVendor.id);
+        setAuthModalOpen(false);
+        setView("vendorPending");
+        return null;
+      }
+    }
     return null;
   };
 
@@ -4338,7 +5191,7 @@ export default function App() {
       body: JSON.stringify({ email, password, data: { full_name: fullName } }),
     });
     if (error) return error;
-    if (data.access_token) setSession(data); // email confirmation is off for this project
+    if (data.access_token) setSessionPersist(data); // in case email confirmation is ever turned off
     return null;
   };
 
@@ -4349,7 +5202,8 @@ export default function App() {
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` },
       }).catch(() => {});
     }
-    setSession(null);
+    setSessionPersist(null);
+    setSubmittedVendorId(null);
     showToast("Utloggad");
     goHome();
   };
@@ -4388,10 +5242,32 @@ export default function App() {
 
 
   const submittedVendor = vendorApplications.find((v) => v.id === submittedVendorId) || null;
-  const customerProviders = useMemo(
-    () => getCustomerVisibleProviders(vendorApplications, customerReviews, bookings),
-    [vendorApplications, customerReviews, bookings]
-  );
+  const customerProviders = useMemo(() => {
+    const base = getCustomerVisibleProviders(vendorApplications, customerReviews, bookings);
+    const quoteListings = acceptedQuotes.map((q) => ({
+      id: q.id,
+      category: q.category,
+      name: q.name,
+      tagline: "Anpassad offert",
+      rating: null,
+      reviews: 0,
+      location: "",
+      distanceKm: null,
+      pricing: { type: "fixed", amount: q.amount, note: q.description || "Offert" },
+      seed: q.id,
+      vendorDbId: q.vendorDbId,
+      image: null,
+      images: [],
+      available: true,
+      closedDates: [],
+      bookedDates: [],
+      blurb: q.description || "",
+      service: q.description || "",
+      reviewsList: [],
+      addons: [],
+    }));
+    return [...base, ...quoteListings];
+  }, [vendorApplications, customerReviews, bookings, acceptedQuotes]);
   const vendorBookingItems = useMemo(() => getVendorBookingItems(submittedVendor, bookings), [submittedVendor, bookings]);
 
   const cart = cartItems
@@ -4421,14 +5297,16 @@ export default function App() {
   const groupedProviders = useMemo(() => {
     const activeCategoryIds =
       party.categories.length > 0 ? CATEGORIES.filter((c) => party.categories.includes(c.id)).map((c) => c.id) : CATEGORIES.map((c) => c.id);
+    const q = searchQuery.trim().toLowerCase();
+    const matchesSearch = (p) => !q || p.name.toLowerCase().includes(q);
 
     return activeCategoryIds
       .map((catId) => ({
         category: catMap[catId],
-        providers: sortWithinCategory(customerProviders.filter((p) => p.category === catId && withinDistance(p))),
+        providers: sortWithinCategory(customerProviders.filter((p) => p.category === catId && withinDistance(p) && matchesSearch(p))),
       }))
       .filter((g) => g.providers.length > 0);
-  }, [party, sortBy, customerProviders, distanceFilter]);
+  }, [party, sortBy, customerProviders, distanceFilter, searchQuery]);
 
   const swapProviders = useMemo(() => {
     if (!swapContext) return [];
@@ -4484,8 +5362,45 @@ export default function App() {
     setView("checkout");
   };
 
-  const confirmBooking = () => {
+  const confirmBooking = async () => {
+    if (!session?.access_token) {
+      openAuthModal("signin");
+      showToast("Logga in för att slutföra bokningen");
+      return;
+    }
     const newBookingNumber = "EVT-" + Math.floor(1000 + Math.random() * 9000);
+    const { data: bookingRows, error: bookingError } = await supabaseRestRequest("/bookings", session.access_token, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        booking_number: newBookingNumber,
+        customer_id: session.user.id,
+        date: party.date || null,
+        start_time: party.startTime || null,
+        end_time: party.endTime || null,
+        guests: party.guests,
+        occasion: party.occasion,
+      }),
+    });
+    if (bookingError || !bookingRows?.[0]) {
+      showToast("Kunde inte skapa bokningen: " + (bookingError?.message || "okänt fel"));
+      return;
+    }
+    const bookingRow = bookingRows[0];
+    const itemsPayload = cart.map((p) => ({
+      booking_id: bookingRow.id,
+      vendor_id: p.vendorDbId || null,
+      category_id: p.category,
+      name: p.name,
+      price: getLineTotal(p, p.chosenAddons, party),
+      status: "pending",
+    }));
+    const { data: itemRows, error: itemsError } = await supabaseRestRequest("/booking_items", session.access_token, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(itemsPayload),
+    });
+    const sourceItems = !itemsError && itemRows ? itemRows : itemsPayload;
     const newBooking = {
       bookingNumber: newBookingNumber,
       date: party.date,
@@ -4495,13 +5410,14 @@ export default function App() {
       occasion: party.occasion,
       cancelled: false,
       completed: false,
-      items: cart.map((p) => ({
-        id: p.id,
-        providerId: p.id,
-        name: p.name,
-        category: p.category,
-        price: getLineTotal(p, p.chosenAddons, party),
-        status: "pending",
+      items: sourceItems.map((row, i) => ({
+        id: row.id || cart[i].id,
+        providerId: cart[i].id,
+        vendorId: row.vendor_id ?? cart[i].vendorDbId ?? null,
+        name: row.name,
+        category: row.category_id,
+        price: row.price,
+        status: row.status || "pending",
         reviewed: false,
       })),
     };
@@ -4524,22 +5440,29 @@ export default function App() {
     setMobileMenuOpen(false);
   };
 
-  const cancelBooking = (bookingNumber) => {
+  const cancelBooking = async (bookingNumber) => {
     setBookings((bs) =>
       bs.map((b) =>
         b.bookingNumber === bookingNumber ? { ...b, cancelled: true, items: b.items.map((i) => ({ ...i, status: "cancelled" })) } : b
       )
     );
     showToast("Bokningen är avbokad.");
+    if (session?.access_token) {
+      await supabaseRestRequest(`/bookings?booking_number=eq.${bookingNumber}`, session.access_token, {
+        method: "PATCH",
+        body: JSON.stringify({ cancelled: true }),
+      });
+    }
   };
 
   const openReview = (bookingNumber, item) => setReviewTarget({ bookingNumber, item });
   const closeReview = () => setReviewTarget(null);
 
-  const submitReview = (stars, text) => {
+  const submitReview = async (stars, text) => {
     if (!reviewTarget) return;
     const { bookingNumber, item } = reviewTarget;
-    setCustomerReviews((r) => [...r, { id: "rev-" + Date.now(), providerId: item.providerId, name: "Du", stars, text: text.trim() }]);
+    const trimmed = text.trim();
+    setCustomerReviews((r) => [...r, { id: "rev-" + Date.now(), providerId: item.providerId, name: "Du", stars, text: trimmed }]);
     setBookings((bs) =>
       bs.map((b) =>
         b.bookingNumber === bookingNumber ? { ...b, items: b.items.map((i) => (i.id === item.id ? { ...i, reviewed: true } : i)) } : b
@@ -4547,17 +5470,85 @@ export default function App() {
     );
     setReviewTarget(null);
     showToast("Tack för din recension! ✓");
+
+    if (session?.access_token && item.vendorId) {
+      await supabaseRestRequest("/reviews", session.access_token, {
+        method: "POST",
+        body: JSON.stringify({ booking_item_id: item.id, vendor_id: item.vendorId, customer_id: session.user.id, stars, text: trimmed }),
+      });
+      await supabaseRestRequest(`/booking_items?id=eq.${item.id}`, session.access_token, {
+        method: "PATCH",
+        body: JSON.stringify({ reviewed: true }),
+      });
+    }
   };
 
-  // --- Chat (Fas 4) — mocked per booking-item conversation, see ChatModal ---
+  // --- Chat (Fas 8) — real, persisted conversations for real vendors; mock/
+  // demo listings keep the old simulated local-only chat as a fallback.
   const getChatKey = (target) => (target.kind === "booking" ? `booking-${target.bookingNumber}-${target.item.id}` : `provider-${target.provider.id}`);
 
-  const openBookingChat = (bookingNumber, item) => setChatTarget({ kind: "booking", bookingNumber, item });
-  const openProviderChat = (provider) => setChatTarget({ kind: "provider", provider });
+  const openBookingChat = async (bookingNumber, item) => {
+    if (!item.vendorId || !session?.access_token) {
+      setChatTarget({ kind: "booking", bookingNumber, item });
+      return;
+    }
+    const { data: convo, error } = await findOrCreateConversation({
+      vendorId: item.vendorId,
+      customerId: session.user.id,
+      categoryId: item.category,
+      accessToken: session.access_token,
+    });
+    if (error || !convo) {
+      setChatTarget({ kind: "booking", bookingNumber, item });
+      return;
+    }
+    const { data: msgs } = await supabaseRestRequest(`/messages?conversation_id=eq.${convo.id}&select=*&order=created_at.asc`, session.access_token);
+    setRealMessages((m) => ({ ...m, [convo.id]: msgs || [] }));
+    setChatTarget({ kind: "booking", bookingNumber, item, real: true, conversationId: convo.id });
+  };
+
+  const openProviderChat = async (provider) => {
+    if (!provider.vendorDbId) {
+      setChatTarget({ kind: "provider", provider });
+      return;
+    }
+    if (!session?.access_token) {
+      openAuthModal("signin");
+      showToast("Logga in för att chatta med leverantören");
+      return;
+    }
+    const { data: convo, error } = await findOrCreateConversation({
+      vendorId: provider.vendorDbId,
+      customerId: session.user.id,
+      categoryId: provider.category,
+      accessToken: session.access_token,
+    });
+    if (error || !convo) {
+      showToast("Kunde inte öppna chatten just nu");
+      return;
+    }
+    const { data: msgs } = await supabaseRestRequest(`/messages?conversation_id=eq.${convo.id}&select=*&order=created_at.asc`, session.access_token);
+    setRealMessages((m) => ({ ...m, [convo.id]: msgs || [] }));
+    setChatTarget({ kind: "provider", provider, real: true, conversationId: convo.id });
+  };
+
   const closeChat = () => setChatTarget(null);
 
-  const sendChatMessage = (text) => {
+  const sendChatMessage = async (text) => {
     if (!chatTarget || !text.trim()) return;
+
+    if (chatTarget.real) {
+      const { data, error } = await supabaseRestRequest("/messages", session.access_token, {
+        method: "POST",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ conversation_id: chatTarget.conversationId, sender: "customer", text: text.trim(), message_type: "text" }),
+      });
+      if (!error && data?.[0]) {
+        setRealMessages((m) => ({ ...m, [chatTarget.conversationId]: [...(m[chatTarget.conversationId] || []), data[0]] }));
+      }
+      return;
+    }
+
     const key = getChatKey(chatTarget);
     const customerMsg = { id: "msg-" + Date.now(), sender: "customer", text: text.trim(), ts: Date.now() };
     setChats((c) => ({ ...c, [key]: [...(c[key] || []), customerMsg] }));
@@ -4570,6 +5561,98 @@ export default function App() {
       setVendorTyping(false);
     }, replyDelay);
   };
+
+  const acceptQuote = async (message) => {
+    if (!session?.access_token || !chatTarget?.conversationId) return;
+    const { error } = await supabaseRestRequest(`/messages?id=eq.${message.id}`, session.access_token, {
+      method: "PATCH",
+      body: JSON.stringify({ quote_status: "accepted" }),
+    });
+    if (error) {
+      showToast("Kunde inte acceptera offerten just nu");
+      return;
+    }
+    setRealMessages((m) => ({
+      ...m,
+      [chatTarget.conversationId]: (m[chatTarget.conversationId] || []).map((msg) => (msg.id === message.id ? { ...msg, quote_status: "accepted" } : msg)),
+    }));
+    const provider =
+      chatTarget.provider || (chatTarget.item ? { vendorDbId: chatTarget.item.vendorId, category: chatTarget.item.category, name: chatTarget.item.name } : null);
+    if (provider) {
+      const quoteId = `quote-${message.id}`;
+      const synthetic = {
+        id: quoteId,
+        vendorDbId: provider.vendorDbId,
+        category: provider.category,
+        name: provider.name,
+        amount: message.quote_amount,
+        description: message.quote_description,
+      };
+      setAcceptedQuotes((q) => [...q.filter((x) => x.id !== quoteId), synthetic]);
+      setCartItems((c) => (c.some((x) => x.id === quoteId) ? c : [...c, { id: quoteId, addons: [] }]));
+      showToast("Offert accepterad — tillagd i Min fest ✓");
+    }
+  };
+
+  const declineQuote = async (message) => {
+    if (!session?.access_token || !chatTarget?.conversationId) return;
+    await supabaseRestRequest(`/messages?id=eq.${message.id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ quote_status: "declined" }) });
+    setRealMessages((m) => ({
+      ...m,
+      [chatTarget.conversationId]: (m[chatTarget.conversationId] || []).map((msg) => (msg.id === message.id ? { ...msg, quote_status: "declined" } : msg)),
+    }));
+  };
+
+  // --- Vendor inbox (Fas 8) ---
+  useEffect(() => {
+    const vendorId = submittedVendor?.id;
+    if (!vendorId || vendorId.startsWith("VND-") || !session?.access_token) return;
+    supabaseRestRequest(`/conversations?vendor_id=eq.${vendorId}&select=*&order=created_at.desc`, session.access_token).then(({ data, error }) => {
+      if (!error && data) setVendorConversations(data);
+    });
+  }, [submittedVendor?.id, session, view]);
+
+  const openVendorConversation = async (conversationId) => {
+    setActiveVendorConversationId(conversationId);
+    const { data, error } = await supabaseRestRequest(`/messages?conversation_id=eq.${conversationId}&select=*&order=created_at.asc`, session.access_token);
+    if (!error && data) setRealMessages((m) => ({ ...m, [conversationId]: data }));
+  };
+  const closeVendorConversation = () => setActiveVendorConversationId(null);
+
+  const sendVendorMessage = async (text) => {
+    if (!activeVendorConversationId) return;
+    const { data, error } = await supabaseRestRequest("/messages", session.access_token, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ conversation_id: activeVendorConversationId, sender: "vendor", text, message_type: "text" }),
+    });
+    if (!error && data?.[0]) {
+      setRealMessages((m) => ({ ...m, [activeVendorConversationId]: [...(m[activeVendorConversationId] || []), data[0]] }));
+    }
+  };
+
+  const sendVendorQuote = async (amount, description) => {
+    if (!activeVendorConversationId) return;
+    const { data, error } = await supabaseRestRequest("/messages", session.access_token, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        conversation_id: activeVendorConversationId,
+        sender: "vendor",
+        text: description || "Offert",
+        message_type: "quote",
+        quote_amount: amount,
+        quote_description: description,
+        quote_status: "pending",
+      }),
+    });
+    if (!error && data?.[0]) {
+      setRealMessages((m) => ({ ...m, [activeVendorConversationId]: [...(m[activeVendorConversationId] || []), data[0]] }));
+      showToast("Offert skickad ✓");
+    }
+  };
+
+  const goVendorInbox = () => setView("vendorInbox");
 
   // --- Support (Fas 4) — simple in-memory contact form, see SupportModal ---
   const submitSupportMessage = (msg) => {
@@ -4585,6 +5668,7 @@ export default function App() {
   const startVendorSignup = () => {
     setVendorForm(emptyVendorForm());
     setVendorErrors({});
+    setVendorSubmitError("");
     setVendorStep(1);
     setView("vendorSignup");
     setMobileMenuOpen(false);
@@ -4609,29 +5693,45 @@ export default function App() {
 
   const vendorBack = () => setVendorStep((s) => Math.max(1, s - 1));
 
-  const submitVendorApplication = () => {
+  const submitVendorApplication = async () => {
     const errors = validateVendorCategories(vendorForm);
     setVendorErrors(errors);
     if (Object.keys(errors).length > 0) return;
 
-    const areaOption = SERVICE_AREA_OPTIONS.find((o) => o.type === vendorForm.serviceArea);
-    const vendor = {
-      id: "VND-" + Math.floor(1000 + Math.random() * 9000),
-      companyName: vendorForm.companyName,
-      organizationNumber: vendorForm.organizationNumber,
-      contactPerson: vendorForm.contactPerson,
-      email: vendorForm.email,
-      phone: vendorForm.phone,
-      baseLocation: vendorForm.baseLocation,
-      serviceArea: areaOption ? { type: areaOption.type, value: areaOption.label } : null,
-      categories: vendorForm.categories,
-      status: "pending",
-      blockedTimes: [],
-      profile: { tagline: "", description: "", images: [], services: [], addons: [] },
-    };
-    setVendorApplications((apps) => [...apps, vendor]);
-    setSubmittedVendorId(vendor.id);
-    setView("vendorPending");
+    setVendorSubmitError("");
+    setVendorSubmitting(true);
+    const { data: signUpData, error: signUpError } = await supabaseAuthRequest("/signup", {
+      method: "POST",
+      body: JSON.stringify({
+        email: vendorForm.email,
+        password: vendorForm.password,
+        data: { full_name: vendorForm.contactPerson },
+      }),
+    });
+    setVendorSubmitting(false);
+
+    if (signUpError) {
+      setVendorSubmitError(signUpError.message);
+      return;
+    }
+
+    if (signUpData.access_token) {
+      // Email confirmation is off (or already confirmed) — we have a session
+      // immediately, so create the vendor row right away.
+      setSessionPersist(signUpData);
+      const { data: newVendor, error: vendorError } = await createVendorApplication(signUpData, vendorForm);
+      if (vendorError) {
+        setVendorSubmitError(vendorError.message);
+        return;
+      }
+      setVendorApplications((apps) => [...apps, newVendor]);
+      setSubmittedVendorId(newVendor.id);
+      setView("vendorPending");
+    } else {
+      // Needs email confirmation first — stash the form and pick it back up on next sign-in.
+      stashPendingVendorApplication(vendorForm.email, vendorForm);
+      setView("vendorAwaitingConfirmation");
+    }
   };
 
   // --- Vendor portal navigation (Fas 2B) ---
@@ -4640,18 +5740,59 @@ export default function App() {
   const goVendorPreview = () => setView("vendorProfilePreview");
   const goVendorBookings = () => setView("vendorBookings");
 
-  const respondToBookingItem = (bookingNumber, itemId, status) => {
+  // Batch-saves the profile editor's changes to the database before leaving it.
+  const saveVendorProfileAndGo = async (nextView) => {
+    if (submittedVendor && session?.access_token) {
+      await saveVendorProfile(submittedVendor, session.access_token);
+      showToast("Sparat ✓");
+    }
+    setView(nextView);
+  };
+  const saveAndGoDashboard = () => saveVendorProfileAndGo("vendorDashboard");
+  const saveAndGoPreview = () => saveVendorProfileAndGo("vendorProfilePreview");
+
+  const respondToBookingItem = async (bookingNumber, itemId, status) => {
     setBookings((bs) =>
       bs.map((b) =>
         b.bookingNumber === bookingNumber ? { ...b, items: b.items.map((i) => (i.id === itemId ? { ...i, status } : i)) } : b
       )
     );
     showToast(status === "confirmed" ? "Bokning bekräftad ✓" : "Bokning nekad");
+    if (session?.access_token) {
+      await supabaseRestRequest(`/booking_items?id=eq.${itemId}`, session.access_token, { method: "PATCH", body: JSON.stringify({ status } ) });
+    }
   };
 
-  const addBlockedTime = (block) => patchVendor((v) => ({ ...v, blockedTimes: [...(v.blockedTimes || []), block] }));
-  const removeBlockedTime = (index) =>
+  const addBlockedTime = async (block) => {
+    if (!submittedVendor) return;
+    if (session?.access_token) {
+      const { data, error } = await supabaseRestRequest("/blocked_times", session.access_token, {
+        method: "POST",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          vendor_id: submittedVendor.id,
+          date: block.date,
+          start_time: block.startTime,
+          end_time: block.endTime,
+          note: block.note,
+        }),
+      });
+      if (!error && data?.[0]) {
+        const saved = { id: data[0].id, date: data[0].date, startTime: data[0].start_time, endTime: data[0].end_time, note: data[0].note || "" };
+        patchVendor((v) => ({ ...v, blockedTimes: [...(v.blockedTimes || []), saved] }));
+        return;
+      }
+    }
+    patchVendor((v) => ({ ...v, blockedTimes: [...(v.blockedTimes || []), block] }));
+  };
+  const removeBlockedTime = async (index) => {
+    if (!submittedVendor) return;
+    const item = submittedVendor.blockedTimes[index];
+    if (item?.id && session?.access_token) {
+      await supabaseRestRequest(`/blocked_times?id=eq.${item.id}`, session.access_token, { method: "DELETE" });
+    }
     patchVendor((v) => ({ ...v, blockedTimes: (v.blockedTimes || []).filter((_, i) => i !== index) }));
+  };
 
   // --- Vendor profile editing (Fas 2B) — patches this vendor's entry inside vendorApplications ---
   const patchVendor = (updater) => {
@@ -4721,19 +5862,27 @@ export default function App() {
     setActiveAdminVendorId(id);
     setView("adminVendorDetail");
   };
-  const approveVendor = (id) => {
+  const approveVendor = async (id) => {
     setVendorApplications((apps) => apps.map((v) => (v.id === id ? { ...v, status: "approved" } : v)));
     showToast("Leverantören är godkänd ✓");
+    if (!id.startsWith("VND-") && session?.access_token) {
+      await supabaseRestRequest(`/vendors?id=eq.${id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ status: "approved" }) });
+    }
   };
-  const rejectVendor = (id) => {
+  const rejectVendor = async (id) => {
     setVendorApplications((apps) => apps.map((v) => (v.id === id ? { ...v, status: "rejected" } : v)));
     showToast("Ansökan har avslagits");
+    if (!id.startsWith("VND-") && session?.access_token) {
+      await supabaseRestRequest(`/vendors?id=eq.${id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ status: "rejected" }) });
+    }
   };
   const activeAdminVendor = vendorApplications.find((v) => v.id === activeAdminVendorId) || null;
 
   const activeProvider = customerProviders.find((p) => p.id === activeProviderId);
   const activeCartEntry = activeProvider ? cartItems.find((ci) => ci.id === activeProvider.id) : null;
-  const isVendorPortalView = ["vendorPending", "vendorDashboard", "vendorProfileEditor", "vendorProfilePreview", "vendorBookings"].includes(view);
+  const isVendorPortalView = ["vendorPending", "vendorDashboard", "vendorProfileEditor", "vendorProfilePreview", "vendorBookings", "vendorInbox"].includes(
+    view
+  );
   const isAdminView = ["adminDashboard", "adminVendorDetail"].includes(view);
 
   const centerNavLinks = (
@@ -4822,6 +5971,14 @@ export default function App() {
         }}
       >
         Bokningar
+      </button>
+      <button
+        onClick={() => {
+          goVendorInbox();
+          setMobileMenuOpen(false);
+        }}
+      >
+        Meddelanden
       </button>
       <button
         onClick={() => {
@@ -5009,6 +6166,8 @@ export default function App() {
           setSortBy={setSortBy}
           distanceFilter={distanceFilter}
           setDistanceFilter={setDistanceFilter}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
           swapContext={swapContext}
           onCancelSwap={() => {
             setSwapContext(null);
@@ -5029,6 +6188,8 @@ export default function App() {
           onRemove={removeFromCart}
           onToggleAddon={toggleAddon}
           onOpenChat={openProviderChat}
+          onSelectDate={(date) => setParty((p) => ({ ...p, date }))}
+          onUpdateParty={(patch) => setParty((p) => ({ ...p, ...patch }))}
         />
       )}
 
@@ -5055,13 +6216,37 @@ export default function App() {
           onBack={vendorBack}
           onSubmit={submitVendorApplication}
           onShowToast={showToast}
+          submitError={vendorSubmitError}
+          submitting={vendorSubmitting}
+          onOpenTerms={goTerms}
         />
       )}
+
+      {view === "vendorAwaitingConfirmation" && <VendorAwaitingConfirmationView email={vendorForm.email} onHome={goHome} />}
 
       {view === "vendorPending" && <VendorPendingView vendor={submittedVendor} onHome={goHome} onGoDashboard={goVendorDashboard} />}
 
       {view === "vendorDashboard" && (
-        <VendorDashboardView vendor={submittedVendor} bookingItems={vendorBookingItems} onEditProfile={goVendorEditor} onPreview={goVendorPreview} onBookings={goVendorBookings} />
+        <VendorDashboardView
+          vendor={submittedVendor}
+          bookingItems={vendorBookingItems}
+          onEditProfile={goVendorEditor}
+          onPreview={goVendorPreview}
+          onBookings={goVendorBookings}
+          onInbox={goVendorInbox}
+        />
+      )}
+
+      {view === "vendorInbox" && (
+        <VendorInboxView
+          conversations={vendorConversations}
+          activeConversationId={activeVendorConversationId}
+          messages={activeVendorConversationId ? realMessages[activeVendorConversationId] || [] : []}
+          onOpenConversation={openVendorConversation}
+          onSendMessage={sendVendorMessage}
+          onSendQuote={sendVendorQuote}
+          onBack={closeVendorConversation}
+        />
       )}
 
       {view === "vendorProfileEditor" && (
@@ -5080,8 +6265,8 @@ export default function App() {
           onAddAddon={addVendorAddon}
           onUpdateAddon={updateVendorAddon}
           onRemoveAddon={removeVendorAddon}
-          onPreview={goVendorPreview}
-          onDashboard={goVendorDashboard}
+          onPreview={saveAndGoPreview}
+          onDashboard={saveAndGoDashboard}
           onShowToast={showToast}
         />
       )}
@@ -5121,7 +6306,7 @@ export default function App() {
       {view === "terms" && <LegalPageView title="Allmänna villkor" sections={TERMS_SECTIONS} onBack={goHome} />}
       {view === "cookiePolicy" && <LegalPageView title="Cookiepolicy" sections={COOKIE_POLICY_SECTIONS} onBack={goHome} />}
 
-      {!isVendorPortalView && !isAdminView && !["checkout", "confirmation", "vendorSignup", "privacyPolicy", "terms", "cookiePolicy"].includes(view) && (
+      {!isVendorPortalView && !isAdminView && !["checkout", "confirmation", "vendorSignup", "vendorAwaitingConfirmation", "privacyPolicy", "terms", "cookiePolicy"].includes(view) && (
         <Footer
           onGoHome={goHome}
           onBrowse={() => {
@@ -5182,10 +6367,12 @@ export default function App() {
       <ReviewModal target={reviewTarget} onSubmit={submitReview} onClose={closeReview} />
       <ChatModal
         target={chatTarget}
-        messages={chatTarget ? chats[getChatKey(chatTarget)] || [] : []}
-        vendorTyping={vendorTyping}
+        messages={chatTarget?.real ? realMessages[chatTarget.conversationId] || [] : chatTarget ? chats[getChatKey(chatTarget)] || [] : []}
+        vendorTyping={!chatTarget?.real && vendorTyping}
         onSend={sendChatMessage}
         onClose={closeChat}
+        onAcceptQuote={acceptQuote}
+        onDeclineQuote={declineQuote}
       />
       <AuthModal
         open={authModalOpen}
