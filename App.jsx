@@ -4909,6 +4909,11 @@ export default function App() {
   const [vendorSubmitting, setVendorSubmitting] = useState(false);
   const [vendorApplications, setVendorApplications] = useState(SEED_VENDOR_APPLICATIONS);
   const [submittedVendorId, setSubmittedVendorId] = useState(null);
+  // Declared early (not just where it's conceptually used) because several
+  // useEffect hooks below reference it in their dependency array, which is
+  // evaluated synchronously during render — unlike an effect's callback body,
+  // that reference can't be deferred, so this needs to exist before them.
+  const submittedVendor = vendorApplications.find((v) => v.id === submittedVendorId) || null;
   const [activeAdminVendorId, setActiveAdminVendorId] = useState(null);
   const [adminFilter, setAdminFilter] = useState("all");
   const [bookings, setBookings] = useState(SEED_BOOKINGS);
@@ -5240,8 +5245,6 @@ export default function App() {
     setMobileMenuOpen(false);
   };
 
-
-  const submittedVendor = vendorApplications.find((v) => v.id === submittedVendorId) || null;
   const customerProviders = useMemo(() => {
     const base = getCustomerVisibleProviders(vendorApplications, customerReviews, bookings);
     const quoteListings = acceptedQuotes.map((q) => ({
