@@ -111,6 +111,7 @@ async function supabaseRestRequest(path, accessToken, options = {}) {
 function mapDbVendorToLocal(dbVendor) {
   return {
     id: dbVendor.id,
+    createdAt: dbVendor.created_at,
     companyName: dbVendor.company_name,
     organizationNumber: dbVendor.organization_number,
     contactPerson: dbVendor.contact_person,
@@ -677,6 +678,11 @@ const PROVIDERS = [
 ];
 
 const formatKr = (n) => Math.round(n).toLocaleString("sv-SE") + " kr";
+const formatAppliedAt = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleDateString("sv-SE", { day: "numeric", month: "short", year: "numeric" }) + ", " + d.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+};
 function formatDistance(km) {
   return `${String(km).replace(".", ",")} km bort`;
 }
@@ -1321,7 +1327,16 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef }) {
                 type="number"
                 min={1}
                 value={party.guests}
-                onChange={(e) => setParty((p) => ({ ...p, guests: Number(e.target.value) || 1 }))}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    setParty((p) => ({ ...p, guests: "" }));
+                    return;
+                  }
+                  const n = Number(raw);
+                  if (!Number.isNaN(n)) setParty((p) => ({ ...p, guests: n }));
+                }}
+                onBlur={() => setParty((p) => ({ ...p, guests: p.guests === "" || p.guests < 1 ? 1 : p.guests }))}
                 className="rounded-xl px-3 py-2 text-sm"
                 style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum }}
               />
@@ -1419,12 +1434,14 @@ function ResultsView({
   searchQuery,
   setSearchQuery,
 }) {
+  const [editOpen, setEditOpen] = useState(false);
   const toggleCategory = (id) => {
     setParty((p) => ({
       ...p,
       categories: p.categories.includes(id) ? p.categories.filter((c) => c !== id) : [...p.categories, id],
     }));
   };
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
 
   return (
     <div className="mx-auto max-w-6xl px-6 pb-32 pt-8 sm:px-10">
@@ -1463,7 +1480,94 @@ function ResultsView({
                 {occasionMap[party.occasion].emoji} {occasionMap[party.occasion].label}
               </span>
             )}
+            <button onClick={() => setEditOpen((v) => !v)} className="flex items-center gap-1 font-semibold underline" style={{ color: colors.lilacDeep }}>
+              Ändra
+            </button>
           </div>
+
+          {editOpen && (
+            <div className="mt-4 rounded-2xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <label className="col-span-2 flex flex-col gap-1 text-sm sm:col-span-1" style={{ color: colors.plumSoft }}>
+                  <span className="flex items-center gap-1">
+                    <Calendar size={14} /> Datum
+                  </span>
+                  <input
+                    type="date"
+                    value={party.date}
+                    onChange={(e) => setParty((p) => ({ ...p, date: e.target.value }))}
+                    className="rounded-xl px-3 py-2 text-sm"
+                    style={fieldStyle}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm" style={{ color: colors.plumSoft }}>
+                  <span className="flex items-center gap-1">
+                    <Clock size={14} /> Start
+                  </span>
+                  <input
+                    type="time"
+                    value={party.startTime}
+                    onChange={(e) => setParty((p) => ({ ...p, startTime: e.target.value }))}
+                    className="rounded-xl px-3 py-2 text-sm"
+                    style={fieldStyle}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm" style={{ color: colors.plumSoft }}>
+                  <span className="flex items-center gap-1">
+                    <Clock size={14} /> Slut
+                  </span>
+                  <input
+                    type="time"
+                    value={party.endTime}
+                    onChange={(e) => setParty((p) => ({ ...p, endTime: e.target.value }))}
+                    className="rounded-xl px-3 py-2 text-sm"
+                    style={fieldStyle}
+                  />
+                </label>
+                <label className="col-span-2 flex flex-col gap-1 text-sm sm:col-span-1" style={{ color: colors.plumSoft }}>
+                  <span className="flex items-center gap-1">
+                    <Users size={14} /> Gäster
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={party.guests}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === "") {
+                        setParty((p) => ({ ...p, guests: "" }));
+                        return;
+                      }
+                      const n = Number(raw);
+                      if (!Number.isNaN(n)) setParty((p) => ({ ...p, guests: n }));
+                    }}
+                    onBlur={() => setParty((p) => ({ ...p, guests: p.guests === "" || p.guests < 1 ? 1 : p.guests }))}
+                    className="rounded-xl px-3 py-2 text-sm"
+                    style={fieldStyle}
+                  />
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {OCCASIONS.map((o) => (
+                  <CategoryChip
+                    key={o.id}
+                    size="sm"
+                    active={party.occasion === o.id}
+                    onClick={() => setParty((p) => ({ ...p, occasion: p.occasion === o.id ? "" : o.id }))}
+                    icon={null}
+                    label={`${o.emoji} ${o.label}`}
+                  />
+                ))}
+              </div>
+              <button
+                onClick={() => setEditOpen(false)}
+                className="mt-4 rounded-full px-4 py-2 text-sm font-semibold"
+                style={{ backgroundColor: colors.coral, color: colors.white }}
+              >
+                Klart
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -1822,7 +1926,16 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                     type="number"
                     min={1}
                     value={party.guests}
-                    onChange={(e) => onUpdateParty({ guests: Number(e.target.value) || 1 })}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === "") {
+                        onUpdateParty({ guests: "" });
+                        return;
+                      }
+                      const n = Number(raw);
+                      if (!Number.isNaN(n)) onUpdateParty({ guests: n });
+                    }}
+                    onBlur={() => onUpdateParty({ guests: party.guests === "" || party.guests < 1 ? 1 : party.guests })}
                     className="rounded-lg px-2 py-1.5 text-sm"
                     style={{ border: `1px solid ${colors.beige}`, color: colors.plum }}
                   />
@@ -3193,6 +3306,118 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
   );
 }
 
+function MyAccountView({ profile, email, onSaveProfile, onChangePassword, onBack }) {
+  const [fullName, setFullName] = useState(profile?.full_name || "");
+  const [phone, setPhone] = useState(profile?.phone || "");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
+
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSaved, setPasswordSaved] = useState(false);
+
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+
+  const saveProfile = async () => {
+    setProfileError("");
+    setProfileSaving(true);
+    const err = await onSaveProfile({ fullName: fullName.trim(), phone: phone.trim() });
+    setProfileSaving(false);
+    if (err) setProfileError(err.message || "Kunde inte spara.");
+  };
+
+  const savePassword = async () => {
+    setPasswordError("");
+    setPasswordSaved(false);
+    if (newPassword.length < 6) {
+      setPasswordError("Lösenordet måste vara minst 6 tecken.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError("Lösenorden matchar inte.");
+      return;
+    }
+    setPasswordSaving(true);
+    const err = await onChangePassword(newPassword);
+    setPasswordSaving(false);
+    if (err) {
+      setPasswordError(err.message || "Kunde inte spara.");
+      return;
+    }
+    setPasswordSaved(true);
+    setNewPassword("");
+    setConfirmPassword("");
+  };
+
+  return (
+    <div className="mx-auto max-w-xl px-6 pb-24 pt-10 sm:px-10">
+      <button onClick={onBack} className="-ml-2 mb-5 flex items-center gap-1 px-2 py-1.5 text-sm font-medium" style={{ color: colors.plumSoft }}>
+        <ChevronLeft size={16} /> Tillbaka
+      </button>
+      <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Mitt konto</h1>
+
+      <div className="mt-6 rounded-2xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+        <h2 className="mb-3 font-semibold" style={{ color: colors.plum }}>
+          Kontaktuppgifter
+        </h2>
+        <div className="space-y-3">
+          <VendorTextField label="Namn" value={fullName} onChange={setFullName} />
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium" style={{ color: colors.plum }}>
+              E-post
+            </span>
+            <input disabled value={email} className="rounded-xl px-3 py-2 text-sm opacity-60" style={fieldStyle} />
+          </label>
+          <VendorTextField label="Mobilnummer" value={phone} onChange={setPhone} placeholder="07X-XXX XX XX" />
+        </div>
+        {profileError && (
+          <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
+            {profileError}
+          </p>
+        )}
+        <button
+          onClick={saveProfile}
+          disabled={profileSaving}
+          className="mt-4 rounded-full px-5 py-2.5 text-sm font-semibold"
+          style={{ backgroundColor: colors.coral, color: colors.white, opacity: profileSaving ? 0.6 : 1 }}
+        >
+          {profileSaving ? "Sparar..." : "Spara"}
+        </button>
+      </div>
+
+      <div className="mt-5 rounded-2xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+        <h2 className="mb-3 font-semibold" style={{ color: colors.plum }}>
+          Byt lösenord
+        </h2>
+        <div className="space-y-3">
+          <VendorTextField label="Nytt lösenord" type="password" value={newPassword} onChange={setNewPassword} />
+          <VendorTextField label="Bekräfta nytt lösenord" type="password" value={confirmPassword} onChange={setConfirmPassword} />
+        </div>
+        {passwordError && (
+          <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
+            {passwordError}
+          </p>
+        )}
+        {passwordSaved && (
+          <p className="mt-2 text-xs" style={{ color: colors.green }}>
+            Lösenordet är uppdaterat ✓
+          </p>
+        )}
+        <button
+          onClick={savePassword}
+          disabled={passwordSaving}
+          className="mt-4 rounded-full px-5 py-2.5 text-sm font-semibold"
+          style={{ border: `1.5px solid ${colors.coral}`, color: colors.coral, backgroundColor: "transparent", opacity: passwordSaving ? 0.6 : 1 }}
+        >
+          {passwordSaving ? "Sparar..." : "Byt lösenord"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ResetPasswordView({ onSubmit, onShowToast }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -4485,6 +4710,11 @@ function AdminDashboardView({ vendorApplications, filter, onFilterChange, onOpen
                 <p className="text-xs" style={{ color: colors.plumSoft }}>
                   {locationName} · {v.serviceArea?.value || "Inget område valt"}
                 </p>
+                {v.createdAt && (
+                  <p className="text-xs" style={{ color: colors.plumSoft }}>
+                    Ansökte {formatAppliedAt(v.createdAt)}
+                  </p>
+                )}
               </div>
               <span
                 className="flex items-center gap-1.5 self-start rounded-full px-3 py-1 text-xs font-medium sm:self-auto"
@@ -4523,6 +4753,11 @@ function AdminVendorDetailView({ vendor, onBack, onApprove, onReject }) {
           {status.emoji} {status.label}
         </span>
       </div>
+      {vendor.createdAt && (
+        <p className="-mt-3 mb-5 text-xs" style={{ color: colors.plumSoft }}>
+          Ansökte {formatAppliedAt(vendor.createdAt)}
+        </p>
+      )}
 
       {vendor.profile.images.length > 0 && (
         <div className="mb-6 flex gap-2 overflow-x-auto">
@@ -5030,8 +5265,11 @@ export default function App() {
   const [view, setView] = useState("home");
   const [recoverySession, setRecoverySession] = useState(null);
 
-  // Detect a password-recovery link (the user just clicked the reset email).
-  // Supabase redirects here with the session tokens in the URL hash.
+  // Detect the redirect Supabase sends the browser to after a link in one of
+  // our auth emails is clicked. Both arrive with tokens in the URL hash;
+  // recovery links use them to auto-authenticate for a "set new password"
+  // step, while a signup confirmation intentionally does NOT log the person
+  // in automatically — we discard those tokens and send them to sign in.
   useEffect(() => {
     const hash = window.location.hash;
     if (hash && hash.includes("type=recovery")) {
@@ -5043,6 +5281,11 @@ export default function App() {
         setRecoverySession({ access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn ? Number(expiresIn) : 3600 });
         setView("resetPassword");
       }
+      window.history.replaceState(null, "", window.location.pathname);
+    } else if (hash && hash.includes("type=signup")) {
+      setAuthModalMode("signin");
+      setAuthModalOpen(true);
+      showToast("Kontot är bekräftat ✓ Logga in för att fortsätta.");
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, []);
@@ -5340,7 +5583,53 @@ export default function App() {
     return null;
   };
 
+  const goMyAccount = () => {
+    setView("myAccount");
+    setMobileMenuOpen(false);
+  };
+
+  const saveMyProfile = async ({ fullName, phone }) => {
+    if (!session?.access_token) return { message: "Du är inte inloggad." };
+    const { error } = await supabaseRestRequest(`/profiles?id=eq.${session.user.id}`, session.access_token, {
+      method: "PATCH",
+      body: JSON.stringify({ full_name: fullName, phone }),
+    });
+    if (error) return error;
+    setProfile((p) => ({ ...p, full_name: fullName, phone }));
+    showToast("Sparat ✓");
+    return null;
+  };
+
+  const changeMyPassword = async (newPassword) => {
+    if (!session?.access_token) return { message: "Du är inte inloggad." };
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ password: newPassword }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { message: data.error_description || data.msg || data.error || "Något gick fel." };
+    return null;
+  };
+
+  // Wipes locally-held data before a different account's session takes over,
+  // so nothing left in memory from a previous user in the same tab can ever
+  // bleed into the next login — cart, party details, and anything fetched
+  // for the previous account.
+  const clearLocalUserState = () => {
+    setCartItems([]);
+    setBookings([]);
+    setLastBooking(null);
+    setParty(emptyParty());
+    setVendorApplications((apps) => apps.filter((v) => v.status === "approved"));
+    setSubmittedVendorId(null);
+    setVendorConversations([]);
+    setActiveVendorConversationId(null);
+    setAcceptedQuotes([]);
+  };
+
   const signIn = async (email, password) => {
+    clearLocalUserState();
     const { data, error } = await supabaseAuthRequest("/token?grant_type=password", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -5366,6 +5655,7 @@ export default function App() {
   };
 
   const signUpCustomer = async (email, password, fullName) => {
+    clearLocalUserState();
     const { data, error } = await supabaseAuthRequest("/signup", {
       method: "POST",
       body: JSON.stringify({ email, password, data: { full_name: fullName } }),
@@ -5383,7 +5673,7 @@ export default function App() {
       }).catch(() => {});
     }
     setSessionPersist(null);
-    setSubmittedVendorId(null);
+    clearLocalUserState();
     showToast("Utloggad");
     goHome();
   };
@@ -6220,9 +6510,9 @@ export default function App() {
                 </button>
                 {session && profile ? (
                   <div className="flex items-center gap-3">
-                    <span className="text-sm font-medium" style={{ color: colors.plum }}>
+                    <button onClick={goMyAccount} className="text-sm font-medium underline" style={{ color: colors.plum }}>
                       {profile.full_name || session.user.email}
-                    </span>
+                    </button>
                     <button onClick={signOut} className="text-sm font-medium" style={{ color: colors.plumSoft }}>
                       Logga ut
                     </button>
@@ -6289,16 +6579,25 @@ export default function App() {
                   <Briefcase size={14} /> Bli leverantör
                 </button>
                 {session && profile ? (
-                  <button
-                    onClick={() => {
-                      signOut();
-                      setMobileMenuOpen(false);
-                    }}
-                    className="mt-2 rounded-full px-4 py-2.5 text-center"
-                    style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum }}
-                  >
-                    Logga ut ({profile.full_name || session.user.email})
-                  </button>
+                  <>
+                    <button
+                      onClick={goMyAccount}
+                      className="mt-2 rounded-full px-4 py-2.5 text-center"
+                      style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum }}
+                    >
+                      Mitt konto ({profile.full_name || session.user.email})
+                    </button>
+                    <button
+                      onClick={() => {
+                        signOut();
+                        setMobileMenuOpen(false);
+                      }}
+                      className="mt-2 rounded-full px-4 py-2.5 text-center"
+                      style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum }}
+                    >
+                      Logga ut
+                    </button>
+                  </>
                 ) : (
                   <button
                     onClick={() => openAuthModal("signin")}
@@ -6403,6 +6702,16 @@ export default function App() {
       {view === "vendorAwaitingConfirmation" && <VendorAwaitingConfirmationView email={vendorForm.email} onHome={goHome} />}
 
       {view === "resetPassword" && <ResetPasswordView onSubmit={submitNewPassword} onShowToast={showToast} />}
+
+      {view === "myAccount" && session && (
+        <MyAccountView
+          profile={profile}
+          email={session.user.email}
+          onSaveProfile={saveMyProfile}
+          onChangePassword={changeMyPassword}
+          onBack={goHome}
+        />
+      )}
 
       {view === "vendorPending" && <VendorPendingView vendor={submittedVendor} onHome={goHome} onGoDashboard={goVendorDashboard} />}
 
