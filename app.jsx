@@ -2606,7 +2606,7 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
 // the dedicated vendor signup flow further down still runs on local mock
 // data for now (see the note where it's rendered).
 // ---------------------------------------------------------------------------
-function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp }) {
+function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onForgotPassword }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -2614,6 +2614,7 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [signedUp, setSignedUp] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   if (!open) return null;
 
@@ -2624,6 +2625,7 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp }) {
     setConfirmPassword("");
     setError("");
     setSignedUp(false);
+    setResetSent(false);
   };
   const closeAndReset = () => {
     onClose();
@@ -2632,6 +2634,17 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp }) {
 
   const submit = async () => {
     setError("");
+    if (mode === "forgot") {
+      if (!email.trim()) {
+        setError("Fyll i din e-postadress.");
+        return;
+      }
+      setLoading(true);
+      await onForgotPassword(email.trim());
+      setLoading(false);
+      setResetSent(true);
+      return;
+    }
     if (!email.trim() || !password) {
       setError("Fyll i e-post och lösenord.");
       return;
@@ -2686,6 +2699,53 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp }) {
               Stäng
             </button>
           </div>
+        ) : resetSent ? (
+          <div className="py-4 text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full" style={{ backgroundColor: colors.coralSoft }}>
+              <Check size={22} color={colors.coralDeep} />
+            </div>
+            <h2 style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>Kolla din mejl!</h2>
+            <p className="mt-2 text-sm" style={{ color: colors.plumSoft }}>
+              Om <strong>{email}</strong> har ett konto hos oss har vi skickat en länk dit för att återställa lösenordet.
+            </p>
+            <button
+              onClick={closeAndReset}
+              className="mt-5 w-full rounded-full py-3 text-sm font-semibold"
+              style={{ backgroundColor: colors.coral, color: colors.white }}
+            >
+              Stäng
+            </button>
+          </div>
+        ) : mode === "forgot" ? (
+          <>
+            <h2 style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>Glömt lösenord?</h2>
+            <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
+              Fyll i din e-post så skickar vi en länk för att välja ett nytt lösenord.
+            </p>
+            <div className="mt-4 space-y-3">
+              <VendorTextField label="E-post" type="email" value={email} onChange={setEmail} />
+            </div>
+            {error && (
+              <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
+                {error}
+              </p>
+            )}
+            <button
+              onClick={submit}
+              disabled={loading}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold"
+              style={{ backgroundColor: colors.coral, color: colors.white, opacity: loading ? 0.6 : 1 }}
+            >
+              {loading ? "Ett ögonblick..." : "Skicka återställningslänk"}
+            </button>
+            <button
+              onClick={() => onModeChange("signin")}
+              className="mt-3 w-full text-center text-sm font-medium underline"
+              style={{ color: colors.lilacDeep }}
+            >
+              Tillbaka till inloggning
+            </button>
+          </>
         ) : (
           <>
             <h2 style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>{mode === "signin" ? "Logga in" : "Skapa konto"}</h2>
@@ -2695,6 +2755,18 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp }) {
               <VendorTextField label="Lösenord" type="password" value={password} onChange={setPassword} />
               {mode === "signup" && <VendorTextField label="Bekräfta lösenord" type="password" value={confirmPassword} onChange={setConfirmPassword} />}
             </div>
+            {mode === "signin" && (
+              <button
+                onClick={() => {
+                  setError("");
+                  onModeChange("forgot");
+                }}
+                className="mt-2 text-xs font-medium underline"
+                style={{ color: colors.lilacDeep }}
+              >
+                Glömt lösenord?
+              </button>
+            )}
             {error && (
               <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
                 {error}
@@ -3117,6 +3189,55 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ResetPasswordView({ onSubmit, onShowToast }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    setError("");
+    if (password.length < 6) {
+      setError("Lösenordet måste vara minst 6 tecken.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Lösenorden matchar inte.");
+      return;
+    }
+    setLoading(true);
+    const err = await onSubmit(password);
+    setLoading(false);
+    if (err) setError(err.message || "Något gick fel, försök igen.");
+  };
+
+  return (
+    <div className="mx-auto max-w-md px-6 pb-24 pt-14 sm:px-10">
+      <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Välj nytt lösenord</h1>
+      <p className="mt-2 text-sm" style={{ color: colors.plumSoft }}>
+        Skriv in ditt nya lösenord nedan.
+      </p>
+      <div className="mt-5 space-y-3">
+        <VendorTextField label="Nytt lösenord" type="password" value={password} onChange={setPassword} />
+        <VendorTextField label="Bekräfta nytt lösenord" type="password" value={confirmPassword} onChange={setConfirmPassword} />
+      </div>
+      {error && (
+        <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
+          {error}
+        </p>
+      )}
+      <button
+        onClick={submit}
+        disabled={loading}
+        className="mt-5 w-full rounded-full py-3 text-sm font-semibold"
+        style={{ backgroundColor: colors.coral, color: colors.white, opacity: loading ? 0.6 : 1 }}
+      >
+        {loading ? "Ett ögonblick..." : "Spara nytt lösenord"}
+      </button>
     </div>
   );
 }
@@ -4907,6 +5028,24 @@ const emptyVendorForm = () => ({
 
 export default function App() {
   const [view, setView] = useState("home");
+  const [recoverySession, setRecoverySession] = useState(null);
+
+  // Detect a password-recovery link (the user just clicked the reset email).
+  // Supabase redirects here with the session tokens in the URL hash.
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash && hash.includes("type=recovery")) {
+      const params = new URLSearchParams(hash.slice(1));
+      const accessToken = params.get("access_token");
+      const refreshToken = params.get("refresh_token");
+      const expiresIn = params.get("expires_in");
+      if (accessToken) {
+        setRecoverySession({ access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn ? Number(expiresIn) : 3600 });
+        setView("resetPassword");
+      }
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
   const [party, setParty] = useState(emptyParty);
   const [cartItems, setCartItems] = useState([]); // [{ id, addons: [addonId, ...] }]
   const [activeProviderId, setActiveProviderId] = useState(null);
@@ -5178,6 +5317,27 @@ export default function App() {
     setAuthModalMode(mode);
     setAuthModalOpen(true);
     setMobileMenuOpen(false);
+  };
+
+  const requestPasswordReset = async (email) => {
+    await supabaseAuthRequest("/recover", { method: "POST", body: JSON.stringify({ email }) });
+    // Always resolve quietly either way — never reveal whether an email is registered.
+  };
+
+  const submitNewPassword = async (newPassword) => {
+    if (!recoverySession?.access_token) return { message: "Länken har gått ut. Begär en ny återställningslänk." };
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${recoverySession.access_token}` },
+      body: JSON.stringify({ password: newPassword }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { message: data.error_description || data.msg || data.error || "Något gick fel." };
+    setSessionPersist({ ...recoverySession, user: data });
+    setRecoverySession(null);
+    showToast("Lösenordet är uppdaterat ✓");
+    setView("home");
+    return null;
   };
 
   const signIn = async (email, password) => {
@@ -6242,6 +6402,8 @@ export default function App() {
 
       {view === "vendorAwaitingConfirmation" && <VendorAwaitingConfirmationView email={vendorForm.email} onHome={goHome} />}
 
+      {view === "resetPassword" && <ResetPasswordView onSubmit={submitNewPassword} onShowToast={showToast} />}
+
       {view === "vendorPending" && <VendorPendingView vendor={submittedVendor} onHome={goHome} onGoDashboard={goVendorDashboard} />}
 
       {view === "vendorDashboard" && (
@@ -6324,7 +6486,7 @@ export default function App() {
       {view === "terms" && <LegalPageView title="Allmänna villkor" sections={TERMS_SECTIONS} onBack={goHome} />}
       {view === "cookiePolicy" && <LegalPageView title="Cookiepolicy" sections={COOKIE_POLICY_SECTIONS} onBack={goHome} />}
 
-      {!isVendorPortalView && !isAdminView && !["checkout", "confirmation", "vendorSignup", "vendorAwaitingConfirmation", "privacyPolicy", "terms", "cookiePolicy"].includes(view) && (
+      {!isVendorPortalView && !isAdminView && !["checkout", "confirmation", "vendorSignup", "vendorAwaitingConfirmation", "resetPassword", "privacyPolicy", "terms", "cookiePolicy"].includes(view) && (
         <Footer
           onGoHome={goHome}
           onBrowse={() => {
@@ -6399,6 +6561,7 @@ export default function App() {
         onClose={() => setAuthModalOpen(false)}
         onSignIn={signIn}
         onSignUp={signUpCustomer}
+        onForgotPassword={requestPasswordReset}
       />
       <SupportModal open={supportOpen} onClose={() => setSupportOpen(false)} onSubmit={submitSupportMessage} />
       <Toast message={toast} />
