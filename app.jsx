@@ -4555,7 +4555,7 @@ const PRIVACY_POLICY_SECTIONS = [
     heading: "1. Vem är personuppgiftsansvarig?",
     paragraphs: [
       "Planifest drivs som enskild firma av Kristina Onus (\"Planifest\", \"vi\" eller \"oss\"). Kristina Onus är personuppgiftsansvarig för den behandling av personuppgifter som beskrivs i denna policy.",
-      "Kontaktuppgifter: info@planifest.se, [DIN REGISTRERADE FÖRETAGSADRESS].",
+      "Kontaktuppgifter: info@planifest.se, Knivetorpsvägen 1, 433 31 Partille.",
     ],
   },
   {
@@ -4678,7 +4678,7 @@ const TERMS_SECTIONS = [
   {
     heading: "9. Kringgående av plattformen",
     paragraphs: [
-      "Kund och Leverantör som kommit i kontakt via Planifest förbinder sig att inte, under pågående bokningsprocess eller inom [12] månader efter första kontakt via plattformen, ingå avtal om samma eller liknande tjänst direkt med varandra i syfte att kringgå Planifests förmedlingsavgift.",
+      "Kund och Leverantör som kommit i kontakt via Planifest förbinder sig att inte, under pågående bokningsprocess eller inom 12 månader efter första kontakt via plattformen, ingå avtal om samma eller liknande tjänst direkt med varandra i syfte att kringgå Planifests förmedlingsavgift.",
       "Vid brott mot denna bestämmelse har Planifest rätt att fakturera den ansvariga parten ett belopp motsvarande den förmedlingsavgift som skulle ha utgått vid bokning via plattformen, samt att stänga av kontot.",
     ],
   },
@@ -4741,7 +4741,7 @@ function LegalPageView({ title, sections, onBack }) {
       </button>
       <h1 style={{ fontFamily: serif, fontSize: 30, color: colors.plum }}>{title}</h1>
       <p className="mt-2 text-sm" style={{ color: colors.plumSoft }}>
-        Det här är ett startutkast — inte juridisk rådgivning. Låt en jurist eller tjänst som Lexly/Avtal24 granska texten, särskilt punkterna markerade med [ ], innan den publiceras skarpt.
+        Det här är ett startutkast — inte juridisk rådgivning. Låt en jurist eller tjänst som Lexly/Avtal24 granska texten innan den publiceras skarpt.
       </p>
       <div className="mt-8 space-y-7">
         {sections.map((s) => (
@@ -4878,6 +4878,9 @@ function Footer({ onGoHome, onBrowse, onHowItWorks, onBecomeVendor, onOpenTerms,
           <p>© {year} Planifest. Alla rättigheter förbehållna.</p>
           <p style={{ fontStyle: "italic" }}>För stunder värda att planera.</p>
         </div>
+        <p className="mt-3 text-center text-xs sm:text-left" style={{ color: colors.plumSoft }}>
+          Planifest, enskild firma · Kristina Onus · Knivetorpsvägen 1, 433 31 Partille · info@planifest.se
+        </p>
       </div>
     </footer>
   );
