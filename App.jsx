@@ -31,6 +31,8 @@ import {
   Eye,
   EyeOff,
   Search,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -50,6 +52,52 @@ const SUPABASE_KEY =
 // for this: per-browser, never shared between visitors.
 const SESSION_STORAGE_KEY = "planifest-session";
 const CHAT_POLL_MS = 5000; // how often an open conversation checks for new messages
+const INBOX_POLL_MS = 10000; // how often the message bubble checks for unread messages
+const SOUND_KEY = "planifest-sound";
+const BADGE_RED = "#C8554B";
+
+// A short two-note "ping", generated in the browser (no audio file needed).
+// Browsers only allow sound after the person has clicked or tapped something on
+// the page, so this stays silent until then. That is a browser rule, not a bug.
+let pingCtx = null;
+function playPing() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    pingCtx = pingCtx || new AC();
+    if (pingCtx.state === "suspended" && pingCtx.resume) {
+      const r = pingCtx.resume();
+      if (r && r.catch) r.catch(() => {});
+    }
+    const now = pingCtx.currentTime;
+    [
+      [880, 0],
+      [1320, 0.13],
+    ].forEach(([freq, offset]) => {
+      const osc = pingCtx.createOscillator();
+      const gain = pingCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.4);
+      osc.connect(gain);
+      gain.connect(pingCtx.destination);
+      osc.start(now + offset);
+      osc.stop(now + offset + 0.45);
+    });
+  } catch (e) {
+    // sound is a nicety, never a reason to break anything
+  }
+}
+
+const timeLabel = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString("sv-SE", { day: "numeric", month: "short" });
+};
 
 function loadStoredSession() {
   try {
@@ -2563,7 +2611,7 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
           <div>
             <p style={{ fontFamily: serif, fontSize: 18, color: colors.plum }}>{vendorName}</p>
             <p className="text-xs" style={{ color: colors.plumSoft }}>
-              {target.kind === "booking" ? target.bookingNumber : "Fråga innan du bokar"}
+              {target.kind === "booking" ? target.bookingNumber : catMap[target.provider.category]?.label || "Meddelanden"}
             </p>
           </div>
           <button onClick={onClose} className="-m-2 p-2" aria-label="Stäng chatt">
@@ -4372,7 +4420,7 @@ function VendorProfilePreviewView({ vendor, onBack }) {
 // chat) since a vendor spends more focused time here. Reuses the same quote
 // bubble treatment as the customer's ChatModal.
 // ---------------------------------------------------------------------------
-function VendorInboxView({ conversations, activeConversationId, messages, onOpenConversation, onSendMessage, onSendQuote, onBack }) {
+function VendorInboxView({ conversations, activeConversationId, messages, onOpenConversation, onSendMessage, onSendQuote, onBack, inboxById = {} }) {
   const [text, setText] = useState("");
   const [quoteMode, setQuoteMode] = useState(false);
   const [quoteAmount, setQuoteAmount] = useState("");
@@ -4538,6 +4586,9 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
         )}
         {conversations.map((c) => {
           const Icon = catMap[c.category_id]?.icon;
+          const meta = inboxById[c.id];
+          const unread = meta?.unread || 0;
+          const preview = meta ? (meta.last_type === "quote" ? "Offert" : meta.last_text) : "";
           return (
             <button
               key={c.id}
@@ -4548,15 +4599,129 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
               <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: colors.lilacSoft }}>
                 {Icon && <Icon size={16} color={colors.lilacDeep} />}
               </div>
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <p className="font-semibold" style={{ color: colors.plum }}>
                   {catMap[c.category_id]?.label || "Fråga"}
                 </p>
-                <p className="text-xs" style={{ color: colors.plumSoft }}>
-                  Kund
+                <p className="truncate text-xs" style={{ color: unread > 0 ? colors.plum : colors.plumSoft, fontWeight: unread > 0 ? 600 : 400 }}>
+                  Kund{preview ? ` · ${preview}` : ""}
                 </p>
               </div>
+              {unread > 0 && (
+                <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-xs font-bold" style={{ backgroundColor: BADGE_RED, color: colors.white }}>
+                  {unread}
+                </span>
+              )}
               <ChevronRight size={16} color={colors.plumSoft} />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ChatBubble({ count, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={count > 0 ? `Meddelanden, ${count} nya` : "Meddelanden"}
+      className="fixed z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-lg"
+      style={{
+        right: 20,
+        bottom: "calc(20px + env(safe-area-inset-bottom, 0px))",
+        backgroundColor: colors.coral,
+        color: colors.white,
+        animation: count > 0 ? "planifest-ring 2.4s ease-out infinite" : "none",
+      }}
+    >
+      <span key={count} style={{ display: "flex", animation: count > 0 ? "planifest-wiggle 0.8s ease-in-out" : "none" }}>
+        <MessageCircle size={24} />
+      </span>
+      {count > 0 && (
+        <span
+          className="absolute -right-1 -top-1 flex h-6 min-w-[24px] items-center justify-center rounded-full px-1.5 text-xs font-bold"
+          style={{ backgroundColor: BADGE_RED, color: colors.white, border: `2px solid ${colors.cream}` }}
+        >
+          {count > 99 ? "99+" : count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function MessagesPanel({ open, conversations, soundOn, onToggleSound, onOpen, onClose }) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed z-40 flex flex-col overflow-hidden rounded-3xl shadow-xl"
+      style={{
+        right: 20,
+        bottom: "calc(90px + env(safe-area-inset-bottom, 0px))",
+        width: "min(92vw, 360px)",
+        maxHeight: "60vh",
+        backgroundColor: colors.cream,
+        border: `1.5px solid ${colors.lilac}`,
+      }}
+    >
+      <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: `1.5px solid ${colors.lilacSoft}` }}>
+        <p style={{ fontFamily: serif, fontSize: 18, color: colors.plum }}>Meddelanden</p>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onToggleSound}
+            className="flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium"
+            style={{ color: colors.plumSoft }}
+            aria-label={soundOn ? "Stäng av ljud" : "Slå på ljud"}
+          >
+            {soundOn ? <Volume2 size={14} /> : <VolumeX size={14} />}
+            {soundOn ? "Ljud på" : "Ljud av"}
+          </button>
+          <button onClick={onClose} className="-mr-1 p-1.5" aria-label="Stäng meddelanden">
+            <X size={16} color={colors.plumSoft} />
+          </button>
+        </div>
+      </div>
+      <div className="overflow-y-auto">
+        {conversations.length === 0 && (
+          <p className="px-5 py-8 text-center text-sm" style={{ color: colors.plumSoft }}>
+            Inga meddelanden än. Öppna en leverantör och klicka på <strong>Fråga leverantören</strong>.
+          </p>
+        )}
+        {conversations.map((c) => {
+          const Icon = catMap[c.category_id]?.icon;
+          const preview = c.last_type === "quote" ? "Offert" : c.last_text || "Inga meddelanden än";
+          return (
+            <button
+              key={c.conversation_id}
+              onClick={() => onOpen(c)}
+              className="flex w-full items-center gap-3 px-5 py-3 text-left"
+              style={{ borderBottom: `1px solid ${colors.beige}`, backgroundColor: c.unread > 0 ? colors.white : "transparent" }}
+            >
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: colors.lilacSoft }}>
+                {Icon && <Icon size={16} color={colors.lilacDeep} />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="truncate text-sm font-semibold" style={{ color: colors.plum }}>
+                    {c.other_name}
+                  </p>
+                  <span className="flex-shrink-0 text-xs" style={{ color: colors.plumSoft }}>
+                    {timeLabel(c.last_at)}
+                  </span>
+                </div>
+                <p className="truncate text-xs" style={{ color: c.unread > 0 ? colors.plum : colors.plumSoft, fontWeight: c.unread > 0 ? 600 : 400 }}>
+                  {c.last_sender === c.i_am ? "Du: " : ""}
+                  {preview}
+                </p>
+              </div>
+              {c.unread > 0 && (
+                <span
+                  className="flex h-5 min-w-[20px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-xs font-bold"
+                  style={{ backgroundColor: BADGE_RED, color: colors.white }}
+                >
+                  {c.unread}
+                </span>
+              )}
             </button>
           );
         })}
@@ -5489,6 +5654,58 @@ export default function App() {
   const [cookieConsent, setCookieConsent] = useState(null); // null = undecided, "all" | "necessary"
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null); // row from public.profiles for the logged-in user
+
+  // --- Message bubble: every conversation I'm in, with unread counts ---
+  const [inbox, setInbox] = useState([]);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [soundOn, setSoundOn] = useState(() => {
+    try {
+      return localStorage.getItem(SOUND_KEY) !== "off";
+    } catch (e) {
+      return true;
+    }
+  });
+  const lastUnreadRef = useRef(null); // null until the first answer, so logging in never pings
+  const unreadTotal = inbox.reduce((n, c) => n + (c.unread || 0), 0);
+
+  useEffect(() => {
+    if (!session?.access_token) {
+      setInbox([]);
+      lastUnreadRef.current = null;
+      return;
+    }
+    let stop = false;
+    let firstLoad = true;
+    const load = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      const { data } = await supabaseRestRequest("/rpc/my_conversations", session.access_token, { method: "POST", body: "{}" });
+      if (stop || !Array.isArray(data)) return;
+      if (firstLoad) {
+        // Whatever is already unread when the page opens is the starting point, so only messages that arrive afterwards ping.
+        lastUnreadRef.current = data.reduce((n, c) => n + (c.unread || 0), 0);
+        firstLoad = false;
+      }
+      setInbox(data);
+    };
+    load();
+    const id = setInterval(load, INBOX_POLL_MS);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, [session]);
+
+  // A new unread message: ping (if sound is on). The bubble wiggles on its own via its changing count.
+  useEffect(() => {
+    if (lastUnreadRef.current !== null && unreadTotal > lastUnreadRef.current && soundOn) playPing();
+    lastUnreadRef.current = unreadTotal;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unreadTotal]);
+
+  // The browser tab shows the count too, e.g. "(2) Planifest".
+  useEffect(() => {
+    document.title = unreadTotal > 0 ? `(${unreadTotal}) Planifest` : "Planifest";
+  }, [unreadTotal]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState("signin"); // "signin" | "signup"
   const howItWorksRef = useRef(null);
@@ -6309,6 +6526,39 @@ export default function App() {
     return () => clearInterval(id);
   }, [openConvoId, session]);
 
+  // Whatever is open on screen counts as read, including messages that arrive while it is open.
+  const openMsgCount = openConvoId ? (realMessages[openConvoId] || []).length : 0;
+  useEffect(() => {
+    if (!openConvoId || !session?.access_token) return;
+    setInbox((list) => list.map((c) => (c.conversation_id === openConvoId ? { ...c, unread: 0 } : c)));
+    supabaseRestRequest("/rpc/mark_conversation_read", session.access_token, { method: "POST", body: JSON.stringify({ p_conversation_id: openConvoId }) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openConvoId, openMsgCount]);
+
+  const toggleSound = () => {
+    setSoundOn((on) => {
+      try {
+        localStorage.setItem(SOUND_KEY, on ? "off" : "on");
+      } catch (e) {
+        // ignore
+      }
+      return !on;
+    });
+  };
+
+  const openConversationFromPanel = async (c) => {
+    setPanelOpen(false);
+    if (c.i_am === "vendor") {
+      await openVendorConversation(c.conversation_id);
+      setView("vendorInbox");
+      return;
+    }
+    const provider = { id: `${c.vendor_id}-${c.category_id}`, vendorDbId: c.vendor_id, category: c.category_id, name: c.other_name };
+    const { data: msgs } = await supabaseRestRequest(`/messages?conversation_id=eq.${c.conversation_id}&select=*&order=created_at.asc`, session.access_token);
+    setRealMessages((m) => ({ ...m, [c.conversation_id]: msgs || [] }));
+    setChatTarget({ kind: "provider", provider, real: true, conversationId: c.conversation_id });
+  };
+
   const sendVendorMessage = async (text) => {
     if (!activeVendorConversationId) return;
     const { data, error } = await supabaseRestRequest("/messages", session.access_token, {
@@ -6713,8 +6963,14 @@ export default function App() {
           goVendorInbox();
           setMobileMenuOpen(false);
         }}
+        className="flex items-center gap-1.5"
       >
         Meddelanden
+        {unreadTotal > 0 && (
+          <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-xs font-bold" style={{ backgroundColor: BADGE_RED, color: colors.white }}>
+            {unreadTotal}
+          </span>
+        )}
       </button>
       <button
         onClick={() => {
@@ -6760,6 +7016,9 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
         input[type="date"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator { cursor: pointer; }
+        @keyframes planifest-wiggle { 0%,100% { transform: rotate(0); } 15% { transform: rotate(-14deg); } 30% { transform: rotate(12deg); } 45% { transform: rotate(-8deg); } 60% { transform: rotate(6deg); } 75% { transform: rotate(-3deg); } }
+        @keyframes planifest-ring { 0% { box-shadow: 0 0 0 0 rgba(139,101,137,0.55), 0 8px 20px rgba(0,0,0,0.15); } 70%, 100% { box-shadow: 0 0 0 16px rgba(139,101,137,0), 0 8px 20px rgba(0,0,0,0.15); } }
+        @media (prefers-reduced-motion: reduce) { [style*="planifest-"] { animation: none !important; } }
       `}</style>
 
       {/* Top nav */}
@@ -7016,6 +7275,7 @@ export default function App() {
           onSendMessage={sendVendorMessage}
           onSendQuote={sendVendorQuote}
           onBack={closeVendorConversation}
+          inboxById={Object.fromEntries(inbox.map((c) => [c.conversation_id, c]))}
         />
       )}
 
@@ -7148,6 +7408,29 @@ export default function App() {
           setCartOpen(true);
         }}
       />
+      {session && profile && !isAdminView && (
+        <>
+          <MessagesPanel
+            open={panelOpen && !isVendorPortalView}
+            conversations={inbox}
+            soundOn={soundOn}
+            onToggleSound={toggleSound}
+            onOpen={openConversationFromPanel}
+            onClose={() => setPanelOpen(false)}
+          />
+          <ChatBubble
+            count={unreadTotal}
+            onClick={() => {
+              if (isVendorPortalView) {
+                setPanelOpen(false);
+                goVendorInbox();
+              } else {
+                setPanelOpen((o) => !o);
+              }
+            }}
+          />
+        </>
+      )}
       <AuthModal
         open={authModalOpen}
         mode={authModalMode}
