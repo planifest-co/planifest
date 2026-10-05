@@ -6,6 +6,7 @@ import {
   Sparkles,
   Camera,
   Cake,
+  ClipboardList,
   Flower2,
   PackageOpen,
   Star,
@@ -55,54 +56,141 @@ const CHAT_POLL_MS = 5000; // how often an open conversation checks for new mess
 const INBOX_POLL_MS = 10000; // how often the message bubble checks for unread messages
 const SOUND_KEY = "planifest-sound";
 
-// ---- Cakes: sizes, the customer's structured request ("brief"), vendor price config ----
-const CAKE_SIZES = [6, 8, 10, 12, 15, 18, 20, 22, 25, 28];
-const CAKE_SHAPES = ["Rund", "Fyrkantig", "Rektangulär", "Hjärta", "Annan form"];
-const CAKE_TIERS = [1, 2, 3];
-const CAKE_DIETARY = ["Glutenfri", "Laktosfri", "Vegansk", "Nötfri"];
-const CAKE_DELIVERY = ["Hämtar själv", "Leverans"];
-// How a brief is shown: [field, label, optional formatter]
-const CAKE_BRIEF_ROWS = [
-  ["portions", "Storlek", (v) => `${v} bitar`],
-  ["flavor", "Smak"],
-  ["shape", "Form"],
-  ["tiers", "Våningar", (v) => String(v)],
-  ["theme", "Tema / design"],
-  ["colors", "Färger"],
-  ["text_on_cake", "Text på tårtan"],
-  ["dietary", "Kostönskemål", (v) => v.join(", ")],
-  ["allergies", "Allergier"],
-  ["delivery", "Hämtning / leverans"],
-  ["date", "Datum"],
-  ["notes", "Övrigt"],
+// ---- Request forms: every vendor decides what customers are asked, per category ----
+// A form is a list of fields. Choice fields can carry a price (an add-on), which feeds the guide price.
+const FIELD_TYPES = [
+  ["single", "Ett val"],
+  ["multi", "Flera val"],
+  ["short", "Kort text"],
+  ["long", "Lång text"],
+  ["number", "Siffra"],
 ];
-const cakeBriefSummary = (b) => ["Tårta", b.portions ? `${b.portions} bitar` : "", b.flavor].filter(Boolean).join(", ");
-const cakeQuoteDescription = (b) =>
-  ["Tårta", b.portions ? `${b.portions} bitar` : "", b.flavor, b.shape ? String(b.shape).toLowerCase() : "", b.tiers ? `${b.tiers} våning${b.tiers > 1 ? "ar" : ""}` : "", b.theme ? `tema: ${b.theme}` : ""]
-    .filter(Boolean)
-    .join(", ");
+// What every vendor has until they build their own: one open question, so anyone can always be asked something.
+const DEFAULT_REQUEST_FIELDS = [{ id: "wishes", label: "Berätta vad du behöver", type: "long", required: true }];
+const choices = (labels) => labels.map((label) => ({ label }));
+// Starting points per category. Vendors edit these freely (rename, remove, add, price the options).
+const REQUEST_TEMPLATES = {
+  tarta: [
+    { id: "size", label: "Storlek", type: "single", required: true, options: choices([6, 8, 10, 12, 15, 18, 20, 22, 25, 28].map((n) => `${n} bitar`)) },
+    { id: "flavor", label: "Smak", type: "single", required: true, options: choices(["Choklad", "Vanilj", "Jordgubb"]) },
+    { id: "shape", label: "Form", type: "single", options: choices(["Rund", "Fyrkantig", "Rektangulär", "Hjärta", "Annan form"]) },
+    { id: "tiers", label: "Våningar", type: "single", options: choices(["1", "2", "3 eller fler"]) },
+    { id: "theme", label: "Tema / design", type: "long" },
+    { id: "colors", label: "Färger", type: "short" },
+    { id: "text", label: "Text på tårtan", type: "short" },
+    { id: "diet", label: "Kostönskemål", type: "multi", options: choices(["Glutenfri", "Laktosfri", "Vegansk", "Nötfri"]) },
+    { id: "allergies", label: "Allergier", type: "short" },
+    { id: "pickup", label: "Hämtning eller leverans", type: "single", options: choices(["Hämtar själv", "Leverans"]) },
+  ],
+  dj: [
+    { id: "genres", label: "Musikstil och önskemål", type: "long", required: true },
+    { id: "venue", label: "Var ska ni vara?", type: "short" },
+    { id: "sound", label: "Behöver ni ljudanläggning?", type: "single", options: choices(["Ja", "Nej, det finns på plats"]) },
+    { id: "extras", label: "Tillägg", type: "multi", options: choices(["Ljus", "Rökmaskin", "Mikrofon för tal"]) },
+    { id: "avoid", label: "Låtar ni inte vill ha", type: "long" },
+  ],
+  lokal: [
+    { id: "setup", label: "Uppställning", type: "single", required: true, options: choices(["Sittande middag", "Stående mingel", "Konferens", "Annat"]) },
+    { id: "needs", label: "Behov", type: "multi", options: choices(["Bord och stolar", "Scen", "Ljudanläggning", "Projektor", "Kök"]) },
+    { id: "cleaning", label: "Städning", type: "single", options: choices(["Ni städar", "Vi städar själva"]) },
+    { id: "notes", label: "Övrigt", type: "long" },
+  ],
+  catering: [
+    { id: "service", label: "Typ av servering", type: "single", required: true, options: choices(["Buffé", "Tallrik", "Tapas och mingel", "Avhämtning"]) },
+    { id: "diet", label: "Kostönskemål", type: "multi", options: choices(["Vegetariskt", "Veganskt", "Glutenfritt", "Laktosfritt"]) },
+    { id: "allergies", label: "Allergier", type: "short" },
+    { id: "staff", label: "Serveringspersonal", type: "single", options: choices(["Behövs", "Behövs inte"]) },
+    { id: "menu", label: "Meny och önskemål", type: "long" },
+  ],
+  dekor: [
+    { id: "theme", label: "Tema", type: "long", required: true },
+    { id: "colors", label: "Färger", type: "short" },
+    { id: "place", label: "Plats", type: "single", options: choices(["Hemma", "Lokal", "Utomhus"]) },
+    { id: "mount", label: "Montering och nedmontering", type: "single", options: choices(["Ni sätter upp och tar ner", "Jag fixar själv"]) },
+    { id: "extras", label: "Tillägg", type: "multi", options: choices(["Ballongbåge", "Ljusslingor", "Bordsdekor"]) },
+  ],
+  fotograf: [
+    { id: "event", label: "Typ av event", type: "short", required: true },
+    { id: "moments", label: "Önskade stunder och motiv", type: "long" },
+    { id: "delivery", label: "Leverans", type: "multi", options: choices(["Digitala bilder", "Album", "Tryckta bilder"]) },
+    { id: "extras", label: "Tillägg", type: "multi", options: choices(["Extra fotograf", "Snabbleverans"]) },
+  ],
+  blommor: [
+    { id: "kind", label: "Vad behöver ni?", type: "single", required: true, options: choices(["Bukett", "Bordsdekoration", "Brudbukett", "Krans", "Annat"]) },
+    { id: "colors", label: "Färger", type: "short" },
+    { id: "delivery", label: "Hämtning eller leverans", type: "single", options: choices(["Hämtar själv", "Leverans"]) },
+    { id: "card", label: "Text på kortet", type: "short" },
+  ],
+  uthyrning: [
+    { id: "items", label: "Vad vill ni hyra?", type: "long", required: true },
+    { id: "count", label: "Antal", type: "number" },
+    { id: "delivery", label: "Hämtning eller leverans", type: "single", options: choices(["Hämtar själv", "Leverans"]) },
+    { id: "setup", label: "Uppsättning", type: "single", options: choices(["Ni sätter upp", "Jag sätter upp själv"]) },
+  ],
+};
+const newFieldId = () => `n${Date.now().toString(36)}${Math.floor(Math.random() * 36).toString(36)}`.slice(0, 16);
 
-// A vendor's cake config as stored: { sizes: { "12": 650, ... }, flavors: ["Choklad", ...] }.
-// Always cleaned the same way before it is used or saved, so a typo in the editor can never make a save fail.
-function sanitizeCakeConfig(cfg) {
-  const sizes = {};
-  CAKE_SIZES.forEach((n) => {
-    const raw = cfg?.sizes?.[n] ?? cfg?.sizes?.[String(n)];
-    const price = Math.round(Number(raw));
-    if (raw !== undefined && raw !== null && raw !== "" && Number.isFinite(price) && price > 0 && price <= 100000) sizes[n] = price;
+// Cleans a vendor's forms the same way before they are used or saved, so an unfinished field in the
+// editor can never make a save fail or show up half-built to customers.
+function sanitizeRequestForms(forms) {
+  const out = {};
+  if (!forms || typeof forms !== "object") return out;
+  Object.entries(forms).forEach(([cat, cfg]) => {
+    if (!catMap[cat] || !cfg || typeof cfg !== "object") return;
+    const ids = new Set();
+    const fields = [];
+    (Array.isArray(cfg.fields) ? cfg.fields : []).slice(0, 25).forEach((f, i) => {
+      const label = String(f?.label ?? "").trim().slice(0, 80);
+      const type = FIELD_TYPES.some(([t]) => t === f?.type) ? f.type : null;
+      if (!label || !type) return;
+      let base = String(f?.id ?? "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 14) || `f${i}`;
+      let id = base;
+      for (let k = 2; ids.has(id); k++) id = `${base}${k}`.slice(0, 16);
+      ids.add(id);
+      const field = { id, label, type };
+      if (f.required) field.required = true;
+      if (type === "single" || type === "multi") {
+        const seen = new Set();
+        const options = [];
+        (Array.isArray(f.options) ? f.options : []).forEach((o) => {
+          const ol = String(o?.label ?? "").trim().slice(0, 60);
+          if (!ol || seen.has(ol.toLowerCase()) || options.length >= 30) return;
+          seen.add(ol.toLowerCase());
+          const price = Math.round(Number(o?.price));
+          options.push(Number.isFinite(price) && price > 0 && price <= 100000 ? { label: ol, price } : { label: ol });
+        });
+        if (options.length === 0) return;
+        field.options = options;
+      }
+      fields.push(field);
+    });
+    const form = { fields };
+    if (typeof cfg.direct === "boolean") form.direct = cfg.direct;
+    out[cat] = form;
   });
-  const seen = new Set();
-  const flavors = [];
-  (Array.isArray(cfg?.flavors) ? cfg.flavors : []).forEach((f) => {
-    const t = String(f).trim().slice(0, 60);
-    if (t && !seen.has(t.toLowerCase()) && flavors.length < 30) {
-      seen.add(t.toLowerCase());
-      flavors.push(t);
-    }
-  });
-  return { sizes, flavors };
+  return out;
 }
-const normalizeCakeConfig = (c) => sanitizeCakeConfig(c && typeof c === "object" ? c : {});
+
+// What a customer is shown for one category: the vendor's own form, or the one-question default.
+// Direct booking only exists when the vendor has a fixed price and hasn't switched it off.
+function getRequestConfig(forms, categoryId, hasPrice) {
+  const cfg = sanitizeRequestForms(forms)[categoryId];
+  const custom = !!cfg?.fields?.length;
+  return { fields: custom ? cfg.fields : DEFAULT_REQUEST_FIELDS, direct: hasPrice ? cfg?.direct !== false : false, custom };
+}
+
+// Guide price: the base price (if the vendor has one) plus the priced options the customer picked.
+function priceFromAnswers(fields, getPicked) {
+  let extra = 0;
+  fields.forEach((f) => {
+    if (f.type !== "single" && f.type !== "multi") return;
+    const picked = [].concat(getPicked(f) ?? []);
+    f.options.forEach((o) => {
+      if (o.price && picked.includes(o.label)) extra += o.price;
+    });
+  });
+  return extra;
+}
 const BADGE_RED = "#C8554B";
 
 // A short two-note "ping", generated in the browser (no audio file needed).
@@ -210,7 +298,7 @@ function mapDbVendorToLocal(dbVendor) {
   return {
     id: dbVendor.id,
     createdAt: dbVendor.created_at,
-    cakeConfig: normalizeCakeConfig(dbVendor.cake_config),
+    requestForms: sanitizeRequestForms(dbVendor.request_forms),
     companyName: dbVendor.company_name,
     organizationNumber: dbVendor.organization_number,
     contactPerson: dbVendor.contact_person,
@@ -335,7 +423,7 @@ async function saveVendorProfile(vendor, accessToken) {
       tagline: vendor.profile.tagline,
       description: vendor.profile.description,
       images: vendor.profile.images,
-      cake_config: sanitizeCakeConfig(vendor.cakeConfig),
+      request_forms: sanitizeRequestForms(vendor.requestForms),
     }),
   });
 
@@ -795,9 +883,15 @@ function mapVendorToProviders(vendor, bookings) {
       .filter(Boolean)
       .join(" ");
 
-    const cleanCake = categoryId === "tarta" ? sanitizeCakeConfig(vendor.cakeConfig) : null;
-    const cakePrices = cleanCake ? Object.values(cleanCake.sizes) : [];
-    const cake = cakePrices.length > 0 ? cleanCake : null;
+    const hasPrice = pricing.amount > 0;
+    const request = getRequestConfig(vendor.requestForms, categoryId, hasPrice);
+    // "from" price when there is no fixed price: the cheapest option of each required choice, added up
+    const fieldsFrom = request.fields
+      .filter((f) => f.required && f.type === "single")
+      .reduce((sum, f) => {
+        const prices = f.options.filter((o) => o.price).map((o) => o.price);
+        return sum + (prices.length ? Math.min(...prices) : 0);
+      }, 0);
 
     return {
       id: `${vendor.id}-${categoryId}`,
@@ -809,8 +903,10 @@ function mapVendorToProviders(vendor, bookings) {
       reviews: 0,
       location: locationMap[vendor.baseLocation]?.name || vendor.baseLocation,
       distanceKm: getMockDistance(vendor.id, vendor.baseLocation),
-      pricing: cake ? { type: "fixed", amount: Math.min(...cakePrices), note: "" } : pricing,
-      cake,
+      pricing,
+      request,
+      requestOnly: !request.direct,
+      fromPrice: hasPrice ? pricing.amount : fieldsFrom,
       seed: vendor.id,
       image: images[0],
       images,
@@ -1252,11 +1348,15 @@ function Toast({ message }) {
 // Vendor card
 // ---------------------------------------------------------------------------
 function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode }) {
-  const priceLabel = `${provider.cake ? "från " : ""}${formatKr(provider.pricing.amount)}${getUnitLabel(provider.pricing)}`;
+  const priceLabel = provider.requestOnly
+    ? provider.fromPrice > 0
+      ? `från ${formatKr(provider.fromPrice)}`
+      : "Pris på förfrågan"
+    : `${formatKr(provider.pricing.amount)}${getUnitLabel(provider.pricing)}`;
   const handleAction = (e) => {
     e.stopPropagation();
-    if (provider.cake) {
-      onView(provider.id); // a cake is ordered through a request, never added straight to the cart
+    if (provider.requestOnly) {
+      onView(provider.id); // booked through a request and a quote, never added straight to the cart
       return;
     }
     if (swapMode) onAdd(provider.id);
@@ -1286,7 +1386,7 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
             backgroundColor: inCart && !swapMode ? colors.white : colors.coral,
             color: inCart && !swapMode ? colors.lilacDeep : colors.white,
           }}
-          aria-label={provider.cake ? "Beställ tårta" : swapMode ? "Välj denna" : inCart ? "Ta bort från Min fest" : "Lägg till i Min fest"}
+          aria-label={provider.requestOnly ? "Skicka förfrågan" : swapMode ? "Välj denna" : inCart ? "Ta bort från Min fest" : "Lägg till i Min fest"}
         >
           {swapMode || inCart ? <Check size={9} /> : <Plus size={9} />}
         </button>
@@ -1776,8 +1876,9 @@ function ResultsView({
   );
 }
 
-function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty, onSendCakeBrief }) {
+function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty, onSendRequest }) {
   const cat = catMap[provider.category];
+  const [requestOpen, setRequestOpen] = useState(false);
   const [pendingAddons, setPendingAddons] = useState([]);
   const initialCalDate = party.date ? new Date(party.date) : new Date();
   const [calYear, setCalYear] = useState(initialCalDate.getFullYear());
@@ -1924,8 +2025,27 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
         </div>
 
         <div className="sm:col-span-1">
-          {provider.cake ? (
-            <CakeOrderPanel provider={provider} party={party} onSelectDate={onSelectDate} onSend={(brief) => onSendCakeBrief(provider, brief)} />
+          {provider.requestOnly ? (
+            <div className="rounded-3xl p-5 sm:sticky sm:top-6" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}` }}>
+              <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>{provider.fromPrice > 0 ? `Från ${formatKr(provider.fromPrice)}` : "Pris på förfrågan"}</p>
+              <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
+                Berätta vad du behöver, så svarar leverantören i chatten och skickar en offert med slutpris.
+              </p>
+              <button
+                onClick={() => setRequestOpen(true)}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold"
+                style={{ backgroundColor: colors.coral, color: colors.white }}
+              >
+                <ClipboardList size={16} /> Skicka förfrågan
+              </button>
+              <button
+                onClick={() => onOpenChat(provider)}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-full py-2.5 text-sm font-medium"
+                style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}
+              >
+                <MessageCircle size={15} /> Fråga leverantören
+              </button>
+            </div>
           ) : (
           <div className="rounded-3xl p-5 sm:sticky sm:top-6" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}` }}>
             <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>
@@ -2048,6 +2168,15 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                 <Plus size={16} /> Lägg till i min fest
               </button>
             )}
+            {provider.request && provider.vendorDbId && (
+              <button
+                onClick={() => setRequestOpen(true)}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-full py-2.5 text-sm font-semibold"
+                style={{ border: `1.5px solid ${colors.coral}`, color: colors.coral, backgroundColor: colors.white }}
+              >
+                <ClipboardList size={15} /> Skicka förfrågan
+              </button>
+            )}
             <button
               onClick={() => onOpenChat(provider)}
               className="mt-2 flex w-full items-center justify-center gap-2 rounded-full py-2.5 text-sm font-medium"
@@ -2056,6 +2185,9 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
               <MessageCircle size={15} /> Fråga leverantören
             </button>
           </div>
+          )}
+          {requestOpen && (
+            <RequestFormModal provider={provider} party={party} onUpdateParty={onUpdateParty} onSend={(brief) => onSendRequest(provider, brief)} onClose={() => setRequestOpen(false)} />
           )}
         </div>
       </div>
@@ -3697,7 +3829,7 @@ function getVendorCompleteness(vendor) {
     { key: "tagline", label: "Tagline", done: !!profile.tagline?.trim() },
     { key: "description", label: "Beskrivning", done: !!profile.description?.trim() },
     { key: "images", label: "Minst en bild", done: (profile.images || []).length > 0 },
-    { key: "services", label: "Minst en tjänst/pris", done: (profile.services || []).length > 0 || Object.keys(sanitizeCakeConfig(vendor?.cakeConfig).sizes).length > 0 },
+    { key: "services", label: "Minst en tjänst/pris eller ett förfrågningsformulär", done: (profile.services || []).length > 0 || Object.values(sanitizeRequestForms(vendor?.requestForms)).some((c) => c.fields.length > 0) },
     { key: "categories", label: "Minst en kategori", done: (vendor?.categories || []).length > 0 },
     { key: "geo", label: "Geografi", done: !!vendor?.baseLocation && !!vendor?.serviceArea },
   ];
@@ -4028,7 +4160,7 @@ function VendorProfileEditorView({
   onPreview,
   onDashboard,
   onShowToast,
-  onCakeConfig,
+  onRequestForm,
 }) {
   const [imageUrl, setImageUrl] = useState("");
   if (!vendor) return null;
@@ -4209,7 +4341,15 @@ function VendorProfileEditorView({
         </button>
       </section>
 
-      {vendor.categories.includes("tarta") && <CakeConfigEditor config={vendor.cakeConfig} onChange={onCakeConfig} />}
+      {vendor.categories.map((cat) => (
+        <RequestFormEditor
+          key={cat}
+          categoryId={cat}
+          form={vendor.requestForms?.[cat]}
+          hasPrice={vendor.profile.services.some((sv) => (!sv.category || sv.category === cat) && Number(sv.price) > 0)}
+          onChange={(cfg) => onRequestForm(cat, cfg)}
+        />
+      ))}
 
       <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
         <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
@@ -4491,7 +4631,7 @@ function VendorProfilePreviewView({ vendor, onBack }) {
 // chat) since a vendor spends more focused time here. Reuses the same quote
 // bubble treatment as the customer's ChatModal.
 // ---------------------------------------------------------------------------
-function VendorInboxView({ conversations, activeConversationId, messages, onOpenConversation, onSendMessage, onSendQuote, onBack, inboxById = {}, cakePrices = {} }) {
+function VendorInboxView({ conversations, activeConversationId, messages, onOpenConversation, onSendMessage, onSendQuote, onBack, inboxById = {}, quoteFromBrief }) {
   const [text, setText] = useState("");
   const [quoteMode, setQuoteMode] = useState(false);
   const [quoteAmount, setQuoteAmount] = useState("");
@@ -4504,12 +4644,12 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
 
   const active = conversations.find((c) => c.id === activeConversationId) || null;
   const lastBrief = [...(messages || [])].reverse().find((m) => m.message_type === "brief")?.brief || null;
-  const guidePrice = lastBrief ? cakePrices[lastBrief.portions] : undefined;
-  // With a cake request in the conversation, the quote starts from the vendor's own price for that size.
+  const prefill = lastBrief && active && quoteFromBrief ? quoteFromBrief(lastBrief, active.category_id) : null;
+  // With a request in the conversation, the quote starts from the vendor's own prices for what the customer picked.
   const openQuote = () => {
-    if (lastBrief && !quoteAmount && !quoteDescription) {
-      if (guidePrice) setQuoteAmount(String(guidePrice));
-      setQuoteDescription(cakeQuoteDescription(lastBrief));
+    if (prefill && !quoteAmount && !quoteDescription) {
+      if (prefill.amount > 0) setQuoteAmount(String(prefill.amount));
+      setQuoteDescription(prefill.description);
     }
     setQuoteMode(true);
   };
@@ -4598,9 +4738,9 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
             <p className="mb-2 text-sm font-semibold" style={{ color: colors.plum }}>
               Skicka offert
             </p>
-            {guidePrice && (
+            {prefill?.amount > 0 && (
               <p className="mb-2 text-xs" style={{ color: colors.lilacDeep }}>
-                Ditt riktpris för {lastBrief.portions} bitar är {formatKr(guidePrice)}. Justera för våningar och design.
+                Utifrån kundens val och era priser blir riktpriset {formatKr(prefill.amount)}. Justera för design och extra önskemål.
               </p>
             )}
             <div className="grid grid-cols-2 gap-2">
@@ -4678,7 +4818,7 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
           const Icon = catMap[c.category_id]?.icon;
           const meta = inboxById[c.id];
           const unread = meta?.unread || 0;
-          const preview = meta ? (meta.last_type === "quote" ? "Offert" : meta.last_type === "brief" ? "Tårtförfrågan" : meta.last_text) : "";
+          const preview = meta ? (meta.last_type === "quote" ? "Offert" : meta.last_type === "brief" ? "Förfrågan" : meta.last_text) : "";
           return (
             <button
               key={c.id}
@@ -4711,7 +4851,7 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
   );
 }
 
-function CakeChip({ active, onClick, children }) {
+function ChoiceChip({ active, onClick, children }) {
   return (
     <button
       type="button"
@@ -4728,25 +4868,30 @@ function CakeChip({ active, onClick, children }) {
   );
 }
 
-// The structured request as a card inside the chat.
+// A customer's request as a card inside the chat: the date and details, then the vendor's own questions with the answers.
 function BriefCard({ brief }) {
-  const rows = CAKE_BRIEF_ROWS.map(([key, label, fmt]) => {
-    const v = brief?.[key];
-    if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0)) return null;
-    return [label, fmt ? fmt(v) : String(v)];
-  }).filter(Boolean);
+  const rows = (brief?.rows || []).filter((r) => r && r.value !== "" && !(Array.isArray(r.value) && r.value.length === 0));
+  const party = brief?.party;
+  const partyText = party
+    ? [party.date, party.start && party.end ? `${String(party.start).slice(0, 5)}–${String(party.end).slice(0, 5)}` : "", party.guests ? `${party.guests} gäster` : ""].filter(Boolean).join(" · ")
+    : "";
   return (
     <div className="max-w-[90%] rounded-2xl p-4 text-sm" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
       <p className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: colors.lilacDeep }}>
-        <Cake size={13} /> Tårtförfrågan
+        <ClipboardList size={13} /> Förfrågan
       </p>
+      {partyText && (
+        <p className="mt-1.5 text-xs" style={{ color: colors.plumSoft }}>
+          {partyText}
+        </p>
+      )}
       <dl className="mt-2 space-y-1.5">
-        {rows.map(([k, v]) => (
-          <div key={k} className="flex gap-3">
+        {rows.map((r, i) => (
+          <div key={`${r.label}-${i}`} className="flex gap-3">
             <dt className="w-28 flex-shrink-0 text-xs" style={{ color: colors.plumSoft }}>
-              {k}
+              {r.label}
             </dt>
-            <dd style={{ color: colors.plum }}>{v}</dd>
+            <dd style={{ color: colors.plum }}>{[].concat(r.value).join(", ")}</dd>
           </div>
         ))}
       </dl>
@@ -4754,274 +4899,325 @@ function BriefCard({ brief }) {
   );
 }
 
-// Customer side: pick size and flavour, add the design wishes, send as a request.
-function CakeOrderPanel({ provider, party, onSelectDate, onSend }) {
-  const sizes = Object.keys(provider.cake.sizes).map(Number).sort((a, b) => a - b);
-  const flavors = provider.cake.flavors || [];
-  const [portions, setPortions] = useState(0);
-  const [flavor, setFlavor] = useState("");
-  const [shape, setShape] = useState("");
-  const [tiers, setTiers] = useState(0);
-  const [theme, setTheme] = useState("");
-  const [colorWishes, setColorWishes] = useState("");
-  const [textOnCake, setTextOnCake] = useState("");
-  const [dietary, setDietary] = useState([]);
-  const [allergies, setAllergies] = useState("");
-  const [delivery, setDelivery] = useState("");
-  const [notes, setNotes] = useState("");
+// Customer side: the vendor's own questions in a pop-up. Sent as one request, then the talk continues in the chat.
+function RequestFormModal({ provider, party, onUpdateParty, onSend, onClose }) {
+  const fields = provider.request.fields;
+  const [answers, setAnswers] = useState({});
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-
-  const closed = !!party.date && provider.closedDates?.includes(party.date);
-  const canSend = portions > 0 && (flavors.length === 0 || !!flavor) && !!party.date && !closed && !sending;
   const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
-  const toggleDietary = (d) => setDietary((list) => (list.includes(d) ? list.filter((x) => x !== d) : [...list, d]));
+  const closed = !!party.date && provider.closedDates?.includes(party.date);
+  const setAnswer = (id, v) => setAnswers((a) => ({ ...a, [id]: v }));
+  const toggleMulti = (id, label) => setAnswers((a) => ({ ...a, [id]: (a[id] || []).includes(label) ? a[id].filter((x) => x !== label) : [...(a[id] || []), label] }));
+  const isEmpty = (v) => v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0);
+  const missing = fields.some((f) => f.required && isEmpty(answers[f.id]));
+  const canSend = !!party.date && !closed && !missing && !sending;
+
+  const base = provider.pricing.amount > 0 ? getBaseAmount(provider, party) : 0;
+  const estimate = base + priceFromAnswers(fields, (f) => answers[f.id]);
 
   const submit = async () => {
     setError("");
-    if (containsContactInfo([theme, colorWishes, textOnCake, allergies, notes].join(" "))) {
+    const freeText = fields.filter((f) => f.type === "short" || f.type === "long").map((f) => answers[f.id] || "").join(" ");
+    if (containsContactInfo(freeText)) {
       setError("Telefonnummer, e-post och länkar får inte skickas här. Håll kontakten på Planifest så gäller ert skydd.");
       return;
     }
-    const brief = { portions, date: party.date };
-    if (flavor) brief.flavor = flavor;
-    if (shape) brief.shape = shape;
-    if (tiers) brief.tiers = tiers;
-    if (theme.trim()) brief.theme = theme.trim();
-    if (colorWishes.trim()) brief.colors = colorWishes.trim();
-    if (textOnCake.trim()) brief.text_on_cake = textOnCake.trim();
-    if (dietary.length) brief.dietary = dietary;
-    if (allergies.trim()) brief.allergies = allergies.trim();
-    if (delivery) brief.delivery = delivery;
-    if (notes.trim()) brief.notes = notes.trim();
+    const rows = fields
+      .filter((f) => !isEmpty(answers[f.id]))
+      .map((f) => ({ label: f.label, value: Array.isArray(answers[f.id]) ? answers[f.id] : String(answers[f.id]).trim() }))
+      .filter((r) => r.value !== "");
+    const brief = {
+      rows: rows.length ? rows : [{ label: "Förfrågan", value: "Inga särskilda önskemål" }],
+      party: { date: party.date, start: party.startTime, end: party.endTime, guests: Number(party.guests) || 1, occasion: party.occasion || "" },
+    };
+    if (estimate > 0) brief.estimate = Math.round(estimate);
     setSending(true);
-    await onSend(brief);
+    const ok = await onSend(brief);
     setSending(false);
+    if (ok) onClose();
   };
 
   return (
-    <div className="rounded-3xl p-5 sm:sticky sm:top-6" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}` }}>
-      <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>Beställ tårta</p>
-      <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>
-        Välj storlek och smak, berätta om dina önskemål, så tar ni designen i chatten. Slutpriset bestäms av leverantören.
-      </p>
-
-      <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
-        Storlek
-      </p>
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {sizes.map((n) => (
-          <CakeChip key={n} active={portions === n} onClick={() => setPortions(n)}>
-            {n} bitar · {formatKr(provider.cake.sizes[n])}
-          </CakeChip>
-        ))}
-      </div>
-      {portions > 0 && (
-        <p className="mt-1.5 text-xs" style={{ color: colors.plumSoft }}>
-          Riktpris för {portions} bitar: {formatKr(provider.cake.sizes[portions])}. Slutpris efter att ni pratat design.
-        </p>
-      )}
-
-      {flavors.length > 0 && (
-        <>
-          <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
-            Smak
-          </p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {flavors.map((f) => (
-              <CakeChip key={f} active={flavor === f} onClick={() => setFlavor(f)}>
-                {f}
-              </CakeChip>
-            ))}
-          </div>
-        </>
-      )}
-
-      <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
-        Form
-      </p>
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {CAKE_SHAPES.map((x) => (
-          <CakeChip key={x} active={shape === x} onClick={() => setShape(shape === x ? "" : x)}>
-            {x}
-          </CakeChip>
-        ))}
-      </div>
-
-      <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
-        Våningar
-      </p>
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {CAKE_TIERS.map((x) => (
-          <CakeChip key={x} active={tiers === x} onClick={() => setTiers(tiers === x ? 0 : x)}>
-            {x === 3 ? "3 eller fler" : x}
-          </CakeChip>
-        ))}
-      </div>
-
-      <label className="mt-4 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
-        Tema / design
-        <textarea
-          value={theme}
-          onChange={(e) => setTheme(e.target.value)}
-          rows={3}
-          maxLength={600}
-          placeholder="Till exempel: enhörning med regnbågsman, blommor, bröllopstårta i vitt..."
-          className="rounded-xl px-3 py-2 text-sm font-normal"
-          style={fieldStyle}
-        />
-      </label>
-      <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
-        Färger
-        <input value={colorWishes} onChange={(e) => setColorWishes(e.target.value)} maxLength={200} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
-      </label>
-      <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
-        Text på tårtan
-        <input value={textOnCake} onChange={(e) => setTextOnCake(e.target.value)} maxLength={100} placeholder="Till exempel: Grattis Elsa 5 år!" className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
-      </label>
-
-      <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
-        Kostönskemål och allergier
-      </p>
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {CAKE_DIETARY.map((d) => (
-          <CakeChip key={d} active={dietary.includes(d)} onClick={() => toggleDietary(d)}>
-            {d}
-          </CakeChip>
-        ))}
-      </div>
-      <input
-        value={allergies}
-        onChange={(e) => setAllergies(e.target.value)}
-        maxLength={300}
-        placeholder="Andra allergier, till exempel mandel eller ägg"
-        className="mt-2 w-full rounded-xl px-3 py-2 text-sm"
-        style={fieldStyle}
-      />
-
-      <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
-        Hämtning eller leverans
-      </p>
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {CAKE_DELIVERY.map((d) => (
-          <CakeChip key={d} active={delivery === d} onClick={() => setDelivery(delivery === d ? "" : d)}>
-            {d}
-          </CakeChip>
-        ))}
-      </div>
-
-      <label className="mt-4 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
-        Datum
-        <input type="date" value={party.date || ""} onChange={(e) => onSelectDate(e.target.value)} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
-      </label>
-      {closed && (
-        <p className="mt-1 text-xs" style={{ color: colors.coralDeep }}>
-          Leverantören har stängt det här datumet. Välj ett annat.
-        </p>
-      )}
-
-      <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
-        Något mer vi bör veta?
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} maxLength={600} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
-      </label>
-
-      {error && (
-        <p className="mt-2 text-xs leading-relaxed" style={{ color: colors.coralDeep }}>
-          {error}
-        </p>
-      )}
-      <button
-        onClick={submit}
-        disabled={!canSend}
-        className="mt-4 flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold"
-        style={{ backgroundColor: colors.coral, color: colors.white, opacity: canSend ? 1 : 0.5 }}
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" style={{ backgroundColor: "rgba(60,47,69,0.45)" }} onClick={onClose}>
+      <div
+        className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl"
+        style={{ backgroundColor: colors.cream }}
+        onClick={(e) => e.stopPropagation()}
       >
-        <Cake size={16} /> {sending ? "Skickar..." : "Skicka tårtförfrågan"}
-      </button>
-      <p className="mt-2 text-center text-xs" style={{ color: colors.plumSoft }}>
-        Du får ett svar i chatten och en offert med slutpris.
-      </p>
+        <div className="flex items-start justify-between gap-3 px-6 pb-3 pt-5" style={{ borderBottom: `1.5px solid ${colors.lilacSoft}` }}>
+          <div>
+            <p style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>Skicka förfrågan till {provider.name}</p>
+            <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>
+              Berätta vad du behöver. Ni pratar vidare i chatten, och leverantören skickar en offert med slutpris.
+            </p>
+          </div>
+          <button onClick={onClose} className="-mr-2 p-2" aria-label="Stäng">
+            <X size={18} color={colors.plumSoft} />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto px-6 py-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <label className="col-span-2 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+              Datum *
+              <input type="date" value={party.date || ""} onChange={(e) => onUpdateParty({ date: e.target.value })} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+              Start
+              <input type="time" value={party.startTime} onChange={(e) => onUpdateParty({ startTime: e.target.value })} className="rounded-xl px-2 py-2 text-sm font-normal" style={fieldStyle} />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+              Slut
+              <input type="time" value={party.endTime} onChange={(e) => onUpdateParty({ endTime: e.target.value })} className="rounded-xl px-2 py-2 text-sm font-normal" style={fieldStyle} />
+            </label>
+          </div>
+          <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+            Antal gäster
+            <input
+              type="number"
+              min={1}
+              value={party.guests}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === "") onUpdateParty({ guests: "" });
+                else if (!Number.isNaN(Number(raw))) onUpdateParty({ guests: Number(raw) });
+              }}
+              onBlur={() => onUpdateParty({ guests: party.guests === "" || party.guests < 1 ? 1 : party.guests })}
+              className="w-32 rounded-xl px-3 py-2 text-sm font-normal"
+              style={fieldStyle}
+            />
+          </label>
+          {closed && (
+            <p className="mt-1 text-xs" style={{ color: colors.coralDeep }}>
+              Leverantören har stängt det här datumet. Välj ett annat.
+            </p>
+          )}
+
+          {fields.map((f) => (
+            <div key={f.id} className="mt-4">
+              <p className="text-xs font-semibold" style={{ color: colors.plum }}>
+                {f.label}
+                {f.required ? " *" : ""}
+              </p>
+              {(f.type === "single" || f.type === "multi") && (
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {f.options.map((o) => {
+                    const active = f.type === "single" ? answers[f.id] === o.label : (answers[f.id] || []).includes(o.label);
+                    return (
+                      <ChoiceChip key={o.label} active={active} onClick={() => (f.type === "single" ? setAnswer(f.id, active ? "" : o.label) : toggleMulti(f.id, o.label))}>
+                        {o.label}
+                        {o.price ? ` · ${f.type === "multi" ? "+" : ""}${formatKr(o.price)}` : ""}
+                      </ChoiceChip>
+                    );
+                  })}
+                </div>
+              )}
+              {f.type === "short" && (
+                <input value={answers[f.id] || ""} onChange={(e) => setAnswer(f.id, e.target.value)} maxLength={200} aria-label={f.label} className="mt-1.5 w-full rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
+              )}
+              {f.type === "long" && (
+                <textarea value={answers[f.id] || ""} onChange={(e) => setAnswer(f.id, e.target.value)} rows={3} maxLength={1000} aria-label={f.label} className="mt-1.5 w-full rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
+              )}
+              {f.type === "number" && (
+                <input type="number" min={0} value={answers[f.id] ?? ""} onChange={(e) => setAnswer(f.id, e.target.value)} aria-label={f.label} className="mt-1.5 w-32 rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
+              )}
+            </div>
+          ))}
+
+          {estimate > 0 && (
+            <div className="mt-5 flex items-center justify-between rounded-xl px-4 py-3" style={{ backgroundColor: colors.lilacSoft }}>
+              <span className="text-sm font-semibold" style={{ color: colors.plum }}>
+                Riktpris
+              </span>
+              <span style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>{formatKr(estimate)}</span>
+            </div>
+          )}
+          {estimate > 0 && (
+            <p className="mt-1 text-xs" style={{ color: colors.plumSoft }}>
+              Slutpriset bestäms av leverantören när ni pratat klart.
+            </p>
+          )}
+          {error && (
+            <p className="mt-3 text-xs leading-relaxed" style={{ color: colors.coralDeep }}>
+              {error}
+            </p>
+          )}
+        </div>
+
+        <div className="px-6 pb-5 pt-2">
+          <button
+            onClick={submit}
+            disabled={!canSend}
+            className="flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold"
+            style={{ backgroundColor: colors.coral, color: colors.white, opacity: canSend ? 1 : 0.5 }}
+          >
+            <ClipboardList size={16} /> {sending ? "Skickar..." : "Skicka förfrågan"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
-// Vendor side (profile editor): a price per size, and the flavours on offer.
-function CakeConfigEditor({ config, onChange }) {
-  const cfg = { sizes: config?.sizes || {}, flavors: config?.flavors || [] };
-  const [flavorInput, setFlavorInput] = useState("");
+// Vendor side (profile editor): this category's questions and add-ons, with prices on the choices.
+function RequestFormEditor({ categoryId, form, hasPrice, onChange }) {
+  const [newType, setNewType] = useState("short");
   const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
-  const setPrice = (n, raw) => {
-    const sizes = { ...cfg.sizes };
-    if (raw === "") delete sizes[n];
-    else sizes[n] = raw;
-    onChange({ ...cfg, sizes });
+  const fields = form?.fields || [];
+  const direct = hasPrice ? form?.direct !== false : false;
+  const emit = (next) => onChange({ ...(form || {}), ...next });
+  const setField = (i, patch) => emit({ fields: fields.map((f, j) => (j === i ? { ...f, ...patch } : f)) });
+  const move = (i, d) => {
+    const j = i + d;
+    if (j < 0 || j >= fields.length) return;
+    const next = [...fields];
+    [next[i], next[j]] = [next[j], next[i]];
+    emit({ fields: next });
   };
-  const addFlavor = () => {
-    const t = flavorInput.trim().slice(0, 60);
-    if (!t || cfg.flavors.some((f) => f.toLowerCase() === t.toLowerCase()) || cfg.flavors.length >= 30) return;
-    onChange({ ...cfg, flavors: [...cfg.flavors, t] });
-    setFlavorInput("");
+  const addField = () => {
+    if (fields.length >= 25) return;
+    const base = { id: newFieldId(), label: "", type: newType };
+    emit({ fields: [...fields, newType === "single" || newType === "multi" ? { ...base, options: [{ label: "" }] } : base] });
   };
+  const useTemplate = () =>
+    emit({
+      fields: (REQUEST_TEMPLATES[categoryId] || DEFAULT_REQUEST_FIELDS).map((f) => ({ ...f, options: f.options ? f.options.map((o) => ({ ...o })) : undefined })),
+      ...(categoryId === "tarta" ? { direct: false } : {}),
+    });
+  const setOption = (i, k, patch) => setField(i, { options: fields[i].options.map((o, j) => (j === k ? { ...o, ...patch } : o)) });
+
   return (
     <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
       <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
-        Tårtor: storlekar, priser och smaker
+        Förfrågningsformulär: {catMap[categoryId]?.label}
       </h2>
       <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
-        Ange ett pris för varje storlek ni gör, och lämna tomt för de ni inte gör. Priset visas för kunden som riktpris. Slutpriset bestämmer ni när ni pratat design.
+        Det här är frågorna kunder svarar på när de skickar en förfrågan till er. Lägg gärna till tillägg med pris, så får kunden ett riktpris och er offert fylls i automatiskt.
       </p>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        {CAKE_SIZES.map((n) => (
-          <label key={n} className="flex flex-col gap-1 text-xs font-medium" style={{ color: colors.plum }}>
-            {n} bitar
-            <input
-              type="number"
-              min={0}
-              value={cfg.sizes[n] ?? ""}
-              onChange={(e) => setPrice(n, e.target.value)}
-              placeholder="kr"
-              className="rounded-xl px-3 py-2 text-sm font-normal"
-              style={fieldStyle}
-            />
+
+      <div className="mb-4 rounded-2xl p-4 text-sm" style={{ backgroundColor: colors.cream, color: colors.plum }}>
+        {hasPrice ? (
+          <label className="flex items-start gap-3">
+            <input type="checkbox" checked={direct} onChange={(e) => emit({ direct: e.target.checked })} className="mt-1" />
+            <span>
+              Kunder får också <strong>boka direkt</strong> till era fasta priser, utan att skicka förfrågan först. Avmarkera om varje uppdrag kräver att ni pratar först.
+            </span>
           </label>
+        ) : (
+          <span>Ni har inga fasta priser inlagda för den här kategorin, så kunder skickar alltid en förfrågan först.</span>
+        )}
+      </div>
+
+      {fields.length === 0 && (
+        <div className="mb-4 rounded-2xl p-4 text-sm" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+          <p>
+            Just nu ser kunder bara en fråga: <strong>"Berätta vad du behöver"</strong>. Starta från en mall för att få frågor som passar er bransch.
+          </p>
+          <button onClick={useTemplate} className="mt-3 rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+            Starta från mall
+          </button>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {fields.map((f, i) => (
+          <div key={f.id} className="rounded-2xl p-4" style={{ border: `1.5px solid ${colors.beige}` }}>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={f.label}
+                onChange={(e) => setField(i, { label: e.target.value })}
+                placeholder="Fråga, till exempel: Storlek"
+                maxLength={80}
+                aria-label="Fråga"
+                className="min-w-[140px] flex-1 rounded-xl px-3 py-2 text-sm"
+                style={fieldStyle}
+              />
+              <select
+                value={f.type}
+                onChange={(e) => {
+                  const t = e.target.value;
+                  const choice = t === "single" || t === "multi";
+                  setField(i, { type: t, options: choice ? (f.options?.length ? f.options : [{ label: "" }]) : undefined });
+                }}
+                aria-label="Typ"
+                className="rounded-xl px-2 py-2 text-sm"
+                style={fieldStyle}
+              >
+                {FIELD_TYPES.map(([t, l]) => (
+                  <option key={t} value={t}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs" style={{ color: colors.plumSoft }}>
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={!!f.required} onChange={(e) => setField(i, { required: e.target.checked })} /> Obligatorisk
+              </label>
+              <button onClick={() => move(i, -1)} disabled={i === 0} aria-label="Flytta upp" className="underline disabled:opacity-30">
+                Upp
+              </button>
+              <button onClick={() => move(i, 1)} disabled={i === fields.length - 1} aria-label="Flytta ner" className="underline disabled:opacity-30">
+                Ner
+              </button>
+              <button onClick={() => emit({ fields: fields.filter((_, j) => j !== i) })} aria-label="Ta bort fråga" className="font-medium underline" style={{ color: colors.coralDeep }}>
+                Ta bort
+              </button>
+            </div>
+            {(f.type === "single" || f.type === "multi") && (
+              <div className="mt-3 space-y-2">
+                {(f.options || []).map((o, k) => (
+                  <div key={k} className="flex items-center gap-2">
+                    <input
+                      value={o.label}
+                      onChange={(e) => setOption(i, k, { label: e.target.value })}
+                      placeholder="Val"
+                      maxLength={60}
+                      aria-label="Val"
+                      className="min-w-0 flex-1 rounded-xl px-3 py-1.5 text-sm"
+                      style={fieldStyle}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={o.price ?? ""}
+                      onChange={(e) => setOption(i, k, { price: e.target.value === "" ? undefined : e.target.value })}
+                      placeholder="+ kr"
+                      aria-label="Pris i kronor"
+                      className="w-24 rounded-xl px-3 py-1.5 text-sm"
+                      style={fieldStyle}
+                    />
+                    <button onClick={() => setField(i, { options: f.options.filter((_, j) => j !== k) })} aria-label="Ta bort val" className="p-1">
+                      <X size={14} color={colors.plumSoft} />
+                    </button>
+                  </div>
+                ))}
+                <button onClick={() => setField(i, { options: [...(f.options || []), { label: "" }] })} className="text-xs font-medium underline" style={{ color: colors.lilacDeep }}>
+                  + Lägg till val
+                </button>
+              </div>
+            )}
+          </div>
         ))}
       </div>
 
-      <p className="mb-2 mt-5 text-sm font-semibold" style={{ color: colors.plum }}>
-        Smaker ni erbjuder
-      </p>
-      <div className="mb-2 flex flex-wrap gap-2">
-        {cfg.flavors.length === 0 && (
-          <span className="text-xs" style={{ color: colors.plumSoft }}>
-            Inga smaker tillagda än.
-          </span>
-        )}
-        {cfg.flavors.map((f) => (
-          <span key={f} className="flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium" style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}>
-            {f}
-            <button type="button" onClick={() => onChange({ ...cfg, flavors: cfg.flavors.filter((x) => x !== f) })} aria-label={`Ta bort ${f}`}>
-              <X size={12} />
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <input
-          value={flavorInput}
-          onChange={(e) => setFlavorInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && addFlavor()}
-          placeholder="Till exempel: Chokladmousse"
-          className="flex-1 rounded-xl px-3 py-2 text-sm"
-          style={fieldStyle}
-        />
-        <button
-          type="button"
-          onClick={addFlavor}
-          className="rounded-full px-4 py-2 text-sm font-semibold"
-          style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}
-        >
-          Lägg till smak
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <select value={newType} onChange={(e) => setNewType(e.target.value)} aria-label="Typ av ny fråga" className="rounded-xl px-2 py-2 text-sm" style={fieldStyle}>
+          {FIELD_TYPES.map(([t, l]) => (
+            <option key={t} value={t}>
+              {l}
+            </option>
+          ))}
+        </select>
+        <button onClick={addField} className="rounded-full px-4 py-2 text-sm font-semibold" style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}>
+          Lägg till fråga
         </button>
+        {fields.length > 0 && (
+          <button onClick={useTemplate} className="text-xs font-medium underline" style={{ color: colors.plumSoft }}>
+            Börja om från mall
+          </button>
+        )}
       </div>
     </section>
   );
@@ -5095,7 +5291,7 @@ function MessagesPanel({ open, conversations, soundOn, onToggleSound, onOpen, on
         )}
         {conversations.map((c) => {
           const Icon = catMap[c.category_id]?.icon;
-          const preview = c.last_type === "quote" ? "Offert" : c.last_type === "brief" ? "Tårtförfrågan" : c.last_text || "Inga meddelanden än";
+          const preview = c.last_type === "quote" ? "Offert" : c.last_type === "brief" ? "Förfrågan" : c.last_text || "Inga meddelanden än";
           return (
             <button
               key={c.conversation_id}
@@ -6456,7 +6652,9 @@ export default function App() {
   };
 
   const signIn = async (email, password) => {
-    clearLocalUserState();
+    // A visitor who is simply logging in keeps their cart and search choices (checkout asks them to log in
+    // at the last step). Local data is only wiped when an account that was already signed in is replaced.
+    if (session?.user) clearLocalUserState();
     const { data, error } = await supabaseAuthRequest("/token?grant_type=password", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -6469,7 +6667,7 @@ export default function App() {
   };
 
   const signUpCustomer = async (email, password, fullName) => {
-    clearLocalUserState();
+    if (session?.user) clearLocalUserState();
     const { data, error } = await supabaseAuthRequest("/signup", {
       method: "POST",
       body: JSON.stringify({ email, password, data: { full_name: fullName } }),
@@ -6831,18 +7029,17 @@ export default function App() {
 
   const closeChat = () => setChatTarget(null);
 
-  // A cake is never added straight to the cart: the customer sends a structured request, the
-  // vendor answers in the chat and sends a quote with the final price, and accepting that
-  // quote is what puts the cake in Min fest.
-  const sendCakeBrief = async (provider, brief) => {
+  // A request: the customer answers the vendor's own questions, the vendor replies in the chat and
+  // sends a quote with the final price, and accepting that quote is what puts it in Min fest.
+  const sendRequest = async (provider, brief) => {
     if (!provider.vendorDbId) {
       showToast("Den här leverantören går inte att kontakta än.");
-      return;
+      return false;
     }
     if (!session?.access_token) {
       openAuthModal("signin");
-      showToast("Logga in för att skicka tårtförfrågan");
-      return;
+      showToast("Logga in för att skicka en förfrågan");
+      return false;
     }
     const { data: convo, error } = await findOrCreateConversation({
       vendorId: provider.vendorDbId,
@@ -6852,21 +7049,26 @@ export default function App() {
     });
     if (error || !convo) {
       showToast("Kunde inte skicka förfrågan just nu");
-      return;
+      return false;
     }
+    const summary = `${catMap[provider.category]?.label || "Förfrågan"}: ${brief.rows
+      .slice(0, 2)
+      .map((r) => [].concat(r.value).join(", "))
+      .join(", ")}`.slice(0, 140);
     const { data: rows, error: msgError } = await supabaseRestRequest("/messages", session.access_token, {
       method: "POST",
       headers: { Prefer: "return=representation" },
-      body: JSON.stringify({ conversation_id: convo.id, sender: "customer", text: cakeBriefSummary(brief), message_type: "brief", brief }),
+      body: JSON.stringify({ conversation_id: convo.id, sender: "customer", text: summary, message_type: "brief", brief }),
     });
     if (msgError || !rows?.[0]) {
       showToast("Kunde inte skicka förfrågan" + (msgError?.message ? `: ${msgError.message}` : ""));
-      return;
+      return false;
     }
     const { data: msgs } = await supabaseRestRequest(`/messages?conversation_id=eq.${convo.id}&select=*&order=created_at.asc`, session.access_token);
     setRealMessages((m) => ({ ...m, [convo.id]: msgs || [rows[0]] }));
     setChatTarget({ kind: "provider", provider, real: true, conversationId: convo.id });
-    showToast("Tårtförfrågan skickad ✓");
+    showToast("Förfrågan skickad ✓");
+    return true;
   };
 
   const sendChatMessage = async (text) => {
@@ -7037,6 +7239,21 @@ export default function App() {
   };
 
   const goVendorInbox = () => setView("vendorInbox");
+
+  // Suggested quote for the vendor, worked out from THEIR OWN prices and what the customer picked
+  // (never from the customer's own total, which could say anything).
+  const quoteFromBrief = (brief, categoryId) => {
+    if (!submittedVendor) return null;
+    const provider = mapVendorToProviders(submittedVendor, bookings).find((p) => p.category === categoryId);
+    if (!provider) return null;
+    const rows = brief.rows || [];
+    const partyLike = { guests: Number(brief.party?.guests) || 1, startTime: brief.party?.start, endTime: brief.party?.end };
+    let base = provider.pricing.amount > 0 ? getBaseAmount(provider, partyLike) : 0;
+    if (!Number.isFinite(base)) base = 0;
+    const extra = priceFromAnswers(provider.request.fields, (f) => rows.find((r) => r.label === f.label)?.value);
+    const parts = rows.slice(0, 6).map((r) => `${r.label}: ${[].concat(r.value).join(", ")}`);
+    return { amount: Math.round(base + extra), description: `${catMap[categoryId]?.label || "Förfrågan"}. ${parts.join("; ")}`.slice(0, 300) };
+  };
 
   // --- Support — saved to the database; a trigger there emails info@planifest.se ---
   const submitSupportMessage = async ({ email, subject, message }) => {
@@ -7245,7 +7462,7 @@ export default function App() {
       categories: v.categories.includes(id) ? v.categories.filter((c) => c !== id) : [...v.categories, id],
     }));
 
-  const updateVendorCakeConfig = (cfg) => patchVendor((v) => ({ ...v, cakeConfig: cfg }));
+  const updateVendorRequestForm = (cat, cfg) => patchVendor((v) => ({ ...v, requestForms: { ...(v.requestForms || {}), [cat]: cfg } }));
   const updateVendorProfileField = (field, value) => patchVendor((v) => ({ ...v, profile: { ...v.profile, [field]: value } }));
 
   const addVendorImage = (url) => patchVendor((v) => ({ ...v, profile: { ...v.profile, images: [...v.profile.images, url] } }));
@@ -7648,7 +7865,7 @@ export default function App() {
           onOpenChat={openProviderChat}
           onSelectDate={(date) => setParty((p) => ({ ...p, date }))}
           onUpdateParty={(patch) => setParty((p) => ({ ...p, ...patch }))}
-          onSendCakeBrief={sendCakeBrief}
+          onSendRequest={sendRequest}
         />
       )}
 
@@ -7722,14 +7939,14 @@ export default function App() {
           onSendQuote={sendVendorQuote}
           onBack={closeVendorConversation}
           inboxById={Object.fromEntries(inbox.map((c) => [c.conversation_id, c]))}
-          cakePrices={sanitizeCakeConfig(submittedVendor?.cakeConfig).sizes}
+          quoteFromBrief={quoteFromBrief}
         />
       )}
 
       {view === "vendorProfileEditor" && (
         <VendorProfileEditorView
           vendor={submittedVendor}
-          onCakeConfig={updateVendorCakeConfig}
+          onRequestForm={updateVendorRequestForm}
           onField={updateVendorTopField}
           onBaseLocation={updateVendorBaseLocation}
           onServiceArea={updateVendorServiceArea}
