@@ -49,6 +49,7 @@ const SUPABASE_KEY =
 // artifact preview sandbox), localStorage works fine and is the right place
 // for this: per-browser, never shared between visitors.
 const SESSION_STORAGE_KEY = "planifest-session";
+const CHAT_POLL_MS = 5000; // how often an open conversation checks for new messages
 
 function loadStoredSession() {
   try {
@@ -2545,7 +2546,7 @@ function containsContactInfo(text) {
   return CONTACT_INFO_PATTERNS.some((re) => re.test(text));
 }
 
-function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQuote, onDeclineQuote }) {
+function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQuote, onDeclineQuote, onOpenCart }) {
   const [text, setText] = useState("");
   const [blocked, setBlocked] = useState(false);
   const scrollRef = useRef(null);
@@ -2637,16 +2638,23 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
                       </button>
                     </div>
                   ) : (
-                    <span
-                      className="mt-3 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
-                      style={{
-                        backgroundColor: m.quote_status === "accepted" ? "#E3F3E9" : colors.beige,
-                        color: m.quote_status === "accepted" ? colors.green : colors.plumSoft,
-                      }}
-                    >
-                      {m.quote_status === "accepted" ? <Check size={12} /> : <X size={12} />}
-                      {m.quote_status === "accepted" ? "Accepterad — tillagd i Min fest" : "Tackade nej"}
-                    </span>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
+                        style={{
+                          backgroundColor: m.quote_status === "accepted" ? "#E3F3E9" : colors.beige,
+                          color: m.quote_status === "accepted" ? colors.green : colors.plumSoft,
+                        }}
+                      >
+                        {m.quote_status === "accepted" ? <Check size={12} /> : <X size={12} />}
+                        {m.quote_status === "accepted" ? "Accepterad — tillagd i Min fest" : "Tackade nej"}
+                      </span>
+                      {m.quote_status === "accepted" && onOpenCart && (
+                        <button onClick={onOpenCart} className="text-xs font-semibold underline" style={{ color: colors.lilacDeep }}>
+                          Öppna Min fest
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -5425,6 +5433,14 @@ const emptyVendorForm = () => ({
 export default function App() {
   const [view, setView] = useState("home");
   const [recoverySession, setRecoverySession] = useState(null);
+  const [pollTick, setPollTick] = useState(0); // bumps every 20 s while a vendor view is open, to refresh requests and conversations
+  useEffect(() => {
+    if (!["vendorDashboard", "vendorBookings", "vendorInbox"].includes(view)) return;
+    const id = setInterval(() => {
+      if (!document.hidden) setPollTick((t) => t + 1);
+    }, 20000);
+    return () => clearInterval(id);
+  }, [view]);
 
   // Detect the redirect Supabase sends the browser to after a link in one of
   // our auth emails is clicked. Both arrive with tokens in the URL hash;
@@ -5705,7 +5721,41 @@ export default function App() {
         return next;
       });
     });
-  }, [submittedVendor?.id, session, view]);
+  }, [submittedVendor?.id, session, view, pollTick]);
+
+  // Accepted quotes that haven't become a booking yet are rebuilt into the cart, so
+  // accepting a quote and then closing the tab never loses it.
+  useEffect(() => {
+    if (!session?.user) return;
+    let stop = false;
+    (async () => {
+      const [q, b] = await Promise.all([
+        supabaseRestRequest(
+          `/messages?message_type=eq.quote&quote_status=eq.accepted&select=id,quote_amount,quote_description,conversations!inner(vendor_id,category_id,customer_id,vendors(company_name))&conversations.customer_id=eq.${session.user.id}`,
+          session.access_token
+        ),
+        supabaseRestRequest(`/bookings?customer_id=eq.${session.user.id}&cancelled=eq.false&select=booking_items(quote_message_id)`, session.access_token),
+      ]);
+      if (stop || q.error || !q.data) return;
+      const used = new Set((b.data || []).flatMap((x) => (x.booking_items || []).map((i) => i.quote_message_id)).filter(Boolean));
+      const open = q.data.filter((m) => !used.has(m.id) && m.conversations);
+      if (open.length === 0) return;
+      const synth = open.map((m) => ({
+        id: `quote-${m.id}`,
+        messageId: m.id,
+        vendorDbId: m.conversations.vendor_id,
+        category: m.conversations.category_id,
+        name: m.conversations.vendors?.company_name || "Leverantör",
+        amount: Number(m.quote_amount),
+        description: m.quote_description,
+      }));
+      setAcceptedQuotes((prev) => [...prev, ...synth.filter((x) => !prev.some((p) => p.id === x.id))]);
+      setCartItems((c) => [...c, ...synth.filter((x) => !c.some((i) => i.id === x.id)).map((x) => ({ id: x.id, addons: [] }))]);
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [session]);
 
   // Real reviews, publicly readable — merged in the same shape applyCustomerReviews() already expects.
   useEffect(() => {
@@ -5896,6 +5946,7 @@ export default function App() {
       pricing: { type: "fixed", amount: q.amount, note: q.description || "Offert" },
       seed: q.id,
       vendorDbId: q.vendorDbId,
+      quoteMessageId: q.messageId,
       image: null,
       images: [],
       available: true,
@@ -6034,13 +6085,20 @@ export default function App() {
       name: p.name,
       price: getLineTotal(p, p.chosenAddons, party),
       status: "pending",
+      quote_message_id: p.quoteMessageId || null,
     }));
     const { data: itemRows, error: itemsError } = await supabaseRestRequest("/booking_items", session.access_token, {
       method: "POST",
       headers: { Prefer: "return=representation" },
       body: JSON.stringify(itemsPayload),
     });
-    const sourceItems = !itemsError && itemRows ? itemRows : itemsPayload;
+    if (itemsError || !itemRows) {
+      // Don't pretend it worked: take the empty booking back and say so.
+      await supabaseRestRequest(`/bookings?id=eq.${bookingRow.id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ cancelled: true }) });
+      showToast("Bokningen kunde inte slutföras" + (itemsError?.message ? `: ${itemsError.message}` : "") + ". Försök igen.");
+      return;
+    }
+    const sourceItems = itemRows;
     const newBooking = {
       bookingNumber: newBookingNumber,
       date: party.date,
@@ -6222,6 +6280,7 @@ export default function App() {
       const quoteId = `quote-${message.id}`;
       const synthetic = {
         id: quoteId,
+        messageId: message.id,
         vendorDbId: provider.vendorDbId,
         category: provider.category,
         name: provider.name,
@@ -6250,7 +6309,7 @@ export default function App() {
     supabaseRestRequest(`/conversations?vendor_id=eq.${vendorId}&select=*&order=created_at.desc`, session.access_token).then(({ data, error }) => {
       if (!error && data) setVendorConversations(data);
     });
-  }, [submittedVendor?.id, session, view]);
+  }, [submittedVendor?.id, session, view, pollTick]);
 
   const openVendorConversation = async (conversationId) => {
     setActiveVendorConversationId(conversationId);
@@ -6258,6 +6317,21 @@ export default function App() {
     if (!error && data) setRealMessages((m) => ({ ...m, [conversationId]: data }));
   };
   const closeVendorConversation = () => setActiveVendorConversationId(null);
+
+  // Live updates: poll whichever conversation is open (a customer's chat or the
+  // vendor's inbox thread) so new messages and quote answers show up by themselves.
+  const openConvoId = chatTarget?.real ? chatTarget.conversationId : view === "vendorInbox" ? activeVendorConversationId : null;
+  useEffect(() => {
+    if (!openConvoId || !session?.access_token) return;
+    const sig = (a) => (a || []).map((x) => `${x.id}:${x.quote_status}`).join(",");
+    const tick = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      const { data } = await supabaseRestRequest(`/messages?conversation_id=eq.${openConvoId}&select=*&order=created_at.asc`, session.access_token);
+      if (data) setRealMessages((m) => (sig(m[openConvoId]) === sig(data) ? m : { ...m, [openConvoId]: data }));
+    };
+    const id = setInterval(tick, CHAT_POLL_MS);
+    return () => clearInterval(id);
+  }, [openConvoId, session]);
 
   const sendVendorMessage = async (text) => {
     if (!activeVendorConversationId) return;
@@ -7049,6 +7123,10 @@ export default function App() {
         onClose={closeChat}
         onAcceptQuote={acceptQuote}
         onDeclineQuote={declineQuote}
+        onOpenCart={() => {
+          closeChat();
+          setCartOpen(true);
+        }}
       />
       <AuthModal
         open={authModalOpen}
