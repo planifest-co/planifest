@@ -54,6 +54,55 @@ const SESSION_STORAGE_KEY = "planifest-session";
 const CHAT_POLL_MS = 5000; // how often an open conversation checks for new messages
 const INBOX_POLL_MS = 10000; // how often the message bubble checks for unread messages
 const SOUND_KEY = "planifest-sound";
+
+// ---- Cakes: sizes, the customer's structured request ("brief"), vendor price config ----
+const CAKE_SIZES = [6, 8, 10, 12, 15, 18, 20, 22, 25, 28];
+const CAKE_SHAPES = ["Rund", "Fyrkantig", "Rektangulär", "Hjärta", "Annan form"];
+const CAKE_TIERS = [1, 2, 3];
+const CAKE_DIETARY = ["Glutenfri", "Laktosfri", "Vegansk", "Nötfri"];
+const CAKE_DELIVERY = ["Hämtar själv", "Leverans"];
+// How a brief is shown: [field, label, optional formatter]
+const CAKE_BRIEF_ROWS = [
+  ["portions", "Storlek", (v) => `${v} bitar`],
+  ["flavor", "Smak"],
+  ["shape", "Form"],
+  ["tiers", "Våningar", (v) => String(v)],
+  ["theme", "Tema / design"],
+  ["colors", "Färger"],
+  ["text_on_cake", "Text på tårtan"],
+  ["dietary", "Kostönskemål", (v) => v.join(", ")],
+  ["allergies", "Allergier"],
+  ["delivery", "Hämtning / leverans"],
+  ["date", "Datum"],
+  ["notes", "Övrigt"],
+];
+const cakeBriefSummary = (b) => ["Tårta", b.portions ? `${b.portions} bitar` : "", b.flavor].filter(Boolean).join(", ");
+const cakeQuoteDescription = (b) =>
+  ["Tårta", b.portions ? `${b.portions} bitar` : "", b.flavor, b.shape ? String(b.shape).toLowerCase() : "", b.tiers ? `${b.tiers} våning${b.tiers > 1 ? "ar" : ""}` : "", b.theme ? `tema: ${b.theme}` : ""]
+    .filter(Boolean)
+    .join(", ");
+
+// A vendor's cake config as stored: { sizes: { "12": 650, ... }, flavors: ["Choklad", ...] }.
+// Always cleaned the same way before it is used or saved, so a typo in the editor can never make a save fail.
+function sanitizeCakeConfig(cfg) {
+  const sizes = {};
+  CAKE_SIZES.forEach((n) => {
+    const raw = cfg?.sizes?.[n] ?? cfg?.sizes?.[String(n)];
+    const price = Math.round(Number(raw));
+    if (raw !== undefined && raw !== null && raw !== "" && Number.isFinite(price) && price > 0 && price <= 100000) sizes[n] = price;
+  });
+  const seen = new Set();
+  const flavors = [];
+  (Array.isArray(cfg?.flavors) ? cfg.flavors : []).forEach((f) => {
+    const t = String(f).trim().slice(0, 60);
+    if (t && !seen.has(t.toLowerCase()) && flavors.length < 30) {
+      seen.add(t.toLowerCase());
+      flavors.push(t);
+    }
+  });
+  return { sizes, flavors };
+}
+const normalizeCakeConfig = (c) => sanitizeCakeConfig(c && typeof c === "object" ? c : {});
 const BADGE_RED = "#C8554B";
 
 // A short two-note "ping", generated in the browser (no audio file needed).
@@ -161,6 +210,7 @@ function mapDbVendorToLocal(dbVendor) {
   return {
     id: dbVendor.id,
     createdAt: dbVendor.created_at,
+    cakeConfig: normalizeCakeConfig(dbVendor.cake_config),
     companyName: dbVendor.company_name,
     organizationNumber: dbVendor.organization_number,
     contactPerson: dbVendor.contact_person,
@@ -285,6 +335,7 @@ async function saveVendorProfile(vendor, accessToken) {
       tagline: vendor.profile.tagline,
       description: vendor.profile.description,
       images: vendor.profile.images,
+      cake_config: sanitizeCakeConfig(vendor.cakeConfig),
     }),
   });
 
@@ -744,6 +795,10 @@ function mapVendorToProviders(vendor, bookings) {
       .filter(Boolean)
       .join(" ");
 
+    const cleanCake = categoryId === "tarta" ? sanitizeCakeConfig(vendor.cakeConfig) : null;
+    const cakePrices = cleanCake ? Object.values(cleanCake.sizes) : [];
+    const cake = cakePrices.length > 0 ? cleanCake : null;
+
     return {
       id: `${vendor.id}-${categoryId}`,
       vendorDbId: vendor.id.startsWith("VND-") ? null : vendor.id, // only real (Supabase) vendors get a real FK id
@@ -754,7 +809,8 @@ function mapVendorToProviders(vendor, bookings) {
       reviews: 0,
       location: locationMap[vendor.baseLocation]?.name || vendor.baseLocation,
       distanceKm: getMockDistance(vendor.id, vendor.baseLocation),
-      pricing,
+      pricing: cake ? { type: "fixed", amount: Math.min(...cakePrices), note: "" } : pricing,
+      cake,
       seed: vendor.id,
       image: images[0],
       images,
@@ -1196,9 +1252,13 @@ function Toast({ message }) {
 // Vendor card
 // ---------------------------------------------------------------------------
 function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode }) {
-  const priceLabel = `${formatKr(provider.pricing.amount)}${getUnitLabel(provider.pricing)}`;
+  const priceLabel = `${provider.cake ? "från " : ""}${formatKr(provider.pricing.amount)}${getUnitLabel(provider.pricing)}`;
   const handleAction = (e) => {
     e.stopPropagation();
+    if (provider.cake) {
+      onView(provider.id); // a cake is ordered through a request, never added straight to the cart
+      return;
+    }
     if (swapMode) onAdd(provider.id);
     else if (inCart) onRemove(provider.id);
     else onAdd(provider.id);
@@ -1226,7 +1286,7 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
             backgroundColor: inCart && !swapMode ? colors.white : colors.coral,
             color: inCart && !swapMode ? colors.lilacDeep : colors.white,
           }}
-          aria-label={swapMode ? "Välj denna" : inCart ? "Ta bort från Min fest" : "Lägg till i Min fest"}
+          aria-label={provider.cake ? "Beställ tårta" : swapMode ? "Välj denna" : inCart ? "Ta bort från Min fest" : "Lägg till i Min fest"}
         >
           {swapMode || inCart ? <Check size={9} /> : <Plus size={9} />}
         </button>
@@ -1716,7 +1776,7 @@ function ResultsView({
   );
 }
 
-function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty }) {
+function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty, onSendCakeBrief }) {
   const cat = catMap[provider.category];
   const [pendingAddons, setPendingAddons] = useState([]);
   const initialCalDate = party.date ? new Date(party.date) : new Date();
@@ -1864,6 +1924,9 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
         </div>
 
         <div className="sm:col-span-1">
+          {provider.cake ? (
+            <CakeOrderPanel provider={provider} party={party} onSelectDate={onSelectDate} onSend={(brief) => onSendCakeBrief(provider, brief)} />
+          ) : (
           <div className="rounded-3xl p-5 sm:sticky sm:top-6" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}` }}>
             <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>
               Från {formatKr(provider.pricing.amount)}
@@ -1993,6 +2056,7 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
               <MessageCircle size={15} /> Fråga leverantören
             </button>
           </div>
+          )}
         </div>
       </div>
     </div>
@@ -2628,7 +2692,11 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
             </p>
           )}
           {messages.map((m) =>
-            m.message_type === "quote" ? (
+            m.message_type === "brief" ? (
+              <div key={m.id} className="flex" style={{ justifyContent: m.sender === "customer" ? "flex-end" : "flex-start" }}>
+                <BriefCard brief={m.brief} />
+              </div>
+            ) : m.message_type === "quote" ? (
               <div key={m.id} className="flex" style={{ justifyContent: "flex-start" }}>
                 <div className="max-w-[85%] rounded-2xl p-3.5 text-sm" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
                   <p className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: colors.lilacDeep }}>
@@ -3629,7 +3697,7 @@ function getVendorCompleteness(vendor) {
     { key: "tagline", label: "Tagline", done: !!profile.tagline?.trim() },
     { key: "description", label: "Beskrivning", done: !!profile.description?.trim() },
     { key: "images", label: "Minst en bild", done: (profile.images || []).length > 0 },
-    { key: "services", label: "Minst en tjänst/pris", done: (profile.services || []).length > 0 },
+    { key: "services", label: "Minst en tjänst/pris", done: (profile.services || []).length > 0 || Object.keys(sanitizeCakeConfig(vendor?.cakeConfig).sizes).length > 0 },
     { key: "categories", label: "Minst en kategori", done: (vendor?.categories || []).length > 0 },
     { key: "geo", label: "Geografi", done: !!vendor?.baseLocation && !!vendor?.serviceArea },
   ];
@@ -3960,6 +4028,7 @@ function VendorProfileEditorView({
   onPreview,
   onDashboard,
   onShowToast,
+  onCakeConfig,
 }) {
   const [imageUrl, setImageUrl] = useState("");
   if (!vendor) return null;
@@ -4139,6 +4208,8 @@ function VendorProfileEditorView({
           + Lägg till exempelbild
         </button>
       </section>
+
+      {vendor.categories.includes("tarta") && <CakeConfigEditor config={vendor.cakeConfig} onChange={onCakeConfig} />}
 
       <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
         <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
@@ -4420,7 +4491,7 @@ function VendorProfilePreviewView({ vendor, onBack }) {
 // chat) since a vendor spends more focused time here. Reuses the same quote
 // bubble treatment as the customer's ChatModal.
 // ---------------------------------------------------------------------------
-function VendorInboxView({ conversations, activeConversationId, messages, onOpenConversation, onSendMessage, onSendQuote, onBack, inboxById = {} }) {
+function VendorInboxView({ conversations, activeConversationId, messages, onOpenConversation, onSendMessage, onSendQuote, onBack, inboxById = {}, cakePrices = {} }) {
   const [text, setText] = useState("");
   const [quoteMode, setQuoteMode] = useState(false);
   const [quoteAmount, setQuoteAmount] = useState("");
@@ -4432,6 +4503,16 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
   }, [messages, activeConversationId]);
 
   const active = conversations.find((c) => c.id === activeConversationId) || null;
+  const lastBrief = [...(messages || [])].reverse().find((m) => m.message_type === "brief")?.brief || null;
+  const guidePrice = lastBrief ? cakePrices[lastBrief.portions] : undefined;
+  // With a cake request in the conversation, the quote starts from the vendor's own price for that size.
+  const openQuote = () => {
+    if (lastBrief && !quoteAmount && !quoteDescription) {
+      if (guidePrice) setQuoteAmount(String(guidePrice));
+      setQuoteDescription(cakeQuoteDescription(lastBrief));
+    }
+    setQuoteMode(true);
+  };
 
   const submitMessage = () => {
     if (!text.trim()) return;
@@ -4467,7 +4548,11 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
             </p>
           )}
           {messages.map((m) =>
-            m.message_type === "quote" ? (
+            m.message_type === "brief" ? (
+              <div key={m.id} className="flex" style={{ justifyContent: "flex-start" }}>
+                <BriefCard brief={m.brief} />
+              </div>
+            ) : m.message_type === "quote" ? (
               <div key={m.id} className="flex" style={{ justifyContent: m.sender === "vendor" ? "flex-end" : "flex-start" }}>
                 <div className="max-w-[80%] rounded-2xl p-3.5 text-sm" style={{ backgroundColor: colors.lilacSoft }}>
                   <p className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: colors.lilacDeep }}>
@@ -4513,6 +4598,11 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
             <p className="mb-2 text-sm font-semibold" style={{ color: colors.plum }}>
               Skicka offert
             </p>
+            {guidePrice && (
+              <p className="mb-2 text-xs" style={{ color: colors.lilacDeep }}>
+                Ditt riktpris för {lastBrief.portions} bitar är {formatKr(guidePrice)}. Justera för våningar och design.
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <input
                 type="number"
@@ -4546,7 +4636,7 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
         ) : (
           <div className="mt-3 flex items-center gap-2">
             <button
-              onClick={() => setQuoteMode(true)}
+              onClick={openQuote}
               className="flex flex-shrink-0 items-center gap-1 rounded-full px-3 py-2.5 text-xs font-semibold"
               style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}
             >
@@ -4588,7 +4678,7 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
           const Icon = catMap[c.category_id]?.icon;
           const meta = inboxById[c.id];
           const unread = meta?.unread || 0;
-          const preview = meta ? (meta.last_type === "quote" ? "Offert" : meta.last_text) : "";
+          const preview = meta ? (meta.last_type === "quote" ? "Offert" : meta.last_type === "brief" ? "Tårtförfrågan" : meta.last_text) : "";
           return (
             <button
               key={c.id}
@@ -4618,6 +4708,322 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
         })}
       </div>
     </div>
+  );
+}
+
+function CakeChip({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-full px-3 py-1.5 text-xs font-medium"
+      style={{
+        border: `1px solid ${active ? colors.lilac : colors.beige}`,
+        backgroundColor: active ? colors.lilacSoft : colors.white,
+        color: active ? colors.lilacDeep : colors.plum,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// The structured request as a card inside the chat.
+function BriefCard({ brief }) {
+  const rows = CAKE_BRIEF_ROWS.map(([key, label, fmt]) => {
+    const v = brief?.[key];
+    if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0)) return null;
+    return [label, fmt ? fmt(v) : String(v)];
+  }).filter(Boolean);
+  return (
+    <div className="max-w-[90%] rounded-2xl p-4 text-sm" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+      <p className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: colors.lilacDeep }}>
+        <Cake size={13} /> Tårtförfrågan
+      </p>
+      <dl className="mt-2 space-y-1.5">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex gap-3">
+            <dt className="w-28 flex-shrink-0 text-xs" style={{ color: colors.plumSoft }}>
+              {k}
+            </dt>
+            <dd style={{ color: colors.plum }}>{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+// Customer side: pick size and flavour, add the design wishes, send as a request.
+function CakeOrderPanel({ provider, party, onSelectDate, onSend }) {
+  const sizes = Object.keys(provider.cake.sizes).map(Number).sort((a, b) => a - b);
+  const flavors = provider.cake.flavors || [];
+  const [portions, setPortions] = useState(0);
+  const [flavor, setFlavor] = useState("");
+  const [shape, setShape] = useState("");
+  const [tiers, setTiers] = useState(0);
+  const [theme, setTheme] = useState("");
+  const [colorWishes, setColorWishes] = useState("");
+  const [textOnCake, setTextOnCake] = useState("");
+  const [dietary, setDietary] = useState([]);
+  const [allergies, setAllergies] = useState("");
+  const [delivery, setDelivery] = useState("");
+  const [notes, setNotes] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+
+  const closed = !!party.date && provider.closedDates?.includes(party.date);
+  const canSend = portions > 0 && (flavors.length === 0 || !!flavor) && !!party.date && !closed && !sending;
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+  const toggleDietary = (d) => setDietary((list) => (list.includes(d) ? list.filter((x) => x !== d) : [...list, d]));
+
+  const submit = async () => {
+    setError("");
+    if (containsContactInfo([theme, colorWishes, textOnCake, allergies, notes].join(" "))) {
+      setError("Telefonnummer, e-post och länkar får inte skickas här. Håll kontakten på Planifest så gäller ert skydd.");
+      return;
+    }
+    const brief = { portions, date: party.date };
+    if (flavor) brief.flavor = flavor;
+    if (shape) brief.shape = shape;
+    if (tiers) brief.tiers = tiers;
+    if (theme.trim()) brief.theme = theme.trim();
+    if (colorWishes.trim()) brief.colors = colorWishes.trim();
+    if (textOnCake.trim()) brief.text_on_cake = textOnCake.trim();
+    if (dietary.length) brief.dietary = dietary;
+    if (allergies.trim()) brief.allergies = allergies.trim();
+    if (delivery) brief.delivery = delivery;
+    if (notes.trim()) brief.notes = notes.trim();
+    setSending(true);
+    await onSend(brief);
+    setSending(false);
+  };
+
+  return (
+    <div className="rounded-3xl p-5 sm:sticky sm:top-6" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}` }}>
+      <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>Beställ tårta</p>
+      <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>
+        Välj storlek och smak, berätta om dina önskemål, så tar ni designen i chatten. Slutpriset bestäms av leverantören.
+      </p>
+
+      <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
+        Storlek
+      </p>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {sizes.map((n) => (
+          <CakeChip key={n} active={portions === n} onClick={() => setPortions(n)}>
+            {n} bitar · {formatKr(provider.cake.sizes[n])}
+          </CakeChip>
+        ))}
+      </div>
+      {portions > 0 && (
+        <p className="mt-1.5 text-xs" style={{ color: colors.plumSoft }}>
+          Riktpris för {portions} bitar: {formatKr(provider.cake.sizes[portions])}. Slutpris efter att ni pratat design.
+        </p>
+      )}
+
+      {flavors.length > 0 && (
+        <>
+          <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
+            Smak
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {flavors.map((f) => (
+              <CakeChip key={f} active={flavor === f} onClick={() => setFlavor(f)}>
+                {f}
+              </CakeChip>
+            ))}
+          </div>
+        </>
+      )}
+
+      <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
+        Form
+      </p>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {CAKE_SHAPES.map((x) => (
+          <CakeChip key={x} active={shape === x} onClick={() => setShape(shape === x ? "" : x)}>
+            {x}
+          </CakeChip>
+        ))}
+      </div>
+
+      <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
+        Våningar
+      </p>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {CAKE_TIERS.map((x) => (
+          <CakeChip key={x} active={tiers === x} onClick={() => setTiers(tiers === x ? 0 : x)}>
+            {x === 3 ? "3 eller fler" : x}
+          </CakeChip>
+        ))}
+      </div>
+
+      <label className="mt-4 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+        Tema / design
+        <textarea
+          value={theme}
+          onChange={(e) => setTheme(e.target.value)}
+          rows={3}
+          maxLength={600}
+          placeholder="Till exempel: enhörning med regnbågsman, blommor, bröllopstårta i vitt..."
+          className="rounded-xl px-3 py-2 text-sm font-normal"
+          style={fieldStyle}
+        />
+      </label>
+      <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+        Färger
+        <input value={colorWishes} onChange={(e) => setColorWishes(e.target.value)} maxLength={200} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+      </label>
+      <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+        Text på tårtan
+        <input value={textOnCake} onChange={(e) => setTextOnCake(e.target.value)} maxLength={100} placeholder="Till exempel: Grattis Elsa 5 år!" className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+      </label>
+
+      <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
+        Kostönskemål och allergier
+      </p>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {CAKE_DIETARY.map((d) => (
+          <CakeChip key={d} active={dietary.includes(d)} onClick={() => toggleDietary(d)}>
+            {d}
+          </CakeChip>
+        ))}
+      </div>
+      <input
+        value={allergies}
+        onChange={(e) => setAllergies(e.target.value)}
+        maxLength={300}
+        placeholder="Andra allergier, till exempel mandel eller ägg"
+        className="mt-2 w-full rounded-xl px-3 py-2 text-sm"
+        style={fieldStyle}
+      />
+
+      <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
+        Hämtning eller leverans
+      </p>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {CAKE_DELIVERY.map((d) => (
+          <CakeChip key={d} active={delivery === d} onClick={() => setDelivery(delivery === d ? "" : d)}>
+            {d}
+          </CakeChip>
+        ))}
+      </div>
+
+      <label className="mt-4 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+        Datum
+        <input type="date" value={party.date || ""} onChange={(e) => onSelectDate(e.target.value)} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+      </label>
+      {closed && (
+        <p className="mt-1 text-xs" style={{ color: colors.coralDeep }}>
+          Leverantören har stängt det här datumet. Välj ett annat.
+        </p>
+      )}
+
+      <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+        Något mer vi bör veta?
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} maxLength={600} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+      </label>
+
+      {error && (
+        <p className="mt-2 text-xs leading-relaxed" style={{ color: colors.coralDeep }}>
+          {error}
+        </p>
+      )}
+      <button
+        onClick={submit}
+        disabled={!canSend}
+        className="mt-4 flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold"
+        style={{ backgroundColor: colors.coral, color: colors.white, opacity: canSend ? 1 : 0.5 }}
+      >
+        <Cake size={16} /> {sending ? "Skickar..." : "Skicka tårtförfrågan"}
+      </button>
+      <p className="mt-2 text-center text-xs" style={{ color: colors.plumSoft }}>
+        Du får ett svar i chatten och en offert med slutpris.
+      </p>
+    </div>
+  );
+}
+
+// Vendor side (profile editor): a price per size, and the flavours on offer.
+function CakeConfigEditor({ config, onChange }) {
+  const cfg = { sizes: config?.sizes || {}, flavors: config?.flavors || [] };
+  const [flavorInput, setFlavorInput] = useState("");
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+  const setPrice = (n, raw) => {
+    const sizes = { ...cfg.sizes };
+    if (raw === "") delete sizes[n];
+    else sizes[n] = raw;
+    onChange({ ...cfg, sizes });
+  };
+  const addFlavor = () => {
+    const t = flavorInput.trim().slice(0, 60);
+    if (!t || cfg.flavors.some((f) => f.toLowerCase() === t.toLowerCase()) || cfg.flavors.length >= 30) return;
+    onChange({ ...cfg, flavors: [...cfg.flavors, t] });
+    setFlavorInput("");
+  };
+  return (
+    <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+      <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
+        Tårtor: storlekar, priser och smaker
+      </h2>
+      <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
+        Ange ett pris för varje storlek ni gör, och lämna tomt för de ni inte gör. Priset visas för kunden som riktpris. Slutpriset bestämmer ni när ni pratat design.
+      </p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {CAKE_SIZES.map((n) => (
+          <label key={n} className="flex flex-col gap-1 text-xs font-medium" style={{ color: colors.plum }}>
+            {n} bitar
+            <input
+              type="number"
+              min={0}
+              value={cfg.sizes[n] ?? ""}
+              onChange={(e) => setPrice(n, e.target.value)}
+              placeholder="kr"
+              className="rounded-xl px-3 py-2 text-sm font-normal"
+              style={fieldStyle}
+            />
+          </label>
+        ))}
+      </div>
+
+      <p className="mb-2 mt-5 text-sm font-semibold" style={{ color: colors.plum }}>
+        Smaker ni erbjuder
+      </p>
+      <div className="mb-2 flex flex-wrap gap-2">
+        {cfg.flavors.length === 0 && (
+          <span className="text-xs" style={{ color: colors.plumSoft }}>
+            Inga smaker tillagda än.
+          </span>
+        )}
+        {cfg.flavors.map((f) => (
+          <span key={f} className="flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium" style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}>
+            {f}
+            <button type="button" onClick={() => onChange({ ...cfg, flavors: cfg.flavors.filter((x) => x !== f) })} aria-label={`Ta bort ${f}`}>
+              <X size={12} />
+            </button>
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={flavorInput}
+          onChange={(e) => setFlavorInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && addFlavor()}
+          placeholder="Till exempel: Chokladmousse"
+          className="flex-1 rounded-xl px-3 py-2 text-sm"
+          style={fieldStyle}
+        />
+        <button
+          type="button"
+          onClick={addFlavor}
+          className="rounded-full px-4 py-2 text-sm font-semibold"
+          style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}
+        >
+          Lägg till smak
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -4689,7 +5095,7 @@ function MessagesPanel({ open, conversations, soundOn, onToggleSound, onOpen, on
         )}
         {conversations.map((c) => {
           const Icon = catMap[c.category_id]?.icon;
-          const preview = c.last_type === "quote" ? "Offert" : c.last_text || "Inga meddelanden än";
+          const preview = c.last_type === "quote" ? "Offert" : c.last_type === "brief" ? "Tårtförfrågan" : c.last_text || "Inga meddelanden än";
           return (
             <button
               key={c.conversation_id}
@@ -6425,6 +6831,44 @@ export default function App() {
 
   const closeChat = () => setChatTarget(null);
 
+  // A cake is never added straight to the cart: the customer sends a structured request, the
+  // vendor answers in the chat and sends a quote with the final price, and accepting that
+  // quote is what puts the cake in Min fest.
+  const sendCakeBrief = async (provider, brief) => {
+    if (!provider.vendorDbId) {
+      showToast("Den här leverantören går inte att kontakta än.");
+      return;
+    }
+    if (!session?.access_token) {
+      openAuthModal("signin");
+      showToast("Logga in för att skicka tårtförfrågan");
+      return;
+    }
+    const { data: convo, error } = await findOrCreateConversation({
+      vendorId: provider.vendorDbId,
+      customerId: session.user.id,
+      categoryId: provider.category,
+      accessToken: session.access_token,
+    });
+    if (error || !convo) {
+      showToast("Kunde inte skicka förfrågan just nu");
+      return;
+    }
+    const { data: rows, error: msgError } = await supabaseRestRequest("/messages", session.access_token, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ conversation_id: convo.id, sender: "customer", text: cakeBriefSummary(brief), message_type: "brief", brief }),
+    });
+    if (msgError || !rows?.[0]) {
+      showToast("Kunde inte skicka förfrågan" + (msgError?.message ? `: ${msgError.message}` : ""));
+      return;
+    }
+    const { data: msgs } = await supabaseRestRequest(`/messages?conversation_id=eq.${convo.id}&select=*&order=created_at.asc`, session.access_token);
+    setRealMessages((m) => ({ ...m, [convo.id]: msgs || [rows[0]] }));
+    setChatTarget({ kind: "provider", provider, real: true, conversationId: convo.id });
+    showToast("Tårtförfrågan skickad ✓");
+  };
+
   const sendChatMessage = async (text) => {
     if (!chatTarget || !text.trim()) return;
 
@@ -6801,6 +7245,7 @@ export default function App() {
       categories: v.categories.includes(id) ? v.categories.filter((c) => c !== id) : [...v.categories, id],
     }));
 
+  const updateVendorCakeConfig = (cfg) => patchVendor((v) => ({ ...v, cakeConfig: cfg }));
   const updateVendorProfileField = (field, value) => patchVendor((v) => ({ ...v, profile: { ...v.profile, [field]: value } }));
 
   const addVendorImage = (url) => patchVendor((v) => ({ ...v, profile: { ...v.profile, images: [...v.profile.images, url] } }));
@@ -7203,6 +7648,7 @@ export default function App() {
           onOpenChat={openProviderChat}
           onSelectDate={(date) => setParty((p) => ({ ...p, date }))}
           onUpdateParty={(patch) => setParty((p) => ({ ...p, ...patch }))}
+          onSendCakeBrief={sendCakeBrief}
         />
       )}
 
@@ -7276,12 +7722,14 @@ export default function App() {
           onSendQuote={sendVendorQuote}
           onBack={closeVendorConversation}
           inboxById={Object.fromEntries(inbox.map((c) => [c.conversation_id, c]))}
+          cakePrices={sanitizeCakeConfig(submittedVendor?.cakeConfig).sizes}
         />
       )}
 
       {view === "vendorProfileEditor" && (
         <VendorProfileEditorView
           vendor={submittedVendor}
+          onCakeConfig={updateVendorCakeConfig}
           onField={updateVendorTopField}
           onBaseLocation={updateVendorBaseLocation}
           onServiceArea={updateVendorServiceArea}
