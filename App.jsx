@@ -275,36 +275,6 @@ async function saveVendorProfile(vendor, accessToken) {
   }
 }
 
-// A vendor signup requiring email confirmation can't insert its vendors row
-// right away (no session yet) — the collected form data is stashed here and
-// picked back up the first time this email successfully logs in.
-const PENDING_VENDOR_KEY = "planifest-pending-vendor";
-function stashPendingVendorApplication(email, form) {
-  try {
-    const { password, confirmPassword, ...rest } = form;
-    localStorage.setItem(PENDING_VENDOR_KEY, JSON.stringify({ email, form: rest }));
-  } catch (e) {
-    // ignore — worst case they just need to redo the vendor form after confirming
-  }
-}
-function loadPendingVendorApplication(email) {
-  try {
-    const raw = localStorage.getItem(PENDING_VENDOR_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed.email === email ? parsed.form : null;
-  } catch (e) {
-    return null;
-  }
-}
-function clearPendingVendorApplication() {
-  try {
-    localStorage.removeItem(PENDING_VENDOR_KEY);
-  } catch (e) {
-    // ignore
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Design tokens
 // ---------------------------------------------------------------------------
@@ -834,17 +804,21 @@ function getBreakdownText(provider, party) {
 // --- Vendor signup validation (Fas 2A) -------------------------------------
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function validateVendorAccount(form) {
+function validateVendorAccount(form, hasAccount = false) {
   const errors = {};
   if (!form.companyName.trim()) errors.companyName = "Fyll i företagsnamn";
   if (!form.organizationNumber.trim()) errors.organizationNumber = "Ange ett organisationsnummer";
   if (!form.contactPerson.trim()) errors.contactPerson = "Fyll i kontaktperson";
-  if (!form.email.trim()) errors.email = "Fyll i e-postadress";
-  else if (!EMAIL_RE.test(form.email.trim())) errors.email = "Ange en giltig e-postadress";
+  if (!hasAccount) {
+    if (!form.email.trim()) errors.email = "Fyll i e-postadress";
+    else if (!EMAIL_RE.test(form.email.trim())) errors.email = "Ange en giltig e-postadress";
+  }
   if (!form.phone.trim()) errors.phone = "Fyll i telefonnummer";
-  if (!form.password) errors.password = "Ange ett lösenord";
-  else if (form.password.length < 6) errors.password = "Lösenordet måste vara minst 6 tecken";
-  if (form.confirmPassword !== form.password) errors.confirmPassword = "Lösenorden matchar inte";
+  if (!hasAccount) {
+    if (!form.password) errors.password = "Ange ett lösenord";
+    else if (form.password.length < 6) errors.password = "Lösenordet måste vara minst 6 tecken";
+    if (form.confirmPassword !== form.password) errors.confirmPassword = "Lösenorden matchar inte";
+  }
   return errors;
 }
 
@@ -3230,8 +3204,8 @@ function GeographyPicker({ baseLocation, serviceAreaType, onBaseLocation, onServ
   );
 }
 
-function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNext, onBack, onSubmit, onShowToast, submitError, submitting, onOpenTerms }) {
-  const stepTitles = { 1: "Skapa konto", 2: "Geografi", 3: "Vad erbjuder du?" };
+function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNext, onBack, onSubmit, onShowToast, submitError, submitting, onOpenTerms, hasAccount, accountEmail }) {
+  const stepTitles = { 1: hasAccount ? "Om ditt företag" : "Skapa konto", 2: "Geografi", 3: "Vad erbjuder du?" };
 
   return (
     <div className="mx-auto max-w-2xl px-6 pb-24 pt-10 sm:px-10">
@@ -3255,7 +3229,12 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
       <div className="rounded-3xl p-6 sm:p-8" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
         {step === 1 && (
           <div className="space-y-4">
-            <h2 style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>Skapa konto</h2>
+            <h2 style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>{hasAccount ? "Om ditt företag" : "Skapa konto"}</h2>
+            {hasAccount && (
+              <p className="rounded-xl px-3 py-2 text-sm" style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}>
+                Du ansöker med ditt konto <strong>{accountEmail}</strong>, så du behöver inte skapa något nytt.
+              </p>
+            )}
             <VendorTextField label="Företagsnamn" value={form.companyName} onChange={(v) => onField("companyName", v)} error={errors.companyName} />
             <VendorTextField
               label="Organisationsnummer"
@@ -3265,16 +3244,20 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
               placeholder="XXXXXX-XXXX"
             />
             <VendorTextField label="Kontaktperson" value={form.contactPerson} onChange={(v) => onField("contactPerson", v)} error={errors.contactPerson} />
-            <VendorTextField label="E-post" type="email" value={form.email} onChange={(v) => onField("email", v)} error={errors.email} />
+            {!hasAccount && <VendorTextField label="E-post" type="email" value={form.email} onChange={(v) => onField("email", v)} error={errors.email} />}
             <VendorTextField label="Telefonnummer" type="tel" value={form.phone} onChange={(v) => onField("phone", v)} error={errors.phone} />
-            <VendorTextField label="Lösenord" type="password" value={form.password} onChange={(v) => onField("password", v)} error={errors.password} />
-            <VendorTextField
-              label="Bekräfta lösenord"
-              type="password"
-              value={form.confirmPassword}
-              onChange={(v) => onField("confirmPassword", v)}
-              error={errors.confirmPassword}
-            />
+            {!hasAccount && (
+              <>
+                <VendorTextField label="Lösenord" type="password" value={form.password} onChange={(v) => onField("password", v)} error={errors.password} />
+                <VendorTextField
+                  label="Bekräfta lösenord"
+                  type="password"
+                  value={form.confirmPassword}
+                  onChange={(v) => onField("confirmPassword", v)}
+                  error={errors.confirmPassword}
+                />
+              </>
+            )}
           </div>
         )}
 
@@ -3532,7 +3515,7 @@ function VendorAwaitingConfirmationView({ email, onHome }) {
       </div>
       <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Kolla din mejl!</h1>
       <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
-        Vi har skickat en bekräftelselänk till <strong>{email}</strong>. Klicka på den, kom sedan tillbaka hit och logga in — då slutförs din leverantörsansökan automatiskt.
+        Vi har skickat en bekräftelselänk till <strong>{email}</strong>. Klicka på den, på vilken enhet du vill — då skickas din leverantörsansökan in automatiskt. Logga sedan in för att följa den.
       </p>
       <button onClick={onHome} className="mt-6 w-full rounded-full py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
         Till startsidan
@@ -5859,20 +5842,6 @@ export default function App() {
     landOnPortalRef.current = true;
     setSessionPersist(data);
     showToast("Inloggad ✓");
-
-    // Finish a vendor application that was waiting on email confirmation.
-    const pendingForm = loadPendingVendorApplication(email);
-    if (pendingForm) {
-      const { data: newVendor, error: vendorError } = await createVendorApplication(data, pendingForm);
-      clearPendingVendorApplication();
-      if (!vendorError && newVendor) {
-        setVendorApplications((apps) => [...apps, newVendor]);
-        setSubmittedVendorId(newVendor.id);
-        setAuthModalOpen(false);
-        setView("vendorPending");
-        return null;
-      }
-    }
     return null;
   };
 
@@ -5883,7 +5852,14 @@ export default function App() {
       body: JSON.stringify({ email, password, data: { full_name: fullName } }),
     });
     if (error) return error;
-    if (data.access_token) setSessionPersist(data); // in case email confirmation is ever turned off
+    if (data.access_token) {
+      setSessionPersist(data); // in case email confirmation is ever turned off
+      return null;
+    }
+    const created = data.user || data;
+    if (Array.isArray(created?.identities) && created.identities.length === 0) {
+      return { message: "Det finns redan ett konto med den e-postadressen. Logga in istället." };
+    }
     return null;
   };
 
@@ -6384,7 +6360,10 @@ export default function App() {
   };
 
   const startVendorSignup = () => {
-    setVendorForm(emptyVendorForm());
+    setVendorForm({
+      ...emptyVendorForm(),
+      ...(session?.user ? { email: session.user.email || "", contactPerson: profile?.full_name || "", phone: profile?.phone || "" } : {}),
+    });
     setVendorErrors({});
     setVendorSubmitError("");
     setVendorStep(1);
@@ -6404,7 +6383,7 @@ export default function App() {
   };
 
   const vendorNext = () => {
-    const errors = vendorStep === 1 ? validateVendorAccount(vendorForm) : validateVendorGeography(vendorForm);
+    const errors = vendorStep === 1 ? validateVendorAccount(vendorForm, !!session) : validateVendorGeography(vendorForm);
     setVendorErrors(errors);
     if (Object.keys(errors).length === 0) setVendorStep((s) => Math.min(3, s + 1));
   };
@@ -6418,12 +6397,44 @@ export default function App() {
 
     setVendorSubmitError("");
     setVendorSubmitting(true);
+
+    // Already signed in (for example a customer who now wants to become a vendor):
+    // no new account is needed, the application is simply saved on this one.
+    if (session?.access_token) {
+      const { data: newVendor, error: vendorError } = await createVendorApplication(session, { ...vendorForm, email: session.user.email });
+      setVendorSubmitting(false);
+      if (vendorError) {
+        setVendorSubmitError(vendorError.message);
+        return;
+      }
+      setVendorApplications((apps) => [...apps.filter((v) => v.id !== newVendor.id), newVendor]);
+      setSubmittedVendorId(newVendor.id);
+      setView("vendorDashboard");
+      return;
+    }
+
+    // New person: the application travels with the signup. The database creates
+    // it the moment the email address is confirmed, from any device, so nothing
+    // depends on this browser remembering anything.
+    const areaOption = SERVICE_AREA_OPTIONS.find((o) => o.type === vendorForm.serviceArea);
     const { data: signUpData, error: signUpError } = await supabaseAuthRequest("/signup", {
       method: "POST",
       body: JSON.stringify({
-        email: vendorForm.email,
+        email: vendorForm.email.trim(),
         password: vendorForm.password,
-        data: { full_name: vendorForm.contactPerson },
+        data: {
+          full_name: vendorForm.contactPerson,
+          vendor_application: {
+            company_name: vendorForm.companyName,
+            organization_number: vendorForm.organizationNumber,
+            contact_person: vendorForm.contactPerson,
+            phone: vendorForm.phone,
+            base_location: vendorForm.baseLocation,
+            service_area_type: areaOption?.type || null,
+            service_area_value: areaOption?.label || null,
+            categories: vendorForm.categories,
+          },
+        },
       }),
     });
     setVendorSubmitting(false);
@@ -6434,8 +6445,7 @@ export default function App() {
     }
 
     if (signUpData.access_token) {
-      // Email confirmation is off (or already confirmed) — we have a session
-      // immediately, so create the vendor row right away.
+      // Email confirmation is off: we have a session immediately, so create the application right away.
       setSessionPersist(signUpData);
       const { data: newVendor, error: vendorError } = await createVendorApplication(signUpData, vendorForm);
       if (vendorError) {
@@ -6445,11 +6455,19 @@ export default function App() {
       setVendorApplications((apps) => [...apps, newVendor]);
       setSubmittedVendorId(newVendor.id);
       setView("vendorPending");
-    } else {
-      // Needs email confirmation first — stash the form and pick it back up on next sign-in.
-      stashPendingVendorApplication(vendorForm.email, vendorForm);
-      setView("vendorAwaitingConfirmation");
+      return;
     }
+
+    // Supabase never says whether an address is already registered; it answers
+    // with a user that has no identities. Tell the person instead of leaving them waiting for a mail that never comes.
+    const created = signUpData.user || signUpData;
+    if (Array.isArray(created?.identities) && created.identities.length === 0) {
+      setVendorSubmitError("Det finns redan ett konto med den e-postadressen. Logga in, så kan du ansöka som leverantör från ditt konto.");
+      openAuthModal("signin");
+      return;
+    }
+
+    setView("vendorAwaitingConfirmation");
   };
 
   // --- Vendor portal navigation (Fas 2B) ---
@@ -6955,6 +6973,8 @@ export default function App() {
           submitError={vendorSubmitError}
           submitting={vendorSubmitting}
           onOpenTerms={goTerms}
+          hasAccount={!!session}
+          accountEmail={session?.user?.email}
         />
       )}
 
