@@ -2907,16 +2907,40 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
   );
 }
 
-function SupportModal({ open, onClose, onSubmit }) {
+function SupportModal({ open, onClose, onSubmit, defaultEmail }) {
+  const [email, setEmail] = useState("");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
+  const [website, setWebsite] = useState(""); // honeypot — a real person never sees or fills this
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open && defaultEmail && !email) setEmail(defaultEmail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultEmail]);
 
   if (!open) return null;
 
-  const submit = () => {
-    if (!message.trim()) return;
-    onSubmit({ subject: subject.trim(), message: message.trim() });
+  const emailOk = EMAIL_RE.test(email.trim());
+  const canSend = message.trim().length > 0 && emailOk && !sending;
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+
+  const submit = async () => {
+    if (!canSend) return;
+    setError("");
+    if (website) {
+      setSent(true); // looks like a bot: pretend it worked, send nothing
+      return;
+    }
+    setSending(true);
+    const err = await onSubmit({ email: email.trim(), subject: subject.trim(), message: message.trim() });
+    setSending(false);
+    if (err) {
+      setError("Det gick inte att skicka just nu. Försök igen, eller mejla info@planifest.se.");
+      return;
+    }
     setSent(true);
   };
 
@@ -2926,6 +2950,7 @@ function SupportModal({ open, onClose, onSubmit }) {
       setSent(false);
       setSubject("");
       setMessage("");
+      setError("");
     }, 300);
   };
 
@@ -2943,7 +2968,7 @@ function SupportModal({ open, onClose, onSubmit }) {
             </div>
             <h2 style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>Tack för ditt meddelande!</h2>
             <p className="mt-2 text-sm" style={{ color: colors.plumSoft }}>
-              Vi återkommer inom 24 timmar via e-post.
+              Vi återkommer inom 24 timmar via e-post till <strong>{email}</strong>.
             </p>
             <button
               onClick={closeAndReset}
@@ -2960,20 +2985,44 @@ function SupportModal({ open, onClose, onSubmit }) {
               Beskriv vad det gäller så återkommer vi så snart vi kan.
             </p>
             <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Din e-post (så vi kan svara)"
+              maxLength={254}
+              className="mt-4 w-full rounded-xl px-3 py-2 text-sm"
+              style={fieldStyle}
+            />
+            <input
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="Ämne (valfritt)"
-              className="mt-4 w-full rounded-xl px-3 py-2 text-sm"
-              style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}
+              maxLength={200}
+              className="mt-2 w-full rounded-xl px-3 py-2 text-sm"
+              style={fieldStyle}
             />
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               rows={4}
+              maxLength={3000}
               placeholder="Ditt meddelande..."
               className="mt-2 w-full rounded-xl px-3 py-2 text-sm"
-              style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}
+              style={fieldStyle}
             />
+            <input
+              tabIndex={-1}
+              autoComplete="off"
+              aria-hidden="true"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+              style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, width: 0 }}
+            />
+            {error && (
+              <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
+                {error}
+              </p>
+            )}
             <div className="mt-4 flex gap-3">
               <button
                 onClick={closeAndReset}
@@ -2984,11 +3033,11 @@ function SupportModal({ open, onClose, onSubmit }) {
               </button>
               <button
                 onClick={submit}
-                disabled={!message.trim()}
+                disabled={!canSend}
                 className="flex-1 rounded-full px-4 py-3 text-sm font-semibold"
-                style={{ backgroundColor: colors.coral, color: colors.white, opacity: message.trim() ? 1 : 0.5 }}
+                style={{ backgroundColor: colors.coral, color: colors.white, opacity: canSend ? 1 : 0.5 }}
               >
-                Skicka
+                {sending ? "Skickar..." : "Skicka"}
               </button>
             </div>
           </>
@@ -3633,13 +3682,33 @@ const SEED_BOOKINGS = [
   },
 ];
 
-function VendorDashboardView({ vendor, bookingItems, onEditProfile, onPreview, onBookings, onInbox }) {
+function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditProfile, onPreview, onBookings, onInbox, onRespond }) {
   if (!vendor) return null;
   const { percent, missing } = getVendorCompleteness(vendor);
   const locationName = locationMap[vendor.baseLocation]?.name || vendor.baseLocation;
   const categoryLabels = vendor.categories.map((id) => catMap[id]?.label).filter(Boolean).join(", ") || "Inga valda ännu";
   const status = STATUS_META[vendor.status] || STATUS_META.pending;
   const pendingCount = bookingItems.filter((i) => i.status === "pending").length;
+  const pendingItems = bookingItems.filter((i) => i.status === "pending");
+  const upcomingAll = bookingItems
+    .filter((i) => i.status === "confirmed" && i.date >= todayStr())
+    .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`));
+  const hhmm = (t) => String(t || "").slice(0, 5);
+  const banner = {
+    pending: {
+      bg: colors.lilacSoft,
+      fg: colors.lilacDeep,
+      title: "Din ansökan granskas",
+      text: "Vi går igenom din ansökan och mejlar dig så fort den är klar. Du kan fylla i din profil under tiden.",
+    },
+    approved: { bg: "#E3F3E9", fg: colors.green, title: "Du är godkänd!", text: "Din profil är publicerad och syns för kunder på Planifest." },
+    rejected: {
+      bg: "#FBE4E1",
+      fg: colors.coralDeep,
+      title: "Din ansökan godkändes inte den här gången",
+      text: "Du är välkommen att höra av dig om du vill veta mer eller komplettera dina uppgifter.",
+    },
+  }[vendor.status];
 
   const cards = [
     { title: "Profil", desc: "Tagline, beskrivning och kontaktuppgifter", icon: Sparkles, action: onEditProfile },
@@ -3659,6 +3728,108 @@ function VendorDashboardView({ vendor, bookingItems, onEditProfile, onPreview, o
     <div className="mx-auto max-w-3xl px-6 pb-24 pt-10 sm:px-10">
       <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Hej, {vendor.contactPerson || vendor.companyName}! 👋</h1>
 
+      {banner && (
+        <div className="mt-5 rounded-3xl p-5" style={{ backgroundColor: banner.bg }}>
+          <p className="font-semibold" style={{ color: banner.fg }}>
+            {banner.title}
+          </p>
+          <p className="mt-1 text-sm" style={{ color: colors.plum }}>
+            {banner.text}
+          </p>
+          {vendor.status === "rejected" && (
+            <a
+              href="mailto:info@planifest.se"
+              className="mt-3 inline-block rounded-full px-4 py-2 text-sm font-semibold"
+              style={{ backgroundColor: colors.coral, color: colors.white }}
+            >
+              Kontakta oss
+            </a>
+          )}
+        </div>
+      )}
+
+      <div className="mt-5 grid grid-cols-3 gap-3">
+        {[
+          { label: "Nya förfrågningar", value: pendingItems.length, action: onBookings },
+          { label: "Kommande bokningar", value: upcomingAll.length, action: onBookings },
+          { label: "Konversationer", value: conversationCount, action: onInbox },
+        ].map((t) => (
+          <button key={t.label} onClick={t.action} className="rounded-2xl p-4 text-center" style={{ backgroundColor: colors.lilacSoft }}>
+            <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>{t.value}</p>
+            <p className="text-xs" style={{ color: colors.lilacDeep }}>
+              {t.label}
+            </p>
+          </button>
+        ))}
+      </div>
+
+      {pendingItems.length > 0 && (
+        <section className="mt-5 rounded-3xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+          <h2 className="mb-3 font-semibold" style={{ color: colors.plum }}>
+            Nya förfrågningar
+          </h2>
+          <div className="space-y-3">
+            {pendingItems.slice(0, 3).map((i) => (
+              <div key={`${i.bookingNumber}-${i.id}`} className="rounded-2xl p-4" style={{ backgroundColor: colors.cream }}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="font-semibold" style={{ color: colors.plum }}>
+                      {i.name}
+                    </p>
+                    <p className="mt-0.5 text-sm" style={{ color: colors.plumSoft }}>
+                      {i.date}, {hhmm(i.startTime)}–{hhmm(i.endTime)} · {i.guests} gäster
+                    </p>
+                  </div>
+                  <span style={{ fontFamily: serif, fontSize: 17, color: colors.plum }}>{formatKr(i.price)}</span>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => onRespond(i.bookingNumber, i.id, "declined")}
+                    className="flex-1 rounded-full px-4 py-2 text-sm font-medium"
+                    style={{ border: `1.5px solid ${colors.coral}`, color: colors.coralDeep, backgroundColor: colors.white }}
+                  >
+                    Neka
+                  </button>
+                  <button
+                    onClick={() => onRespond(i.bookingNumber, i.id, "confirmed")}
+                    className="flex-1 rounded-full px-4 py-2 text-sm font-semibold"
+                    style={{ backgroundColor: colors.green, color: colors.white }}
+                  >
+                    Acceptera
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          {pendingItems.length > 3 && (
+            <button onClick={onBookings} className="mt-3 text-sm font-medium underline" style={{ color: colors.lilacDeep }}>
+              Visa alla {pendingItems.length} förfrågningar
+            </button>
+          )}
+        </section>
+      )}
+
+      {upcomingAll.length > 0 && (
+        <section className="mt-5 rounded-3xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+          <h2 className="mb-3 font-semibold" style={{ color: colors.plum }}>
+            Kommande bokningar
+          </h2>
+          <div className="space-y-2">
+            {upcomingAll.slice(0, 3).map((i) => (
+              <div key={`${i.bookingNumber}-${i.id}`} className="flex items-center justify-between rounded-xl p-3 text-sm" style={{ backgroundColor: "#E3F3E9" }}>
+                <span className="flex items-center gap-2" style={{ color: colors.plum }}>
+                  <Check size={14} color={colors.green} /> {i.date}, {hhmm(i.startTime)}–{hhmm(i.endTime)} · {i.name}
+                </span>
+                <span style={{ color: colors.plumSoft }}>{formatKr(i.price)}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={onBookings} className="mt-3 text-sm font-medium underline" style={{ color: colors.lilacDeep }}>
+            Öppna kalendern
+          </button>
+        </section>
+      )}
+
       <div className="mt-5 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
         <p style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>{vendor.companyName}</p>
         <span
@@ -3667,16 +3838,6 @@ function VendorDashboardView({ vendor, bookingItems, onEditProfile, onPreview, o
         >
           {status.emoji} Status: {status.label}
         </span>
-        {vendor.status === "approved" && (
-          <p className="mt-2 text-sm" style={{ color: colors.plumSoft }}>
-            Er profil är publicerad och synlig för kunder på Planifest.
-          </p>
-        )}
-        {vendor.status === "rejected" && (
-          <p className="mt-2 text-sm" style={{ color: colors.plumSoft }}>
-            Er ansökan godkändes inte den här gången. Ni kan fortfarande redigera profilen.
-          </p>
-        )}
         <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2" style={{ color: colors.plumSoft }}>
           <span className="flex items-center gap-1">
             <MapPin size={13} /> {locationName}
@@ -5332,6 +5493,7 @@ export default function App() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState("signin"); // "signin" | "signup"
   const howItWorksRef = useRef(null);
+  const landOnPortalRef = useRef(false); // set at login / session restore; consumed once the vendor row has loaded
   const toastTimer = useRef(null);
 
   const showToast = (msg) => {
@@ -5346,6 +5508,7 @@ export default function App() {
   useEffect(() => {
     const stored = loadStoredSession();
     if (!stored) return;
+    landOnPortalRef.current = true;
     if (stored._expiresAtMs && stored._expiresAtMs > Date.now() + 60000) {
       setSession(stored);
       return;
@@ -5394,7 +5557,10 @@ export default function App() {
   useEffect(() => {
     if (!session?.user) return;
     fetchVendorByProfileId(session.user.id, session.access_token).then(({ data, error }) => {
-      if (error || !data || data.length === 0) return;
+      if (error || !data || data.length === 0) {
+        landOnPortalRef.current = false;
+        return;
+      }
       const local = mapDbVendorToLocal(data[0]);
       setVendorApplications((apps) => {
         const idx = apps.findIndex((v) => v.id === local.id);
@@ -5406,6 +5572,10 @@ export default function App() {
         return [...apps, local];
       });
       setSubmittedVendorId(local.id);
+      if (landOnPortalRef.current) {
+        landOnPortalRef.current = false;
+        setView((v) => (v === "home" ? "vendorDashboard" : v)); // only from the front page, never mid-checkout
+      }
     });
   }, [session]);
 
@@ -5490,6 +5660,7 @@ export default function App() {
   useEffect(() => {
     const vendorId = submittedVendor?.id;
     if (!vendorId || vendorId.startsWith("VND-") || !session?.access_token) return;
+    if (!["vendorDashboard", "vendorBookings"].includes(view)) return;
     supabaseRestRequest(
       `/booking_items?vendor_id=eq.${vendorId}&select=*,bookings(booking_number,date,start_time,end_time,guests,occasion,cancelled)`,
       session.access_token
@@ -5534,7 +5705,7 @@ export default function App() {
         return next;
       });
     });
-  }, [submittedVendor?.id, session]);
+  }, [submittedVendor?.id, session, view]);
 
   // Real reviews, publicly readable — merged in the same shape applyCustomerReviews() already expects.
   useEffect(() => {
@@ -5635,6 +5806,7 @@ export default function App() {
       body: JSON.stringify({ email, password }),
     });
     if (error) return error;
+    landOnPortalRef.current = true;
     setSessionPersist(data);
     showToast("Inloggad ✓");
 
@@ -6122,9 +6294,13 @@ export default function App() {
 
   const goVendorInbox = () => setView("vendorInbox");
 
-  // --- Support (Fas 4) — simple in-memory contact form, see SupportModal ---
-  const submitSupportMessage = (msg) => {
-    setSupportMessages((m) => [...m, { id: "sup-" + Date.now(), ...msg, ts: Date.now() }]);
+  // --- Support — saved to the database; a trigger there emails info@planifest.se ---
+  const submitSupportMessage = async ({ email, subject, message }) => {
+    const { error } = await supabaseRestRequest("/support_messages", session?.access_token, {
+      method: "POST",
+      body: JSON.stringify({ customer_id: session?.user?.id || null, email, subject, message }),
+    });
+    return error || null;
   };
 
   // --- Vendor signup (Fas 2A) ---
@@ -6456,13 +6632,22 @@ export default function App() {
       >
         Förhandsvisa
       </button>
+      <button
+        onClick={() => {
+          goHome();
+          setMobileMenuOpen(false);
+        }}
+        style={{ color: colors.plumSoft }}
+      >
+        Till kundsidan
+      </button>
     </>
   );
 
   const vendorLogoutButton = (
     <button
       onClick={() => {
-        showToast("Utloggning är inte byggt i denna prototyp än.");
+        signOut();
         setMobileMenuOpen(false);
       }}
       className="text-sm font-medium"
@@ -6506,7 +6691,7 @@ export default function App() {
                   className="flex items-center gap-1.5 text-sm font-medium"
                   style={{ color: colors.plumSoft }}
                 >
-                  <Briefcase size={14} /> Bli leverantör
+                  <Briefcase size={14} /> {submittedVendor ? "Min portal" : "Bli leverantör"}
                 </button>
                 {session && profile ? (
                   <div className="flex items-center gap-3">
@@ -6548,7 +6733,7 @@ export default function App() {
                 <div className="flex flex-col items-start gap-3 pt-3 [&>button]:text-left">{vendorPortalNavLinks}</div>
                 <button
                   onClick={() => {
-                    showToast("Utloggning är inte byggt i denna prototyp än.");
+                    signOut();
                     setMobileMenuOpen(false);
                   }}
                   className="mt-3 rounded-full px-4 py-2.5 text-center"
@@ -6576,7 +6761,7 @@ export default function App() {
                   className="mt-3 flex items-center gap-1.5 rounded-full px-4 py-2.5"
                   style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep }}
                 >
-                  <Briefcase size={14} /> Bli leverantör
+                  <Briefcase size={14} /> {submittedVendor ? "Min portal" : "Bli leverantör"}
                 </button>
                 {session && profile ? (
                   <>
@@ -6723,6 +6908,8 @@ export default function App() {
           onPreview={goVendorPreview}
           onBookings={goVendorBookings}
           onInbox={goVendorInbox}
+          onRespond={respondToBookingItem}
+          conversationCount={vendorConversations.length}
         />
       )}
 
@@ -6872,7 +7059,7 @@ export default function App() {
         onSignUp={signUpCustomer}
         onForgotPassword={requestPasswordReset}
       />
-      <SupportModal open={supportOpen} onClose={() => setSupportOpen(false)} onSubmit={submitSupportMessage} />
+      <SupportModal open={supportOpen} onClose={() => setSupportOpen(false)} onSubmit={submitSupportMessage} defaultEmail={session?.user?.email || ""} />
       <Toast message={toast} />
       {cookieConsent === null && (
         <CookieConsentBanner onAcceptAll={() => setConsent("all")} onNecessaryOnly={() => setConsent("necessary")} onOpenPolicy={goCookiePolicy} />
