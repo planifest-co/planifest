@@ -124,7 +124,76 @@ function buildTemplateTasks(eventType, eventDate, existingTitles = []) {
       return { id: newId(), title, done: false, dueDate: due && due >= todayISO() ? due : null };
     });
 }
+// ---- Gästlista & RSVP ----
+const RSVP_STATUS = {
+  yes: { label: "Kommer", bg: "#E3F3E9", fg: "#3D7A52" },
+  maybe: { label: "Kanske", bg: "#EFE3EE", fg: "#8B6589" },
+  no: { label: "Kan inte", bg: "#FBE4E1", fg: "#A5483F" },
+  pending: { label: "Ej svarat", bg: "#EFE6DE", fg: "#8F7A6C" },
+};
+const DIETARY_OPTIONS = ["Vegetarian", "Vegan", "Glutenfri", "Laktosfri", "Nötfri"];
+const guestLink = (token) => `${typeof window !== "undefined" ? window.location.origin : ""}/?svara=${token}`;
+const eventWhen = (ev) =>
+  [ev.date ? new Date(`${ev.date}T00:00:00`).toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" }) : "", ev.eventTime ? `kl. ${ev.eventTime}` : ""].filter(Boolean).join(" ");
+const invitationText = (ev, guest) =>
+  `Hej ${guest.name}! ${(occasionMap[ev.eventType] || occasionMap.other).emoji} Du är bjuden till ${ev.title}${eventWhen(ev) ? ` ${eventWhen(ev)}` : ""}${ev.location ? `, ${ev.location}` : ""}. Svara gärna här: ${guestLink(guest.token)}`;
+// On a phone this opens the share sheet (WhatsApp, SMS...); elsewhere it copies the text.
+async function shareOrCopy(text, title) {
+  try {
+    if (typeof navigator !== "undefined" && navigator.share) {
+      await navigator.share({ title, text });
+      return "shared";
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") return "cancelled";
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    return "copied";
+  } catch (e) {
+    window.prompt("Kopiera texten:", text);
+    return "copied";
+  }
+}
+// Guests are not signed in, so they talk to the database only through two public functions.
+async function rpcAnon(name, payload) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return { error: { message: data?.message || "error" } };
+    return { data };
+  } catch (e) {
+    return { error: { message: "network" } };
+  }
+}
+const rsvpErrorText = (m = "") =>
+  m.includes("closed") ? "Svarstiden har gått ut." : m.includes("name") ? "Skriv ditt namn." : m.includes("toomany") ? "Många svarar just nu. Försök igen om en stund." : m.includes("toolong") ? "Texten är för lång." : m.includes("network") ? "Kunde inte nå servern. Försök igen." : "Länken fungerar inte. Be den som bjudit in dig om en ny.";
+const mapGuest = (g) => ({
+  id: g.id,
+  name: g.name,
+  token: g.token,
+  status: g.status,
+  allowedParty: g.allowed_party,
+  partySize: g.party_size,
+  dietary: g.dietary || "",
+  message: g.message || "",
+  source: g.source,
+});
+
 const normalizeEvent = (e) => ({
+  location: e.location || "",
+  eventTime: e.event_time || "",
+  inviteMessage: e.invite_message || "",
+  rsvpDeadline: e.rsvp_deadline || "",
+  inviteToken: e.invite_token || null,
+  guestList: (e.event_guests || [])
+    .slice()
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+    .map(mapGuest),
   id: e.id,
   title: e.title,
   eventType: e.event_type,
@@ -5439,7 +5508,519 @@ function NotesPad({ initial, onSave }) {
   );
 }
 
-function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateEvent, onUpdateEvent, onDeleteEvent, taskApi, budgetApi, bookings, savedProviders, onViewProvider, party, onLogin, onSignup }) {
+function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
+  const [filter, setFilter] = useState("all");
+  const [name, setName] = useState("");
+  const [bulk, setBulk] = useState("");
+  const [showBulk, setShowBulk] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
+  const [open, setOpen] = useState(null); // guest id with the edit panel open
+  const [copied, setCopied] = useState("");
+  const [loc, setLoc] = useState(ev.location);
+  const [time, setTime] = useState(ev.eventTime);
+  const [msg, setMsg] = useState(ev.inviteMessage);
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+  const guests = ev.guestList;
+
+  // pick up answers that arrive while the page is open
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (typeof document === "undefined" || !document.hidden) onRefresh(ev.id);
+    }, 20000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ev.id]);
+
+  const heads = (status) => guests.filter((g) => g.status === status).reduce((n, g) => n + g.partySize, 0);
+  const count = (status) => guests.filter((g) => g.status === status).length;
+  const yesHeads = heads("yes");
+  const maybeHeads = heads("maybe");
+  const shown = guests.filter((g) => filter === "all" || g.status === filter);
+
+  // what the cook needs to know: dietary wishes of everyone who is coming (or might)
+  const diet = {};
+  const notes = [];
+  guests
+    .filter((g) => g.status === "yes" || g.status === "maybe")
+    .forEach((g) => {
+      g.dietary
+        .split(/,\s*/)
+        .filter(Boolean)
+        .forEach((d) => {
+          if (DIETARY_OPTIONS.includes(d)) diet[d] = (diet[d] || 0) + g.partySize;
+          else notes.push(`${g.name}: ${d}`);
+        });
+    });
+
+  const addOne = () => {
+    if (!name.trim()) return;
+    guestApi.add(ev.id, [name.trim()]);
+    setName("");
+  };
+  const addBulk = () => {
+    const names = bulk
+      .split(/\n|,|;/)
+      .map((n) => n.trim())
+      .filter(Boolean)
+      .slice(0, 100);
+    if (names.length === 0) return;
+    guestApi.add(ev.id, names);
+    setBulk("");
+    setShowBulk(false);
+  };
+  const flash = (key) => {
+    setCopied(key);
+    setTimeout(() => setCopied(""), 1800);
+  };
+  const send = async (g) => {
+    const r = await shareOrCopy(invitationText(ev, g), ev.title);
+    if (r !== "cancelled") flash(`i-${g.id}`);
+  };
+  const copyLink = async (g) => {
+    await shareOrCopy(guestLink(g.token), ev.title).catch(() => {});
+    flash(`l-${g.id}`);
+  };
+  const filters = [
+    ["all", `Alla (${guests.length})`],
+    ["yes", `Kommer (${count("yes")})`],
+    ["maybe", `Kanske (${count("maybe")})`],
+    ["no", `Kan inte (${count("no")})`],
+    ["pending", `Ej svarat (${count("pending")})`],
+  ];
+
+  return (
+    <div className="mt-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          ["Kommer", yesHeads, "yes", "personer"],
+          ["Kanske", maybeHeads, "maybe", "personer"],
+          ["Kan inte", count("no"), "no", "gäster"],
+          ["Ej svarat", count("pending"), "pending", "gäster"],
+        ].map(([label, value, key, unit]) => (
+          <div key={label} className="rounded-2xl p-3 text-center" style={{ backgroundColor: RSVP_STATUS[key].bg }}>
+            <p style={{ fontFamily: serif, fontSize: 24, color: RSVP_STATUS[key].fg }}>{value}</p>
+            <p className="text-xs" style={{ color: RSVP_STATUS[key].fg }}>
+              {label} <span className="opacity-70">({unit})</span>
+            </p>
+          </div>
+        ))}
+      </div>
+      {yesHeads > 0 && yesHeads !== ev.guests && (
+        <button onClick={() => onUpdateEvent(ev.id, { guests: yesHeads })} className="mt-2 text-xs font-medium underline" style={{ color: colors.lilacDeep }}>
+          Sätt antal gäster i festen till {yesHeads}
+        </button>
+      )}
+
+      <div className="mt-5 rounded-2xl p-4" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.beige}` }}>
+        <button onClick={() => setShowInvite((v) => !v)} className="flex w-full items-center justify-between text-left text-sm font-semibold" style={{ color: colors.plum }}>
+          <span>Inbjudan: plats, tid och hälsning</span>
+          <span style={{ color: colors.lilacDeep }}>{showInvite ? "Dölj" : "Ändra"}</span>
+        </button>
+        {!showInvite && (
+          <p className="mt-1 text-xs" style={{ color: colors.plumSoft }}>
+            {[ev.location, ev.eventTime, ev.rsvpDeadline ? `svara senast ${shortDate(ev.rsvpDeadline)}` : ""].filter(Boolean).join(" · ") || "Det här ser gästerna när de öppnar sin länk."}
+          </p>
+        )}
+        {showInvite && (
+          <div className="mt-3 grid gap-3">
+            <label className="flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+              Plats
+              <input value={loc} onChange={(e) => setLoc(e.target.value)} onBlur={() => loc !== ev.location && onUpdateEvent(ev.id, { location: loc.trim() })} maxLength={200} placeholder="Till exempel: Hemma hos oss, Storgatan 1" className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+                Tid
+                <input value={time} onChange={(e) => setTime(e.target.value)} onBlur={() => time !== ev.eventTime && onUpdateEvent(ev.id, { eventTime: time.trim() })} maxLength={40} placeholder="14:00" className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+                Svara senast
+                <input type="date" value={ev.rsvpDeadline} onChange={(e) => onUpdateEvent(ev.id, { rsvpDeadline: e.target.value })} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+              </label>
+            </div>
+            <label className="flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+              Hälsning till gästerna
+              <textarea value={msg} onChange={(e) => setMsg(e.target.value)} onBlur={() => msg !== ev.inviteMessage && onUpdateEvent(ev.id, { inviteMessage: msg.trim() })} rows={3} maxLength={1000} placeholder="Skriv något personligt..." className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+            </label>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-2xl p-4" style={{ backgroundColor: colors.lilacSoft }}>
+        <label className="flex items-start gap-3 text-sm" style={{ color: colors.plum }}>
+          <input type="checkbox" checked={!!ev.inviteToken} onChange={(e) => guestApi.setOpen(ev, e.target.checked)} className="mt-1" aria-label="Gemensam länk" />
+          <span>
+            <strong>Gemensam länk.</strong> Skicka den till en grupp (till exempel i WhatsApp) så lägger gästerna till sig själva när de svarar.
+          </span>
+        </label>
+        {ev.inviteToken && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-lg px-2 py-1.5 text-xs" style={{ backgroundColor: colors.white, color: colors.plum }}>
+              {guestLink(ev.inviteToken)}
+            </code>
+            <button
+              onClick={async () => {
+                await shareOrCopy(`${ev.title}: svara här ${guestLink(ev.inviteToken)}`, ev.title);
+                flash("open");
+              }}
+              className="rounded-full px-4 py-1.5 text-xs font-semibold"
+              style={{ backgroundColor: colors.coral, color: colors.white }}
+            >
+              {copied === "open" ? "Kopierad ✓" : "Kopiera länk"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-2">
+        <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addOne()} maxLength={100} placeholder="Lägg till en gäst..." aria-label="Ny gäst" className="min-w-[160px] flex-1 rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
+        <button onClick={addOne} className="rounded-full px-5 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+          Lägg till
+        </button>
+      </div>
+      <button onClick={() => setShowBulk((v) => !v)} className="mt-2 text-xs font-medium underline" style={{ color: colors.lilacDeep }}>
+        {showBulk ? "Dölj" : "Klistra in flera namn på en gång"}
+      </button>
+      {showBulk && (
+        <div className="mt-2">
+          <textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5} aria-label="Flera gäster" placeholder={"Ett namn per rad:\nFarmor\nKalle och Lisa"} className="w-full rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
+          <button onClick={addBulk} className="mt-2 rounded-full px-5 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+            Lägg till alla
+          </button>
+        </div>
+      )}
+
+      {guests.length > 0 && (
+        <div className="mt-4 flex gap-1.5 overflow-x-auto">
+          {filters.map(([id, label]) => (
+            <ChoiceChip key={id} active={filter === id} onClick={() => setFilter(id)}>
+              {label}
+            </ChoiceChip>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 space-y-2">
+        {guests.length === 0 && (
+          <p className="py-6 text-center text-sm" style={{ color: colors.plumSoft }}>
+            Inga gäster än. Lägg till några namn, så får var och en sin egen länk att svara via.
+          </p>
+        )}
+        {shown.map((g) => {
+          const meta = RSVP_STATUS[g.status];
+          return (
+            <div key={g.id} className="rounded-2xl p-3" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.beige}` }}>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="min-w-0 flex-1 truncate font-semibold" style={{ color: colors.plum }}>
+                  {g.name}
+                  {g.source === "open" && <span className="ml-1.5 text-xs font-normal" style={{ color: colors.plumSoft }}>(anmälde sig själv)</span>}
+                </p>
+                <span className="rounded-full px-2.5 py-1 text-xs font-medium" style={{ backgroundColor: meta.bg, color: meta.fg }}>
+                  {meta.label}
+                  {g.status === "yes" && g.partySize > 1 ? ` · ${g.partySize} pers` : ""}
+                </span>
+              </div>
+              {(g.dietary || g.message) && (
+                <p className="mt-1 text-xs italic" style={{ color: colors.plumSoft }}>
+                  {[g.dietary, g.message && `"${g.message}"`].filter(Boolean).join(" · ")}
+                </p>
+              )}
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                <button onClick={() => send(g)} className="rounded-full px-3 py-1.5 font-semibold" style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}>
+                  {copied === `i-${g.id}` ? "Klart ✓" : "Skicka inbjudan"}
+                </button>
+                <button onClick={() => copyLink(g)} className="font-medium underline" style={{ color: colors.lilacDeep }}>
+                  {copied === `l-${g.id}` ? "Kopierad ✓" : "Kopiera länk"}
+                </button>
+                <button onClick={() => setOpen(open === g.id ? null : g.id)} className="font-medium underline" style={{ color: colors.plumSoft }}>
+                  {open === g.id ? "Stäng" : "Ändra"}
+                </button>
+                <button onClick={() => guestApi.remove(ev.id, g.id)} aria-label={`Ta bort ${g.name}`} className="ml-auto p-1">
+                  <Trash2 size={14} color={colors.coralDeep} />
+                </button>
+              </div>
+              {open === g.id && (
+                <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl p-3 text-xs" style={{ backgroundColor: colors.cream, color: colors.plum }}>
+                  <label className="flex items-center gap-1.5">
+                    Svar
+                    <select value={g.status} onChange={(e) => guestApi.update(ev.id, g.id, { status: e.target.value })} aria-label={`Svar för ${g.name}`} className="rounded-lg px-2 py-1" style={fieldStyle}>
+                      {Object.entries(RSVP_STATUS).map(([k, m]) => (
+                        <option key={k} value={k}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    Platser
+                    <select value={g.allowedParty} onChange={(e) => guestApi.update(ev.id, g.id, { allowedParty: Number(e.target.value) })} aria-label={`Platser för ${g.name}`} className="rounded-lg px-2 py-1" style={fieldStyle}>
+                      {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span style={{ color: colors.plumSoft }}>Platser = hur många som får komma, inklusive gästen.</span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {(Object.keys(diet).length > 0 || notes.length > 0) && (
+        <div className="mt-6 rounded-2xl p-4" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.beige}` }}>
+          <p className="text-sm font-semibold" style={{ color: colors.plum }}>
+            Mat och allergier
+          </p>
+          <p className="mt-1 text-xs" style={{ color: colors.plumSoft }}>
+            Bra att ge till catering eller bagare. Räknar dem som kommer och kanske kommer.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {Object.entries(diet).map(([d, n]) => (
+              <span key={d} className="rounded-full px-3 py-1 text-xs font-medium" style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}>
+                {d} × {n}
+              </span>
+            ))}
+          </div>
+          {notes.length > 0 && (
+            <ul className="mt-2 space-y-0.5 text-xs" style={{ color: colors.plum }}>
+              {notes.map((n, i) => (
+                <li key={i}>{n}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// What a guest sees when they open their link. No account, no login.
+function RsvpView({ state, onSubmit, onHome }) {
+  const { loading, error, data, saved } = state;
+  const [status, setStatus] = useState("");
+  const [size, setSize] = useState(1);
+  const [chips, setChips] = useState([]);
+  const [other, setOther] = useState("");
+  const [message, setMessage] = useState("");
+  const [name, setName] = useState("");
+  const [sending, setSending] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  useEffect(() => {
+    const g = data?.guest;
+    if (!g) return;
+    setStatus(g.status === "pending" ? "" : g.status);
+    setSize(g.party_size || 1);
+    const parts = (g.dietary || "").split(/,\s*/).filter(Boolean);
+    setChips(parts.filter((x) => DIETARY_OPTIONS.includes(x)));
+    setOther(parts.filter((x) => !DIETARY_OPTIONS.includes(x)).join(", "));
+    setMessage(g.message || "");
+  }, [data]);
+
+  const wrap = (children) => <div className="mx-auto max-w-lg px-6 pb-24 pt-10 sm:px-10">{children}</div>;
+  if (loading) return wrap(<p className="text-center text-sm" style={{ color: colors.plumSoft }}>Öppnar din inbjudan...</p>);
+  if (error || !data) {
+    return wrap(
+      <div className="text-center">
+        <h1 style={{ fontFamily: serif, fontSize: 26, color: colors.plum }}>Länken fungerar inte</h1>
+        <p className="mx-auto mt-3 max-w-sm text-sm" style={{ color: colors.plumSoft }}>
+          {error || "Inbjudan hittades inte."}
+        </p>
+      </div>
+    );
+  }
+
+  const e = data.event;
+  const occ = occasionMap[e.event_type] || occasionMap.other;
+  const isOpen = data.kind === "open";
+  const maxParty = isOpen ? 5 : data.guest?.allowed_party || 1;
+  const host = e.host ? `${e.host} bjuder in dig till` : "Du är bjuden till";
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+  const answered = !editing && (saved || (data.guest && data.guest.status !== "pending"));
+  const meta = RSVP_STATUS[data.guest?.status || "pending"];
+
+  const submit = async () => {
+    if (!status) {
+      setFormError("Välj om du kommer.");
+      return;
+    }
+    if (isOpen && !name.trim()) {
+      setFormError("Skriv ditt namn.");
+      return;
+    }
+    setFormError("");
+    setSending(true);
+    const dietary = status === "no" ? "" : [...chips, other.trim()].filter(Boolean).join(", ");
+    const err = await onSubmit({ status, partySize: status === "no" ? 1 : size, dietary, message: message.trim(), name: name.trim() });
+    setSending(false);
+    if (err) setFormError(err);
+    else setEditing(false);
+  };
+
+  const card = (
+    <div className="relative overflow-hidden rounded-3xl p-6 text-center" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}`, boxShadow: "0 10px 30px rgba(76,51,38,0.08)" }}>
+      {saved?.status === "yes" && <Confetti key={saved.guestToken} />}
+      <p style={{ fontFamily: hand, fontSize: 26, color: colors.lilacDeep }}>{host}</p>
+      <p className="mt-1 text-4xl">{occ.emoji}</p>
+      <h1 className="mt-1" style={{ fontFamily: serif, fontSize: 30, color: colors.plum }}>
+        {e.title}
+      </h1>
+      <div className="mt-3 flex flex-col items-center gap-1 text-sm" style={{ color: colors.plum }}>
+        {e.date && (
+          <span className="flex items-center gap-1.5">
+            <Calendar size={14} /> {new Date(`${e.date}T00:00:00`).toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+          </span>
+        )}
+        {e.time && (
+          <span className="flex items-center gap-1.5">
+            <Clock size={14} /> kl. {e.time}
+          </span>
+        )}
+        {e.location && (
+          <span className="flex items-center gap-1.5">
+            <MapPin size={14} /> {e.location}
+          </span>
+        )}
+      </div>
+      {e.message && (
+        <p className="mx-auto mt-4 max-w-sm whitespace-pre-line text-sm italic leading-relaxed" style={{ fontFamily: serif, color: colors.plumSoft }}>
+          "{e.message}"
+        </p>
+      )}
+    </div>
+  );
+
+  return wrap(
+    <>
+      {card}
+      <div className="mt-5">
+        {data.closed ? (
+          <div className="rounded-2xl p-4 text-center text-sm" style={{ backgroundColor: colors.beige, color: colors.plum }}>
+            Svarstiden har gått ut{e.deadline ? ` (${shortDate(e.deadline)})` : ""}.
+            {data.guest && data.guest.status !== "pending" && <span> Ditt svar var: <strong>{meta.label}</strong>.</span>}
+          </div>
+        ) : answered ? (
+          <div className="rounded-2xl p-5 text-center" style={{ backgroundColor: "#E3F3E9" }}>
+            <p style={{ fontFamily: hand, fontSize: 28, color: "#3D7A52" }}>Tack, ditt svar är sparat!</p>
+            <p className="mt-1 text-sm" style={{ color: colors.plum }}>
+              {data.guest?.name ? `${data.guest.name}: ` : ""}
+              <strong>{meta.label}</strong>
+              {data.guest?.status === "yes" && data.guest.party_size > 1 ? ` · ${data.guest.party_size} personer` : ""}
+            </p>
+            {isOpen || saved?.guestToken ? (
+              <div className="mt-3 text-xs" style={{ color: colors.plum }}>
+                <p>Vill du ändra dig? Spara din personliga länk:</p>
+                <button
+                  onClick={async () => {
+                    await shareOrCopy(guestLink(saved?.guestToken || state.token), e.title);
+                    setCopiedLink(true);
+                  }}
+                  className="mt-1 font-semibold underline"
+                >
+                  {copiedLink ? "Länken är kopierad ✓" : "Kopiera min länk"}
+                </button>
+              </div>
+            ) : null}
+            <button onClick={() => setEditing(true)} className="mt-3 rounded-full px-5 py-2 text-sm font-semibold" style={{ border: `1.5px solid ${colors.coral}`, color: colors.coral, backgroundColor: colors.white }}>
+              Ändra mitt svar
+            </button>
+          </div>
+        ) : (
+          <div className="rounded-3xl p-5" style={{ backgroundColor: colors.cream }}>
+            {isOpen ? (
+              <label className="flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+                Ditt namn
+                <input value={name} onChange={(ev2) => setName(ev2.target.value)} maxLength={100} aria-label="Ditt namn" className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+              </label>
+            ) : (
+              <p style={{ fontFamily: hand, fontSize: 26, color: colors.plum }}>Hej {data.guest?.name}!</p>
+            )}
+            <p className="mt-3 text-sm font-semibold" style={{ color: colors.plum }}>
+              Kommer du?
+            </p>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {[
+                ["yes", "Jag kommer 🎉"],
+                ["maybe", "Kanske"],
+                ["no", "Kan tyvärr inte"],
+              ].map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => setStatus(k)}
+                  aria-pressed={status === k}
+                  className="rounded-2xl px-2 py-3 text-sm font-semibold"
+                  style={{ backgroundColor: status === k ? RSVP_STATUS[k].bg : colors.white, color: status === k ? RSVP_STATUS[k].fg : colors.plum, border: `2px solid ${status === k ? RSVP_STATUS[k].fg : colors.beige}` }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {(status === "yes" || status === "maybe") && (
+              <>
+                {maxParty > 1 && (
+                  <div className="mt-4 flex items-center gap-3">
+                    <span className="text-sm font-semibold" style={{ color: colors.plum }}>
+                      Hur många kommer? <span className="font-normal" style={{ color: colors.plumSoft }}>(inklusive dig)</span>
+                    </span>
+                    <button onClick={() => setSize((n) => Math.max(1, n - 1))} aria-label="Färre" className="h-8 w-8 rounded-full text-lg font-semibold" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.beige}` }}>
+                      −
+                    </button>
+                    <span aria-label="Antal personer" className="w-5 text-center font-semibold" style={{ color: colors.plum }}>
+                      {size}
+                    </span>
+                    <button onClick={() => setSize((n) => Math.min(maxParty, n + 1))} aria-label="Fler" className="h-8 w-8 rounded-full text-lg font-semibold" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.beige}` }}>
+                      +
+                    </button>
+                  </div>
+                )}
+                <p className="mt-4 text-sm font-semibold" style={{ color: colors.plum }}>
+                  Något vi ska tänka på med maten?
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {DIETARY_OPTIONS.map((d) => (
+                    <ChoiceChip key={d} active={chips.includes(d)} onClick={() => setChips((c) => (c.includes(d) ? c.filter((x) => x !== d) : [...c, d]))}>
+                      {d}
+                    </ChoiceChip>
+                  ))}
+                </div>
+                <input value={other} onChange={(ev2) => setOther(ev2.target.value)} maxLength={150} placeholder="Annat, till exempel allergier" aria-label="Annat om maten" className="mt-2 w-full rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
+              </>
+            )}
+            <textarea value={message} onChange={(ev2) => setMessage(ev2.target.value)} rows={2} maxLength={500} placeholder="Ett meddelande till värden (valfritt)" aria-label="Meddelande" className="mt-4 w-full rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
+            {formError && (
+              <p className="mt-2 text-sm" style={{ color: colors.coralDeep }}>
+                {formError}
+              </p>
+            )}
+            <button onClick={submit} disabled={sending} className="mt-4 w-full rounded-full py-3 text-base font-semibold" style={{ backgroundColor: colors.coral, color: colors.white, opacity: sending ? 0.6 : 1 }}>
+              {sending ? "Skickar..." : "Skicka mitt svar"}
+            </button>
+            {e.deadline && (
+              <p className="mt-2 text-center text-xs" style={{ color: colors.plumSoft }}>
+                Svara senast {shortDate(e.deadline)}.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+      <p className="mt-5 text-center text-xs" style={{ color: colors.plumSoft }}>
+        Ditt svar delas bara med {e.host || "den som bjudit in dig"}.
+      </p>
+      <p className="mt-4 text-center text-xs" style={{ color: colors.plumSoft }}>
+        Ska du själv ha en fest?{" "}
+        <button onClick={onHome} className="font-semibold underline" style={{ color: colors.lilacDeep }}>
+          Planera den på Planifest
+        </button>
+      </p>
+    </>
+  );
+}
+
+function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateEvent, onUpdateEvent, onDeleteEvent, taskApi, budgetApi, guestApi, bookings, savedProviders, onViewProvider, party, onLogin, onSignup }) {
   const [tab, setTab] = useState("checklist");
   const [modal, setModal] = useState(null); // null | "create" | "edit"
   const [newTask, setNewTask] = useState("");
@@ -5598,6 +6179,7 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
   const tabs = [
     { id: "checklist", label: "Checklista", icon: ListChecks, count: open.length },
     { id: "budget", label: "Budget", icon: Wallet },
+    { id: "guests", label: "Gäster", icon: Users, count: ev.guestList.length },
     { id: "notes", label: "Anteckningar", icon: StickyNote },
     { id: "saved", label: "Sparade", icon: Heart, count: savedProviders.length },
   ];
@@ -5818,6 +6400,8 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
           </div>
         </div>
       )}
+
+      {tab === "guests" && <GuestsTab key={ev.id} ev={ev} guestApi={guestApi} onUpdateEvent={onUpdateEvent} onRefresh={guestApi.refresh} />}
 
       {tab === "notes" && <NotesPad key={ev.id} initial={ev.notes} onSave={(text) => onUpdateEvent(ev.id, { notes: text })} />}
 
@@ -7191,6 +7775,7 @@ export default function App() {
   const [activeEventId, setActiveEventId] = useState(null);
   const [favoriteIds, setFavoriteIds] = useState(() => new Set());
   const [bookingEventId, setBookingEventId] = useState(undefined); // undefined = the active planning, "none" = no planning
+  const [rsvp, setRsvp] = useState({ loading: false, error: "", data: null, token: "", openToken: "", saved: null });
   const [guestError, setGuestError] = useState("");
   const [guestSubmitting, setGuestSubmitting] = useState(false);
   const [guestPendingEmail, setGuestPendingEmail] = useState("");
@@ -7240,6 +7825,31 @@ export default function App() {
     (async () => {
       const { data, error } = await guestRequest({ action: kind === "verifiera" ? "verify" : "get", token });
       setGuestBooking({ loading: false, error: error || "", data: data?.booking || null, justVerified: kind === "verifiera" && !error, token });
+    })();
+  }, []);
+  // A guest's invitation link: ?svara=TOKEN. Their personal link answers for them; the open link adds them to the list.
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("svara");
+    if (!token) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    setRsvp({ loading: true, error: "", data: null, token, openToken: token, saved: null });
+    setView("rsvp");
+    (async () => {
+      let use = token;
+      try {
+        // someone who joined through the open link earlier gets their own answer back
+        const stored = window.localStorage.getItem(`planifest-rsvp-${token}`);
+        if (stored) use = stored;
+      } catch (e) {
+        // no storage: fine
+      }
+      let res = await rpcAnon("rsvp_get", { p_token: use });
+      if ((res.error || !res.data) && use !== token) {
+        use = token;
+        res = await rpcAnon("rsvp_get", { p_token: token });
+      }
+      if (res.error || !res.data) setRsvp({ loading: false, error: "Länken fungerar inte. Be den som bjudit in dig om en ny.", data: null, token: use, openToken: token, saved: null });
+      else setRsvp({ loading: false, error: "", data: res.data, token: use, openToken: token, saved: null });
     })();
   }, []);
   const [party, setParty] = useState(emptyParty);
@@ -7560,7 +8170,7 @@ export default function App() {
     let stop = false;
     (async () => {
       const [ev, fav] = await Promise.all([
-        supabaseRestRequest("/events?select=*,event_tasks(*),event_budget_items(*)&order=created_at.asc", session.access_token),
+        supabaseRestRequest("/events?select=*,event_tasks(*),event_budget_items(*),event_guests(*)&order=created_at.asc", session.access_token),
         supabaseRestRequest("/favorites?select=vendor_id", session.access_token),
       ]);
       if (stop) return;
@@ -8029,7 +8639,7 @@ export default function App() {
   const createEvent = async ({ title, eventType, date, guests, budgetTotal, withTemplate }) => {
     const id = newId();
     const tasks = withTemplate ? buildTemplateTasks(eventType, date) : [];
-    const local = { id, title, eventType, date: date || "", guests: guests || null, budgetTotal: budgetTotal ?? null, notes: "", tasks, budget: [] };
+    const local = { id, title, eventType, date: date || "", guests: guests || null, budgetTotal: budgetTotal ?? null, notes: "", tasks, budget: [], location: "", eventTime: "", inviteMessage: "", rsvpDeadline: "", inviteToken: null, guestList: [] };
     setEvents((l) => [...l, local]);
     setActiveEventId(id);
     const { error } = await planningDb("/events", {
@@ -8063,6 +8673,10 @@ export default function App() {
     if ("guests" in patch) body.guests = patch.guests || null;
     if ("budgetTotal" in patch) body.budget_total = patch.budgetTotal;
     if ("notes" in patch) body.notes = patch.notes;
+    if ("location" in patch) body.location = patch.location || null;
+    if ("eventTime" in patch) body.event_time = patch.eventTime || null;
+    if ("inviteMessage" in patch) body.invite_message = patch.inviteMessage || null;
+    if ("rsvpDeadline" in patch) body.rsvp_deadline = patch.rsvpDeadline || null;
     const { error } = await planningDb(`/events?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(body) });
     if (error) {
       patchEvent(id, () => before);
@@ -8175,6 +8789,69 @@ export default function App() {
     },
   };
 
+  const guestApi = {
+    add: async (eventId, names) => {
+      const have = new Set((events.find((e) => e.id === eventId)?.guestList || []).map((g) => g.name.toLowerCase()));
+      const rows = [];
+      names.forEach((name) => {
+        if (have.has(name.toLowerCase())) return;
+        have.add(name.toLowerCase());
+        rows.push({ id: newId(), name: name.slice(0, 100), token: `${newId()}${newId()}`.replace(/-/g, ""), status: "pending", allowedParty: 1, partySize: 1, dietary: "", message: "", source: "host" });
+      });
+      if (rows.length === 0) {
+        showToast("Den gästen finns redan i listan");
+        return;
+      }
+      patchEvent(eventId, (e) => ({ ...e, guestList: [...e.guestList, ...rows] }));
+      const { error } = await planningDb("/event_guests", { method: "POST", body: JSON.stringify(rows.map((g) => ({ id: g.id, event_id: eventId, name: g.name, token: g.token }))) });
+      if (error) {
+        patchEvent(eventId, (e) => ({ ...e, guestList: e.guestList.filter((g) => !rows.some((r) => r.id === g.id)) }));
+        failed("lägga till gästerna", error);
+      }
+    },
+    update: async (eventId, guestId, patch) => {
+      const cur = events.find((e) => e.id === eventId)?.guestList.find((g) => g.id === guestId);
+      if (!cur) return;
+      const next = { ...patch };
+      if ("allowedParty" in patch && cur.partySize > patch.allowedParty) next.partySize = patch.allowedParty;
+      if (next.status === "no") next.partySize = 1;
+      patchEvent(eventId, (e) => ({ ...e, guestList: e.guestList.map((g) => (g.id === guestId ? { ...g, ...next } : g)) }));
+      const body = {};
+      if ("name" in next) body.name = next.name;
+      if ("status" in next) body.status = next.status;
+      if ("allowedParty" in next) body.allowed_party = next.allowedParty;
+      if ("partySize" in next) body.party_size = next.partySize;
+      if ("dietary" in next) body.dietary = next.dietary;
+      const { error } = await planningDb(`/event_guests?id=eq.${guestId}`, { method: "PATCH", body: JSON.stringify(body) });
+      if (error) {
+        patchEvent(eventId, (e) => ({ ...e, guestList: e.guestList.map((g) => (g.id === guestId ? cur : g)) }));
+        failed("spara", error);
+      }
+    },
+    remove: async (eventId, guestId) => {
+      const cur = events.find((e) => e.id === eventId)?.guestList.find((g) => g.id === guestId);
+      patchEvent(eventId, (e) => ({ ...e, guestList: e.guestList.filter((g) => g.id !== guestId) }));
+      const { error } = await planningDb(`/event_guests?id=eq.${guestId}`, { method: "DELETE" });
+      if (error && cur) {
+        patchEvent(eventId, (e) => ({ ...e, guestList: [...e.guestList, cur] }));
+        failed("ta bort gästen", error);
+      }
+    },
+    setOpen: async (ev, enabled) => {
+      const { data, error } = await planningDb("/rpc/set_open_rsvp", { method: "POST", body: JSON.stringify({ p_event_id: ev.id, p_enabled: enabled }) });
+      if (error) {
+        failed("ändra den gemensamma länken", error);
+        return;
+      }
+      patchEvent(ev.id, (e) => ({ ...e, inviteToken: typeof data === "string" ? data : null }));
+    },
+    // answers can arrive at any time (a guest answering from their phone): fetch the list again
+    refresh: async (eventId) => {
+      const { data } = await planningDb(`/event_guests?event_id=eq.${eventId}&select=*&order=created_at.asc`);
+      if (Array.isArray(data)) patchEvent(eventId, (e) => ({ ...e, guestList: data.map(mapGuest) }));
+    },
+  };
+
   const toggleFavorite = async (vendorId) => {
     if (!session?.access_token) {
       openAuthModal("signin");
@@ -8206,6 +8883,23 @@ export default function App() {
   const goPlanning = () => {
     setView("planning");
     setMobileMenuOpen(false);
+  };
+
+  // A guest answers their invitation. Returns an error text, or "" when it worked.
+  const submitRsvp = async ({ status, partySize, dietary, message, name }) => {
+    const { data, error } = await rpcAnon("rsvp_submit", { p_token: rsvp.token, p_status: status, p_party_size: partySize, p_dietary: dietary, p_message: message, p_name: name || null });
+    if (error) return rsvpErrorText(error.message);
+    const guestToken = data.guest_token;
+    if (rsvp.data?.kind === "open") {
+      try {
+        window.localStorage.setItem(`planifest-rsvp-${rsvp.openToken}`, guestToken);
+      } catch (e) {
+        // fine
+      }
+    }
+    const g = await rpcAnon("rsvp_get", { p_token: guestToken });
+    setRsvp((st) => ({ ...st, token: guestToken, data: g.data || st.data, saved: { status, guestToken } }));
+    return "";
   };
 
   const restart = () => {
@@ -9189,6 +9883,8 @@ export default function App() {
 
       {view === "confirmation" && <ConfirmationView booking={lastBooking} onRestart={restart} onMinaBokningar={goMinaBokningar} />}
 
+      {view === "rsvp" && <RsvpView state={rsvp} onSubmit={submitRsvp} onHome={goHome} />}
+
       {view === "planning" && (
         <PlanningView
           session={session}
@@ -9200,6 +9896,7 @@ export default function App() {
           onDeleteEvent={deleteEvent}
           taskApi={taskApi}
           budgetApi={budgetApi}
+          guestApi={guestApi}
           bookings={bookings}
           savedProviders={savedProviders}
           onViewProvider={viewProfile}
