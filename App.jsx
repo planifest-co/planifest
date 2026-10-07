@@ -5714,16 +5714,48 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
                   {g.name}
                   {g.source === "open" && <span className="ml-1.5 text-xs font-normal" style={{ color: colors.plumSoft }}>(anmälde sig själv)</span>}
                 </p>
-                <span className="rounded-full px-2.5 py-1 text-xs font-medium" style={{ backgroundColor: meta.bg, color: meta.fg }}>
-                  {meta.label}
-                  {g.status === "yes" && g.partySize > 1 ? ` · ${g.partySize} pers` : ""}
-                </span>
+                {(g.status === "yes" || g.status === "maybe") && g.partySize > 1 && (
+                  <span className="text-xs font-semibold" style={{ color: meta.fg }}>
+                    {g.partySize} personer
+                  </span>
+                )}
               </div>
               {(g.dietary || g.message) && (
                 <p className="mt-1 text-xs italic" style={{ color: colors.plumSoft }}>
                   {[g.dietary, g.message && `"${g.message}"`].filter(Boolean).join(" · ")}
                 </p>
               )}
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {["yes", "maybe", "no"].map((k) => {
+                  const on = g.status === k;
+                  return (
+                    <button
+                      key={k}
+                      onClick={() => guestApi.update(ev.id, g.id, { status: on ? "pending" : k })}
+                      aria-label={`${g.name}: ${RSVP_STATUS[k].label}`}
+                      aria-pressed={on}
+                      className="rounded-full px-3 py-1 text-xs font-semibold"
+                      style={{ backgroundColor: on ? RSVP_STATUS[k].bg : colors.white, color: on ? RSVP_STATUS[k].fg : colors.plumSoft, border: `1.5px solid ${on ? RSVP_STATUS[k].fg : colors.beige}` }}
+                    >
+                      {RSVP_STATUS[k].label}
+                    </button>
+                  );
+                })}
+                {(g.status === "yes" || g.status === "maybe") && g.allowedParty > 1 && (
+                  <span className="ml-1 flex items-center gap-1.5 text-xs" style={{ color: colors.plumSoft }}>
+                    Antal
+                    <button onClick={() => guestApi.update(ev.id, g.id, { partySize: Math.max(1, g.partySize - 1) })} aria-label={`Färre personer: ${g.name}`} className="h-6 w-6 rounded-full font-semibold" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.beige}` }}>
+                      −
+                    </button>
+                    <span className="w-4 text-center font-semibold" style={{ color: colors.plum }}>
+                      {g.partySize}
+                    </span>
+                    <button onClick={() => guestApi.update(ev.id, g.id, { partySize: Math.min(g.allowedParty, g.partySize + 1) })} aria-label={`Fler personer: ${g.name}`} className="h-6 w-6 rounded-full font-semibold" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.beige}` }}>
+                      +
+                    </button>
+                  </span>
+                )}
+              </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
                 <button onClick={() => send(g)} className="rounded-full px-3 py-1.5 font-semibold" style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}>
                   {copied === `i-${g.id}` ? "Klart ✓" : "Skicka inbjudan"}
@@ -5741,14 +5773,16 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
               {open === g.id && (
                 <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl p-3 text-xs" style={{ backgroundColor: colors.cream, color: colors.plum }}>
                   <label className="flex items-center gap-1.5">
-                    Svar
-                    <select value={g.status} onChange={(e) => guestApi.update(ev.id, g.id, { status: e.target.value })} aria-label={`Svar för ${g.name}`} className="rounded-lg px-2 py-1" style={fieldStyle}>
-                      {Object.entries(RSVP_STATUS).map(([k, m]) => (
-                        <option key={k} value={k}>
-                          {m.label}
-                        </option>
-                      ))}
-                    </select>
+                    Mat / allergier
+                    <input
+                      defaultValue={g.dietary}
+                      onBlur={(e) => e.target.value.trim() !== g.dietary && guestApi.update(ev.id, g.id, { dietary: e.target.value.trim().slice(0, 300) })}
+                      maxLength={300}
+                      aria-label={`Mat för ${g.name}`}
+                      placeholder="Till exempel: Glutenfri"
+                      className="w-44 rounded-lg px-2 py-1"
+                      style={fieldStyle}
+                    />
                   </label>
                   <label className="flex items-center gap-1.5">
                     Platser
