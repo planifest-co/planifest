@@ -3044,7 +3044,7 @@ function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem
               {tab === "completed" && (
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   {b.items
-                    .filter((item) => !item.reviewed)
+                    .filter((item) => !item.reviewed && (item.status === "confirmed" || item.status === "completed"))
                     .map((item) => (
                       <button
                         key={item.id}
@@ -3055,7 +3055,7 @@ function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem
                         Recensera {item.name}
                       </button>
                     ))}
-                  {b.items.every((i) => i.reviewed) && (
+                  {b.items.some((i) => i.status === "confirmed" || i.status === "completed") && b.items.filter((i) => i.status === "confirmed" || i.status === "completed").every((i) => i.reviewed) && (
                     <span className="flex items-center gap-1 text-xs" style={{ color: colors.plumSoft }}>
                       <Check size={13} color={colors.green} /> Tack för din recension!
                     </span>
@@ -8119,7 +8119,7 @@ export default function App() {
           guests: b.guests,
           occasion: b.occasion,
           cancelled: b.cancelled,
-          completed: b.completed,
+          completed: !!b.completed || (!!b.date && b.date < todayISO() && !b.cancelled),
           items: (b.booking_items || []).map((i) => ({
             id: i.id,
             providerId: i.vendor_id ? `${i.vendor_id}-${i.category_id}` : i.id,
@@ -8971,6 +8971,21 @@ export default function App() {
     if (!reviewTarget) return;
     const { bookingNumber, item } = reviewTarget;
     const trimmed = text.trim();
+    if (session?.access_token && item.vendorId) {
+      const { error } = await supabaseRestRequest("/reviews", session.access_token, {
+        method: "POST",
+        body: JSON.stringify({ booking_item_id: item.id, vendor_id: item.vendorId, customer_id: session.user.id, stars, text: trimmed }),
+      });
+      if (error) {
+        setReviewTarget(null);
+        showToast("Recensionen kunde inte sparas. Du kan recensera en genomförd, bekräftad bokning, en gång.");
+        return;
+      }
+      await supabaseRestRequest(`/booking_items?id=eq.${item.id}`, session.access_token, {
+        method: "PATCH",
+        body: JSON.stringify({ reviewed: true }),
+      });
+    }
     setCustomerReviews((r) => [...r, { id: "rev-" + Date.now(), providerId: item.providerId, name: "Du", stars, text: trimmed }]);
     setBookings((bs) =>
       bs.map((b) =>
@@ -8979,17 +8994,6 @@ export default function App() {
     );
     setReviewTarget(null);
     showToast("Tack för din recension! ✓");
-
-    if (session?.access_token && item.vendorId) {
-      await supabaseRestRequest("/reviews", session.access_token, {
-        method: "POST",
-        body: JSON.stringify({ booking_item_id: item.id, vendor_id: item.vendorId, customer_id: session.user.id, stars, text: trimmed }),
-      });
-      await supabaseRestRequest(`/booking_items?id=eq.${item.id}`, session.access_token, {
-        method: "PATCH",
-        body: JSON.stringify({ reviewed: true }),
-      });
-    }
   };
 
   // --- Chat (Fas 8) — real, persisted conversations for real vendors; mock/
