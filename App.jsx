@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, createContext, useContext } from "react";
 import {
   Music2,
   Building2,
@@ -34,6 +34,11 @@ import {
   Search,
   Volume2,
   VolumeX,
+  Heart,
+  ListChecks,
+  Wallet,
+  StickyNote,
+  Pencil,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -55,6 +60,90 @@ const SESSION_STORAGE_KEY = "planifest-session";
 const CHAT_POLL_MS = 5000; // how often an open conversation checks for new messages
 const INBOX_POLL_MS = 10000; // how often the message bubble checks for unread messages
 const SOUND_KEY = "planifest-sound";
+const hand = "'Caveat', 'Segoe Script', cursive"; // a little handwriting for notes and margins
+
+// ---- Min planering ----
+// Starting checklists per kind of event. w = how many weeks before the event it is a good time to do it.
+const TASK_TEMPLATES = {
+  wedding: [
+    [52, "Bestäm preliminär budget"], [52, "Gör en första gästlista"], [48, "Boka lokal för vigsel och fest"], [44, "Välj och boka fotograf"],
+    [40, "Boka catering eller meny"], [36, "Boka DJ eller band"], [32, "Beställ bröllopstårta"], [26, "Skicka ut save-the-date"],
+    [20, "Välj blommor och dekor"], [16, "Skicka ut inbjudningar"], [12, "Planera bordsplacering"], [8, "Bekräfta alla leverantörer"],
+    [4, "Slutlig gästlista och allergier"], [2, "Gå igenom dagens tidsschema"], [1, "Packa och förbered det sista"],
+  ],
+  birthday: [
+    [12, "Bestäm datum, tema och budget"], [10, "Gör gästlista"], [8, "Boka lokal"], [8, "Skicka inbjudningar"], [6, "Boka DJ eller underhållning"],
+    [5, "Beställ tårta"], [4, "Planera mat och dryck"], [3, "Köp dekor och ballonger"], [2, "Bekräfta leverantörer"], [1, "Handla det sista"], [1, "Gå igenom tidsschema"],
+  ],
+  baptism: [
+    [12, "Bestäm datum med dopförrättaren"], [10, "Gör gästlista"], [8, "Boka lokal för kalaset"], [8, "Skicka inbjudningar"], [6, "Fråga faddrar"],
+    [5, "Beställ tårta"], [4, "Planera mat och dryck"], [3, "Köp dekor och blommor"], [2, "Bekräfta leverantörer"], [1, "Förbered dopkläder"],
+  ],
+  graduation: [
+    [10, "Bestäm datum och budget"], [8, "Boka lokal"], [8, "Skicka inbjudningar"], [6, "Boka DJ"], [5, "Beställ tårta"],
+    [4, "Planera mat och dryck"], [3, "Köp dekor"], [2, "Bekräfta leverantörer"], [1, "Gå igenom tidsschema"],
+  ],
+  party: [
+    [8, "Bestäm datum, tema och budget"], [6, "Gör gästlista och bjud in"], [5, "Boka lokal"], [4, "Boka DJ eller underhållning"],
+    [3, "Planera mat och dryck"], [2, "Bekräfta leverantörer"], [1, "Handla det sista"],
+  ],
+  corporate: [
+    [12, "Bestäm syfte och budget"], [10, "Boka lokal"], [8, "Boka catering"], [8, "Skicka inbjudan och be om svar"], [6, "Boka underhållning eller talare"],
+    [4, "Planera program och tidsschema"], [3, "Boka fotograf"], [2, "Bekräfta leverantörer och antal gäster"], [1, "Skicka praktisk information till gästerna"],
+  ],
+  other: [[8, "Bestäm datum och budget"], [6, "Gör gästlista"], [4, "Boka leverantörer"], [2, "Bekräfta allt"]],
+};
+
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const dayNumber = (iso) => {
+  const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number);
+  return Math.round(Date.UTC(y, m - 1, d) / 86400000);
+};
+const daysUntil = (iso) => (iso ? dayNumber(iso) - dayNumber(todayISO()) : null);
+const addDaysISO = (iso, days) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+const shortDate = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("sv-SE", { day: "numeric", month: "short" }) : "");
+const newId = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => ((Math.random() * 16) | 0).toString(16)));
+const toMoney = (v) => {
+  const n = Number(String(v ?? "").replace(/\s/g, "").replace(",", "."));
+  return Number.isFinite(n) && n >= 0 && n <= 100000000 ? Math.round(n) : null;
+};
+// The template as tasks with real due dates (a date already passed just means "do it now").
+function buildTemplateTasks(eventType, eventDate, existingTitles = []) {
+  const have = new Set(existingTitles.map((t) => t.trim().toLowerCase()));
+  return (TASK_TEMPLATES[eventType] || TASK_TEMPLATES.other)
+    .filter(([, title]) => !have.has(title.toLowerCase()))
+    .map(([weeks, title]) => {
+      const due = eventDate ? addDaysISO(eventDate, -weeks * 7) : null;
+      return { id: newId(), title, done: false, dueDate: due && due >= todayISO() ? due : null };
+    });
+}
+const normalizeEvent = (e) => ({
+  id: e.id,
+  title: e.title,
+  eventType: e.event_type,
+  date: e.event_date || "",
+  guests: e.guests,
+  budgetTotal: e.budget_total == null ? null : Number(e.budget_total),
+  notes: e.notes || "",
+  tasks: (e.event_tasks || [])
+    .slice()
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+    .map((t) => ({ id: t.id, title: t.title, done: t.done, dueDate: t.due_date || null })),
+  budget: (e.event_budget_items || [])
+    .slice()
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+    .map((b) => ({ id: b.id, label: b.label, estimated: Number(b.estimated) || 0, actual: b.actual == null ? null : Number(b.actual), paid: b.paid })),
+});
+
+// "Sparade": which vendors the customer has saved, available to every heart button without threading props.
+const FavoritesContext = createContext({ ids: new Set(), toggle: () => {} });
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (v) => typeof v === "string" && UUID_RE.test(v);
 
@@ -1398,6 +1487,7 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
           alt={provider.name}
           className="h-12 w-full object-cover sm:h-14"
         />
+        <HeartButton vendorId={provider.vendorDbId} small className="absolute left-1 top-1 shadow-sm" />
         <button
           onClick={handleAction}
           className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full shadow-sm"
@@ -1932,9 +2022,12 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
   };
   return (
     <div className="mx-auto max-w-3xl px-6 pb-40 pt-8 sm:px-10">
-      <button onClick={onBack} className="-ml-2 mb-5 flex items-center gap-1 px-2 py-1.5 text-sm font-medium" style={{ color: colors.plumSoft }}>
-        <ChevronLeft size={16} /> Tillbaka
-      </button>
+      <div className="mb-5 flex items-center justify-between">
+        <button onClick={onBack} className="-ml-2 flex items-center gap-1 px-2 py-1.5 text-sm font-medium" style={{ color: colors.plumSoft }}>
+          <ChevronLeft size={16} /> Tillbaka
+        </button>
+        <HeartButton vendorId={provider.vendorDbId} />
+      </div>
 
       <div className="grid gap-2 sm:grid-cols-3">
         <img
@@ -2380,7 +2473,7 @@ function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddo
   );
 }
 
-function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConfirm, onLogin, guestError, guestSubmitting, guestBlockReason, onOpenTerms }) {
+function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConfirm, onLogin, guestError, guestSubmitting, guestBlockReason, onOpenTerms, events = [], eventChoice, onEventChoice }) {
   const [accepted, setAccepted] = useState(false);
   const [gName, setGName] = useState("");
   const [gEmail, setGEmail] = useState("");
@@ -2462,6 +2555,20 @@ function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConf
             </>
           )}
         </div>
+      )}
+
+      {!isGuest && events.length > 0 && (
+        <label className="mt-4 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+          Koppla bokningen till din planering
+          <select value={eventChoice} onChange={(e) => onEventChoice(e.target.value)} className="rounded-xl px-3 py-2 text-sm font-normal" style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}>
+            {events.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.title}
+              </option>
+            ))}
+            <option value="none">Ingen planering</option>
+          </select>
+        </label>
       )}
 
       <label className="mt-4 flex items-start gap-3 text-sm" style={{ color: colors.plum }}>
@@ -5071,6 +5178,680 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
   );
 }
 
+function HeartButton({ vendorId, small, className = "" }) {
+  const { ids, toggle } = useContext(FavoritesContext);
+  if (!vendorId || String(vendorId).startsWith("VND-")) return null;
+  const on = ids.has(vendorId);
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        toggle(vendorId);
+      }}
+      aria-label={on ? "Ta bort från sparade" : "Spara leverantör"}
+      aria-pressed={on}
+      className={`flex items-center justify-center rounded-full ${className}`}
+      style={{ backgroundColor: "rgba(255,255,255,0.92)", width: small ? 16 : 36, height: small ? 16 : 36 }}
+    >
+      <span key={String(on)} style={{ display: "flex", animation: on ? "planifest-pop 0.4s ease-out" : "none" }}>
+        <Heart size={small ? 9 : 18} fill={on ? BADGE_RED : "none"} color={on ? BADGE_RED : colors.plumSoft} />
+      </span>
+    </button>
+  );
+}
+
+// A small burst of paper confetti, e.g. when the last item on the checklist is ticked.
+function Confetti() {
+  const palette = [colors.lilac, BADGE_RED, "#E8B86B", colors.lilacDeep, "#8DB596", colors.coral];
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center" aria-hidden="true">
+      {Array.from({ length: 26 }, (_, i) => (
+        <span
+          key={i}
+          style={{
+            position: "absolute",
+            top: 40,
+            width: 7 + (i % 3) * 2,
+            height: 10 + (i % 2) * 4,
+            backgroundColor: palette[i % palette.length],
+            borderRadius: i % 4 === 0 ? 999 : 2,
+            "--dx": `${((i * 37) % 260) - 130}px`,
+            "--dy": `${-(40 + ((i * 53) % 140))}px`,
+            "--rot": `${(i * 97) % 540}deg`,
+            animation: `planifest-confetti ${1.1 + (i % 5) * 0.12}s ease-out forwards`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// A hand-drawn-style tick box: the check mark draws itself.
+function HandCheck({ done, onToggle, label }) {
+  return (
+    <button type="button" onClick={onToggle} aria-label={label} aria-pressed={done} className="flex h-7 w-7 flex-shrink-0 items-center justify-center">
+      <svg viewBox="0 0 28 28" width="26" height="26" fill="none">
+        <path d="M5 4.6 C 11 3.4, 18 3.6, 23.2 4.4 C 24.2 10, 24 17, 23.4 23.2 C 17 24.4, 11 24.2, 4.8 23.4 C 3.8 17, 4 10, 5 4.6 Z" stroke={done ? colors.green : colors.lilac} strokeWidth="1.8" fill={done ? "#E3F3E9" : colors.white} strokeLinejoin="round" />
+        <path d="M8 14.5 L12.3 19 L20.5 8.5" stroke={colors.green} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ strokeDasharray: 26, strokeDashoffset: done ? 0 : 26, transition: "stroke-dashoffset 0.35s ease" }} />
+      </svg>
+    </button>
+  );
+}
+
+function EventFormModal({ open, mode, initial, onClose, onSubmit, onDelete }) {
+  const [title, setTitle] = useState("");
+  const [eventType, setEventType] = useState("party");
+  const [date, setDate] = useState("");
+  const [guests, setGuests] = useState("");
+  const [budget, setBudget] = useState("");
+  const [withTemplate, setWithTemplate] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    setTitle(initial?.title || "");
+    setEventType(initial?.eventType || "party");
+    setDate(initial?.date || "");
+    setGuests(initial?.guests ? String(initial.guests) : "");
+    setBudget(initial?.budgetTotal ? String(initial.budgetTotal) : "");
+    setWithTemplate(true);
+    setConfirmDelete(false);
+    setSaving(false);
+  }, [open, initial]);
+  if (!open) return null;
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+  const canSave = title.trim().length > 0 && !saving;
+  const submit = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    const g = Math.round(Number(guests));
+    const ok = await onSubmit({
+      title: title.trim(),
+      eventType,
+      date,
+      guests: Number.isFinite(g) && g >= 1 && g <= 5000 ? g : null,
+      budgetTotal: budget === "" ? null : toMoney(budget),
+      withTemplate: mode === "create" && withTemplate,
+    });
+    setSaving(false);
+    if (ok !== false) onClose();
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" style={{ backgroundColor: "rgba(60,47,69,0.45)" }} onClick={onClose}>
+      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl p-6 sm:rounded-3xl" style={{ backgroundColor: colors.cream }} onClick={(e) => e.stopPropagation()}>
+        <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>{mode === "create" ? "Ny planering" : "Redigera din fest"}</p>
+        <label className="mt-4 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+          Namn på festen
+          <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={80} placeholder="Till exempel: Elsas 5-årsdag" className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+        </label>
+        <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
+          Vad ska ni fira?
+        </p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {OCCASIONS.map((o) => (
+            <ChoiceChip key={o.id} active={eventType === o.id} onClick={() => setEventType(o.id)}>
+              {o.emoji} {o.label}
+            </ChoiceChip>
+          ))}
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <label className="flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+            Datum
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+          </label>
+          <label className="flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+            Antal gäster
+            <input type="number" min={1} value={guests} onChange={(e) => setGuests(e.target.value)} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+          </label>
+        </div>
+        <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+          Budget (kr, valfritt)
+          <input type="number" min={0} value={budget} onChange={(e) => setBudget(e.target.value)} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+        </label>
+        {mode === "create" && (
+          <label className="mt-4 flex items-start gap-2 text-sm" style={{ color: colors.plum }}>
+            <input type="checkbox" checked={withTemplate} onChange={(e) => setWithTemplate(e.target.checked)} className="mt-1" />
+            Lägg in en färdig checklista för {occasionMap[eventType]?.label.toLowerCase()}, som du sedan kan ändra fritt.
+          </label>
+        )}
+        <div className="mt-5 flex gap-3">
+          <button onClick={onClose} className="flex-1 rounded-full px-4 py-3 text-sm font-medium" style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}>
+            Avbryt
+          </button>
+          <button onClick={submit} disabled={!canSave} className="flex-1 rounded-full px-4 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white, opacity: canSave ? 1 : 0.5 }}>
+            {saving ? "Sparar..." : mode === "create" ? "Skapa" : "Spara"}
+          </button>
+        </div>
+        {mode === "edit" && (
+          <div className="mt-4 text-center">
+            {confirmDelete ? (
+              <p className="text-sm" style={{ color: colors.plum }}>
+                Ta bort hela festen, med checklista, budget och anteckningar?{" "}
+                <button
+                  onClick={async () => {
+                    await onDelete();
+                    onClose();
+                  }}
+                  className="font-semibold underline"
+                  style={{ color: colors.coralDeep }}
+                >
+                  Ja, ta bort
+                </button>
+              </p>
+            ) : (
+              <button onClick={() => setConfirmDelete(true)} className="text-xs font-medium underline" style={{ color: colors.coralDeep }}>
+                Ta bort festen
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// One budget line. Edits are kept locally while typing and saved when the field loses focus.
+function BudgetRow({ line, onUpdate, onRemove }) {
+  const [label, setLabel] = useState(line.label);
+  const [estimated, setEstimated] = useState(String(line.estimated));
+  const [actual, setActual] = useState(line.actual == null ? "" : String(line.actual));
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+  const save = () => {
+    const patch = {};
+    if (label.trim() && label.trim() !== line.label) patch.label = label.trim();
+    const e = toMoney(estimated);
+    if (e !== null && e !== line.estimated) patch.estimated = e;
+    const a = actual === "" ? null : toMoney(actual);
+    if (a !== line.actual && (actual === "" || a !== null)) patch.actual = a;
+    if (Object.keys(patch).length) onUpdate(patch);
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-2xl p-3" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.beige}` }}>
+      <input value={label} onChange={(e) => setLabel(e.target.value)} onBlur={save} maxLength={100} aria-label="Post" className="min-w-[120px] flex-1 rounded-xl px-3 py-1.5 text-sm" style={fieldStyle} />
+      <input type="number" min={0} value={estimated} onChange={(e) => setEstimated(e.target.value)} onBlur={save} aria-label="Uppskattat pris" placeholder="Uppskattat" className="w-24 rounded-xl px-3 py-1.5 text-sm" style={fieldStyle} />
+      <input type="number" min={0} value={actual} onChange={(e) => setActual(e.target.value)} onBlur={save} aria-label="Faktiskt pris" placeholder="Faktiskt" className="w-24 rounded-xl px-3 py-1.5 text-sm" style={fieldStyle} />
+      <label className="flex items-center gap-1.5 text-xs" style={{ color: colors.plumSoft }}>
+        <input type="checkbox" checked={line.paid} onChange={(e) => onUpdate({ paid: e.target.checked })} aria-label="Betald" /> Betald
+      </label>
+      <button onClick={onRemove} aria-label="Ta bort post" className="p-1">
+        <Trash2 size={14} color={colors.coralDeep} />
+      </button>
+    </div>
+  );
+}
+
+// The notepad: lined paper that saves itself a moment after you stop typing.
+function NotesPad({ initial, onSave }) {
+  const [text, setText] = useState(initial);
+  const [state, setState] = useState("saved");
+  const lastSaved = useRef(initial);
+  const textRef = useRef(initial);
+  const saveRef = useRef(onSave);
+  saveRef.current = onSave;
+  textRef.current = text;
+  useEffect(() => {
+    if (text === lastSaved.current) return;
+    setState("saving");
+    const t = setTimeout(async () => {
+      lastSaved.current = text;
+      await saveRef.current(text);
+      setState("saved");
+    }, 800);
+    return () => clearTimeout(t);
+  }, [text]);
+  // leaving the page or switching event saves anything still waiting
+  useEffect(
+    () => () => {
+      if (textRef.current !== lastSaved.current) saveRef.current(textRef.current);
+    },
+    []
+  );
+  return (
+    <div className="relative mt-4">
+      <span aria-hidden="true" className="absolute left-1/2 -top-3 h-6 w-24 -translate-x-1/2 rotate-[-2deg] rounded-sm" style={{ backgroundColor: "rgba(189,155,189,0.45)" }} />
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        maxLength={20000}
+        aria-label="Anteckningar"
+        placeholder="Skriv ner allt du inte vill glömma: idéer, önskemål, namn, telefonnummer..."
+        rows={14}
+        className="w-full rounded-lg text-base"
+        style={{
+          fontFamily: hand,
+          fontSize: 20,
+          lineHeight: "28px",
+          padding: "8px 16px 8px 44px",
+          color: colors.plum,
+          backgroundColor: "#FFFDF8",
+          backgroundImage: "repeating-linear-gradient(transparent, transparent 27px, rgba(189,155,189,0.4) 28px)",
+          backgroundAttachment: "local",
+          border: `1.5px solid ${colors.beige}`,
+          borderLeft: "3px solid rgba(200,85,75,0.35)",
+          boxShadow: "0 6px 14px rgba(76,51,38,0.07)",
+        }}
+      />
+      <p className="mt-1 text-right text-xs" style={{ color: colors.plumSoft }}>
+        {state === "saving" ? "Sparar..." : "Sparat ✓"}
+      </p>
+    </div>
+  );
+}
+
+function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateEvent, onUpdateEvent, onDeleteEvent, taskApi, budgetApi, bookings, savedProviders, onViewProvider, party, onLogin, onSignup }) {
+  const [tab, setTab] = useState("checklist");
+  const [modal, setModal] = useState(null); // null | "create" | "edit"
+  const [newTask, setNewTask] = useState("");
+  const [newDue, setNewDue] = useState("");
+  const [editing, setEditing] = useState(null); // { id, value }
+  const [showDone, setShowDone] = useState(false);
+  const [confetti, setConfetti] = useState(0);
+  const [newLine, setNewLine] = useState("");
+  const [newEstimate, setNewEstimate] = useState("");
+  const [budgetInput, setBudgetInput] = useState("");
+  const ev = events.find((e) => e.id === activeEventId) || events[0] || null;
+  const prevDone = useRef(null);
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+
+  useEffect(() => {
+    setBudgetInput(ev?.budgetTotal ? String(ev.budgetTotal) : "");
+  }, [ev?.id, ev?.budgetTotal]);
+
+  // confetti the moment the last open item is ticked off
+  const doneCount = ev ? ev.tasks.filter((t) => t.done).length : 0;
+  const totalCount = ev ? ev.tasks.length : 0;
+  useEffect(() => {
+    if (prevDone.current !== null && ev && totalCount >= 3 && doneCount === totalCount && prevDone.current < totalCount) setConfetti((c) => c + 1);
+    prevDone.current = ev ? doneCount : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doneCount, totalCount, ev?.id]);
+
+  if (!session) {
+    return (
+      <div className="mx-auto max-w-xl px-6 pb-24 pt-14 text-center sm:px-10">
+        <p style={{ fontFamily: hand, fontSize: 28, color: colors.lilacDeep }}>din fest, på ett ställe</p>
+        <h1 style={{ fontFamily: serif, fontSize: 32, color: colors.plum }}>Min planering</h1>
+        <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
+          Spara dina fester, bocka av en checklista, håll koll på budgeten, skriv anteckningar och samla leverantörerna du gillar. Allt med ett gratis konto.
+        </p>
+        <div className="mt-6 flex justify-center gap-3">
+          <button onClick={onSignup} className="rounded-full px-6 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+            Skapa konto
+          </button>
+          <button onClick={onLogin} className="rounded-full px-6 py-3 text-sm font-medium" style={{ border: `1.5px solid ${colors.coral}`, color: colors.coral, backgroundColor: colors.white }}>
+            Logga in
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const createModal = (
+    <EventFormModal
+      open={modal === "create" || modal === "edit"}
+      mode={modal === "edit" ? "edit" : "create"}
+      initial={
+        modal === "edit" && ev
+          ? ev
+          : { title: party.occasion ? occasionMap[party.occasion]?.boardLabel : "", eventType: party.occasion || "party", date: party.date || "", guests: party.guests || "", budgetTotal: null }
+      }
+      onClose={() => setModal(null)}
+      onSubmit={(values) => (modal === "edit" ? onUpdateEvent(ev.id, values) : onCreateEvent(values))}
+      onDelete={() => onDeleteEvent(ev.id)}
+    />
+  );
+
+  if (!ev) {
+    return (
+      <div className="mx-auto max-w-xl px-6 pb-24 pt-14 text-center sm:px-10">
+        <p style={{ fontFamily: hand, fontSize: 28, color: colors.lilacDeep }}>nu börjar det roliga</p>
+        <h1 style={{ fontFamily: serif, fontSize: 32, color: colors.plum }}>Min planering</h1>
+        <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
+          Skapa din första fest, så får du checklista, budget och anteckningsblock på ett ställe.
+        </p>
+        <button onClick={() => setModal("create")} className="mt-6 rounded-full px-6 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+          Skapa min första fest
+        </button>
+        {savedProviders.length > 0 && (
+          <p className="mt-4 text-xs" style={{ color: colors.plumSoft }}>
+            Du har {savedProviders.length} sparade leverantörer. De hittar du här när festen är skapad.
+          </p>
+        )}
+        {createModal}
+      </div>
+    );
+  }
+
+  const occ = occasionMap[ev.eventType] || occasionMap.other;
+  const left = daysUntil(ev.date);
+  const open = ev.tasks
+    .filter((t) => !t.done)
+    .sort((a, b) => (a.dueDate && b.dueDate ? a.dueDate.localeCompare(b.dueDate) : a.dueDate ? -1 : b.dueDate ? 1 : 0));
+  const done = ev.tasks.filter((t) => t.done);
+  const pct = totalCount ? Math.round((doneCount / totalCount) * 100) : 0;
+
+  // budget: own lines + what is booked here on Planifest for this event
+  const booked = bookings
+    .filter((b) => b.eventId === ev.id && !b.cancelled)
+    .flatMap((b) => b.items.filter((i) => i.status !== "declined" && i.status !== "cancelled").map((i) => ({ ...i, bookingNumber: b.bookingNumber })));
+  const bookedSum = booked.reduce((n, i) => n + Number(i.price || 0), 0);
+  const linesPlanned = ev.budget.reduce((n, l) => n + (l.actual ?? l.estimated), 0);
+  const linesPaid = ev.budget.filter((l) => l.paid).reduce((n, l) => n + (l.actual ?? l.estimated), 0);
+  const planned = linesPlanned + bookedSum;
+  const remaining = ev.budgetTotal != null ? ev.budgetTotal - planned : null;
+  const usedPct = ev.budgetTotal ? Math.min(100, Math.round((planned / ev.budgetTotal) * 100)) : 0;
+
+  const addTask = () => {
+    const title = newTask.trim();
+    if (!title) return;
+    taskApi.add(ev.id, { title, dueDate: newDue || null });
+    setNewTask("");
+    setNewDue("");
+  };
+  const dueInfo = (t) => {
+    if (!t.dueDate) return null;
+    const d = daysUntil(t.dueDate);
+    if (!t.done && d < 0) return { text: `Försenad · ${shortDate(t.dueDate)}`, color: colors.coralDeep };
+    if (!t.done && d <= 7) return { text: `Snart · ${shortDate(t.dueDate)}`, color: colors.lilacDeep };
+    return { text: shortDate(t.dueDate), color: colors.plumSoft };
+  };
+  const taskRow = (t) => {
+    const info = dueInfo(t);
+    return (
+      <div key={t.id} className="flex items-center gap-2 rounded-2xl px-3 py-2" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.beige}` }}>
+        <HandCheck done={t.done} onToggle={() => taskApi.toggle(ev.id, t.id)} label={t.done ? `Ångra: ${t.title}` : `Klart: ${t.title}`} />
+        <div className="min-w-0 flex-1">
+          {editing?.id === t.id ? (
+            <input
+              autoFocus
+              value={editing.value}
+              onChange={(e) => setEditing({ id: t.id, value: e.target.value })}
+              onBlur={() => {
+                if (editing.value.trim() && editing.value.trim() !== t.title) taskApi.update(ev.id, t.id, { title: editing.value.trim() });
+                setEditing(null);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+              maxLength={200}
+              aria-label="Ändra punkt"
+              className="w-full rounded-lg px-2 py-1 text-sm"
+              style={fieldStyle}
+            />
+          ) : (
+            <button onClick={() => setEditing({ id: t.id, value: t.title })} className="block w-full text-left text-sm" style={{ color: t.done ? colors.plumSoft : colors.plum, textDecoration: t.done ? "line-through" : "none" }}>
+              {t.title}
+            </button>
+          )}
+          {info && (
+            <span className="text-xs" style={{ color: info.color, fontWeight: info.color === colors.plumSoft ? 400 : 600 }}>
+              {info.text}
+            </span>
+          )}
+        </div>
+        <button onClick={() => taskApi.remove(ev.id, t.id)} aria-label={`Ta bort: ${t.title}`} className="p-1">
+          <Trash2 size={14} color={colors.plumSoft} />
+        </button>
+      </div>
+    );
+  };
+
+  const tabs = [
+    { id: "checklist", label: "Checklista", icon: ListChecks, count: open.length },
+    { id: "budget", label: "Budget", icon: Wallet },
+    { id: "notes", label: "Anteckningar", icon: StickyNote },
+    { id: "saved", label: "Sparade", icon: Heart, count: savedProviders.length },
+  ];
+
+  return (
+    <div className="mx-auto max-w-3xl px-6 pb-28 pt-8 sm:px-10">
+      <p style={{ fontFamily: hand, fontSize: 24, color: colors.lilacDeep }}>min planering</p>
+
+      {events.length > 1 && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {events.map((e) => (
+            <ChoiceChip key={e.id} active={e.id === ev.id} onClick={() => onSelectEvent(e.id)}>
+              {(occasionMap[e.eventType] || occasionMap.other).emoji} {e.title}
+            </ChoiceChip>
+          ))}
+        </div>
+      )}
+
+      <div className="relative overflow-hidden rounded-3xl" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+        {confetti > 0 && <Confetti key={confetti} />}
+        <div className="flex items-stretch">
+          <div className="min-w-0 flex-1 p-5">
+            <p className="text-2xl">{occ.emoji}</p>
+            <h1 className="mt-1 truncate" style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>
+              {ev.title}
+            </h1>
+            <p className="mt-1 flex flex-wrap gap-x-3 text-sm" style={{ color: colors.plumSoft }}>
+              {ev.date && <span>{new Date(`${ev.date}T00:00:00`).toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</span>}
+              {ev.guests && <span>{ev.guests} gäster</span>}
+              {!ev.date && <span>Inget datum satt än</span>}
+            </p>
+            <div className="mt-3 flex gap-3 text-xs">
+              <button onClick={() => setModal("edit")} className="flex items-center gap-1 font-medium underline" style={{ color: colors.lilacDeep }}>
+                <Pencil size={12} /> Redigera
+              </button>
+              <button onClick={() => setModal("create")} className="flex items-center gap-1 font-medium underline" style={{ color: colors.lilacDeep }}>
+                <Plus size={12} /> Ny fest
+              </button>
+            </div>
+          </div>
+          {left !== null && (
+            <div className="relative flex w-28 flex-shrink-0 flex-col items-center justify-center py-4 text-center" style={{ borderLeft: `2px dashed ${colors.lilac}`, backgroundColor: colors.lilacSoft }}>
+              <span aria-hidden="true" className="absolute -left-2.5 -top-2.5 h-5 w-5 rounded-full" style={{ backgroundColor: colors.cream }} />
+              <span aria-hidden="true" className="absolute -bottom-2.5 -left-2.5 h-5 w-5 rounded-full" style={{ backgroundColor: colors.cream }} />
+              {left > 0 ? (
+                <>
+                  <span style={{ fontFamily: serif, fontSize: 34, lineHeight: 1, color: colors.plum }}>{left}</span>
+                  <span style={{ fontFamily: hand, fontSize: 20, color: colors.lilacDeep }}>{left === 1 ? "dag kvar" : "dagar kvar"}</span>
+                </>
+              ) : left === 0 ? (
+                <span style={{ fontFamily: hand, fontSize: 26, color: colors.lilacDeep }}>Idag! 🎉</span>
+              ) : (
+                <span style={{ fontFamily: hand, fontSize: 20, color: colors.plumSoft }}>{-left} dagar sedan</span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5 flex gap-1 overflow-x-auto">
+        {tabs.map((t) => {
+          const Icon = t.icon;
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className="flex flex-shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium"
+              style={{ backgroundColor: active ? colors.coral : colors.white, color: active ? colors.white : colors.plum, border: `1.5px solid ${active ? colors.coral : colors.beige}` }}
+            >
+              <Icon size={14} /> {t.label}
+              {t.count > 0 && <span className="text-xs opacity-80">({t.count})</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "checklist" && (
+        <div className="mt-5">
+          <div className="flex items-end justify-between">
+            <p style={{ fontFamily: hand, fontSize: 24, color: colors.plum }}>{totalCount === 0 ? "ingenting att göra än" : `${doneCount} av ${totalCount} klara`}</p>
+            {totalCount > 0 && <span className="text-xs" style={{ color: colors.plumSoft }}>{pct}%</span>}
+          </div>
+          {totalCount > 0 && (
+            <div className="mt-1 h-2 overflow-hidden rounded-full" style={{ backgroundColor: colors.beige }}>
+              <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: colors.green, transition: "width 0.4s ease" }} />
+            </div>
+          )}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <input
+              value={newTask}
+              onChange={(e) => setNewTask(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addTask()}
+              maxLength={200}
+              placeholder="Lägg till något att göra..."
+              aria-label="Ny punkt"
+              className="min-w-[160px] flex-1 rounded-xl px-3 py-2 text-sm"
+              style={fieldStyle}
+            />
+            <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} aria-label="Klart senast" className="rounded-xl px-2 py-2 text-sm" style={fieldStyle} />
+            <button onClick={addTask} className="rounded-full px-5 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+              Lägg till
+            </button>
+          </div>
+          <button
+            onClick={() => taskApi.addTemplate(ev)}
+            className="mt-2 flex items-center gap-1.5 text-xs font-medium underline"
+            style={{ color: colors.lilacDeep }}
+          >
+            <Sparkles size={12} /> Fyll på med förslag för {occ.label.toLowerCase()}
+          </button>
+          <div className="mt-4 space-y-2">{open.map(taskRow)}</div>
+          {done.length > 0 && (
+            <div className="mt-5">
+              <button onClick={() => setShowDone((v) => !v)} className="text-sm font-medium underline" style={{ color: colors.plumSoft }}>
+                {showDone ? "Dölj" : "Visa"} klara ({done.length})
+              </button>
+              {showDone && <div className="mt-2 space-y-2">{done.map(taskRow)}</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "budget" && (
+        <div className="mt-5">
+          <label className="flex flex-wrap items-center gap-3 text-sm font-semibold" style={{ color: colors.plum }}>
+            Din totala budget
+            <input
+              type="number"
+              min={0}
+              value={budgetInput}
+              onChange={(e) => setBudgetInput(e.target.value)}
+              onBlur={() => {
+                const v = budgetInput === "" ? null : toMoney(budgetInput);
+                if (v !== ev.budgetTotal && (budgetInput === "" || v !== null)) onUpdateEvent(ev.id, { budgetTotal: v });
+              }}
+              aria-label="Total budget"
+              placeholder="kr"
+              className="w-36 rounded-xl px-3 py-2 text-sm font-normal"
+              style={fieldStyle}
+            />
+          </label>
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            {[
+              ["Planerat", formatKr(planned), colors.plum],
+              ["Betalt", formatKr(linesPaid), colors.plum],
+              [remaining != null && remaining < 0 ? "Över budget" : "Kvar", remaining != null ? formatKr(Math.abs(remaining)) : "–", remaining != null && remaining < 0 ? colors.coralDeep : colors.green],
+            ].map(([label, value, color]) => (
+              <div key={label} className="rounded-2xl p-3 text-center" style={{ backgroundColor: colors.lilacSoft }}>
+                <p style={{ fontFamily: serif, fontSize: 19, color }}>{value}</p>
+                <p className="text-xs" style={{ color: colors.lilacDeep }}>
+                  {label}
+                </p>
+              </div>
+            ))}
+          </div>
+          {ev.budgetTotal ? (
+            <div className="mt-2 h-2 overflow-hidden rounded-full" style={{ backgroundColor: colors.beige }}>
+              <div className="h-full rounded-full" style={{ width: `${usedPct}%`, backgroundColor: remaining < 0 ? colors.coralDeep : colors.lilacDeep, transition: "width 0.4s ease" }} />
+            </div>
+          ) : (
+            <p className="mt-2 text-xs" style={{ color: colors.plumSoft }}>
+              Sätt en total budget så ser du hur mycket som finns kvar.
+            </p>
+          )}
+
+          <p className="mb-2 mt-6 text-sm font-semibold" style={{ color: colors.plum }}>
+            Bokat på Planifest
+          </p>
+          {booked.length === 0 ? (
+            <p className="text-xs" style={{ color: colors.plumSoft }}>
+              Leverantörer du bokar och kopplar till den här festen dyker upp här automatiskt, med pris och status.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {booked.map((i) => {
+                const meta = BOOKING_STATUS_META[i.status] || BOOKING_STATUS_META.pending;
+                return (
+                  <div key={`${i.bookingNumber}-${i.id}`} className="flex items-center justify-between gap-3 rounded-2xl p-3" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.beige}` }}>
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: colors.plum }}>
+                        {i.name}
+                      </p>
+                      <span className="rounded-full px-2 py-0.5 text-xs" style={{ backgroundColor: meta.bg, color: meta.fg }}>
+                        {meta.label}
+                      </span>
+                    </div>
+                    <span style={{ fontFamily: serif, fontSize: 17, color: colors.plum }}>{formatKr(i.price)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <p className="mb-2 mt-6 text-sm font-semibold" style={{ color: colors.plum }}>
+            Egna poster
+          </p>
+          <div className="space-y-2">
+            {ev.budget.map((l) => (
+              <BudgetRow key={l.id} line={l} onUpdate={(patch) => budgetApi.update(ev.id, l.id, patch)} onRemove={() => budgetApi.remove(ev.id, l.id)} />
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <input value={newLine} onChange={(e) => setNewLine(e.target.value)} maxLength={100} placeholder="Till exempel: Ballonger" aria-label="Ny post" className="min-w-[140px] flex-1 rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
+            <input type="number" min={0} value={newEstimate} onChange={(e) => setNewEstimate(e.target.value)} placeholder="kr" aria-label="Pris på ny post" className="w-24 rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
+            <button
+              onClick={() => {
+                if (!newLine.trim()) return;
+                budgetApi.add(ev.id, { label: newLine.trim(), estimated: toMoney(newEstimate) ?? 0 });
+                setNewLine("");
+                setNewEstimate("");
+              }}
+              className="rounded-full px-5 py-2 text-sm font-semibold"
+              style={{ backgroundColor: colors.coral, color: colors.white }}
+            >
+              Lägg till post
+            </button>
+          </div>
+        </div>
+      )}
+
+      {tab === "notes" && <NotesPad key={ev.id} initial={ev.notes} onSave={(text) => onUpdateEvent(ev.id, { notes: text })} />}
+
+      {tab === "saved" && (
+        <div className="mt-5">
+          {savedProviders.length === 0 ? (
+            <p className="py-6 text-center text-sm" style={{ color: colors.plumSoft }}>
+              Du har inga sparade leverantörer än. Tryck på hjärtat på en leverantör så hamnar den här.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {savedProviders.map((p) => (
+                <div key={p.id} onClick={() => onViewProvider(p.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && onViewProvider(p.id)} className="flex cursor-pointer items-center gap-3 rounded-2xl p-3" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.beige}` }}>
+                  <img src={p.image || `https://picsum.photos/seed/${p.seed}/120/120`} alt="" className="h-14 w-14 rounded-xl object-cover" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold" style={{ color: colors.plum }}>
+                      {p.name}
+                    </p>
+                    <p className="text-xs" style={{ color: colors.plumSoft }}>
+                      {catMap[p.category]?.label} · {p.requestOnly ? (p.fromPrice > 0 ? `från ${formatKr(p.fromPrice)}` : "Pris på förfrågan") : `${formatKr(p.pricing.amount)}${getUnitLabel(p.pricing)}`}
+                    </p>
+                  </div>
+                  <HeartButton vendorId={p.vendorDbId} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {createModal}
+    </div>
+  );
+}
+
 function ChoiceChip({ active, onClick, children }) {
   return (
     <button
@@ -6406,6 +7187,10 @@ const emptyVendorForm = () => ({
 export default function App() {
   const [view, setView] = useState("home");
   const [recoverySession, setRecoverySession] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [activeEventId, setActiveEventId] = useState(null);
+  const [favoriteIds, setFavoriteIds] = useState(() => new Set());
+  const [bookingEventId, setBookingEventId] = useState(undefined); // undefined = the active planning, "none" = no planning
   const [guestError, setGuestError] = useState("");
   const [guestSubmitting, setGuestSubmitting] = useState(false);
   const [guestPendingEmail, setGuestPendingEmail] = useState("");
@@ -6682,6 +7467,7 @@ export default function App() {
       ({ data, error }) => {
         if (error || !data) return;
         const real = data.map((b) => ({
+          eventId: b.event_id || null,
           bookingNumber: b.booking_number,
           date: b.date,
           startTime: b.start_time,
@@ -6767,6 +7553,28 @@ export default function App() {
       });
     });
   }, [submittedVendor?.id, session, view, pollTick]);
+
+  // The customer's saved events (with checklist and budget) and saved vendors.
+  useEffect(() => {
+    if (!session?.user) return;
+    let stop = false;
+    (async () => {
+      const [ev, fav] = await Promise.all([
+        supabaseRestRequest("/events?select=*,event_tasks(*),event_budget_items(*)&order=created_at.asc", session.access_token),
+        supabaseRestRequest("/favorites?select=vendor_id", session.access_token),
+      ]);
+      if (stop) return;
+      if (Array.isArray(ev.data)) {
+        const list = ev.data.map(normalizeEvent);
+        setEvents(list);
+        setActiveEventId((id) => (list.some((e) => e.id === id) ? id : list[0]?.id || null));
+      }
+      if (Array.isArray(fav.data)) setFavoriteIds(new Set(fav.data.map((f) => f.vendor_id)));
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [session]);
 
   // Accepted quotes that haven't become a booking yet are rebuilt into the cart, so
   // accepting a quote and then closing the tab never loses it.
@@ -6892,6 +7700,10 @@ export default function App() {
     setVendorConversations([]);
     setActiveVendorConversationId(null);
     setAcceptedQuotes([]);
+    setEvents([]);
+    setActiveEventId(null);
+    setFavoriteIds(new Set());
+    setBookingEventId(undefined);
   };
 
   const signIn = async (email, password) => {
@@ -7104,6 +7916,7 @@ export default function App() {
       headers: { Prefer: "return=representation" },
       body: JSON.stringify({
         customer_id: session.user.id,
+        event_id: (bookingEventId === "none" ? null : bookingEventId || activeEventId) || null,
         date: party.date || null,
         start_time: party.startTime || null,
         end_time: party.endTime || null,
@@ -7141,6 +7954,7 @@ export default function App() {
     }
     const sourceItems = itemRows;
     const newBooking = {
+      eventId: (bookingEventId === "none" ? null : bookingEventId || activeEventId) || null,
       bookingNumber: newBookingNumber,
       date: party.date,
       startTime: party.startTime,
@@ -7205,6 +8019,193 @@ export default function App() {
   const fetchGuestContact = async (bookingId) => {
     const { data } = await supabaseRestRequest("/rpc/vendor_guest_contact", session.access_token, { method: "POST", body: JSON.stringify({ p_booking_id: bookingId }) });
     return Array.isArray(data) ? data[0] || null : null;
+  };
+
+  // --- Min planering: every change shows at once and is saved in the background; a failed save is undone and explained ---
+  const planningDb = (path, opts) => supabaseRestRequest(path, session.access_token, opts);
+  const patchEvent = (id, fn) => setEvents((list) => list.map((e) => (e.id === id ? fn(e) : e)));
+  const failed = (what, error) => showToast(`Kunde inte ${what}${error?.message ? `: ${error.message}` : ""}`);
+
+  const createEvent = async ({ title, eventType, date, guests, budgetTotal, withTemplate }) => {
+    const id = newId();
+    const tasks = withTemplate ? buildTemplateTasks(eventType, date) : [];
+    const local = { id, title, eventType, date: date || "", guests: guests || null, budgetTotal: budgetTotal ?? null, notes: "", tasks, budget: [] };
+    setEvents((l) => [...l, local]);
+    setActiveEventId(id);
+    const { error } = await planningDb("/events", {
+      method: "POST",
+      body: JSON.stringify({ id, owner_id: session.user.id, title, event_type: eventType, event_date: date || null, guests: guests || null, budget_total: budgetTotal ?? null }),
+    });
+    if (error) {
+      setEvents((l) => l.filter((e) => e.id !== id));
+      failed("spara festen", error);
+      return false;
+    }
+    if (tasks.length) {
+      const { error: tErr } = await planningDb("/event_tasks", {
+        method: "POST",
+        body: JSON.stringify(tasks.map((t) => ({ id: t.id, event_id: id, title: t.title, done: false, due_date: t.dueDate }))),
+      });
+      if (tErr) failed("lägga in checklistan", tErr);
+    }
+    showToast("Din planering är skapad ✓");
+    return true;
+  };
+
+  const updateEvent = async (id, patch) => {
+    const before = events.find((e) => e.id === id);
+    if (!before) return false;
+    patchEvent(id, (e) => ({ ...e, ...patch }));
+    const body = {};
+    if ("title" in patch) body.title = patch.title;
+    if ("eventType" in patch) body.event_type = patch.eventType;
+    if ("date" in patch) body.event_date = patch.date || null;
+    if ("guests" in patch) body.guests = patch.guests || null;
+    if ("budgetTotal" in patch) body.budget_total = patch.budgetTotal;
+    if ("notes" in patch) body.notes = patch.notes;
+    const { error } = await planningDb(`/events?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(body) });
+    if (error) {
+      patchEvent(id, () => before);
+      failed("spara ändringen", error);
+      return false;
+    }
+    return true;
+  };
+
+  const deleteEvent = async (id) => {
+    const before = events;
+    const rest = events.filter((e) => e.id !== id);
+    setEvents(rest);
+    setActiveEventId(rest[0]?.id || null);
+    const { error } = await planningDb(`/events?id=eq.${id}`, { method: "DELETE" });
+    if (error) {
+      setEvents(before);
+      failed("ta bort festen", error);
+    }
+  };
+
+  const taskApi = {
+    add: async (eventId, { title, dueDate }) => {
+      const t = { id: newId(), title, done: false, dueDate: dueDate || null };
+      patchEvent(eventId, (e) => ({ ...e, tasks: [...e.tasks, t] }));
+      const { error } = await planningDb("/event_tasks", { method: "POST", body: JSON.stringify({ id: t.id, event_id: eventId, title, done: false, due_date: t.dueDate }) });
+      if (error) {
+        patchEvent(eventId, (e) => ({ ...e, tasks: e.tasks.filter((x) => x.id !== t.id) }));
+        failed("lägga till punkten", error);
+      }
+    },
+    toggle: async (eventId, taskId) => {
+      const cur = events.find((e) => e.id === eventId)?.tasks.find((t) => t.id === taskId);
+      if (!cur) return;
+      patchEvent(eventId, (e) => ({ ...e, tasks: e.tasks.map((t) => (t.id === taskId ? { ...t, done: !cur.done } : t)) }));
+      const { error } = await planningDb(`/event_tasks?id=eq.${taskId}`, { method: "PATCH", body: JSON.stringify({ done: !cur.done }) });
+      if (error) {
+        patchEvent(eventId, (e) => ({ ...e, tasks: e.tasks.map((t) => (t.id === taskId ? { ...t, done: cur.done } : t)) }));
+        failed("spara", error);
+      }
+    },
+    update: async (eventId, taskId, patch) => {
+      const cur = events.find((e) => e.id === eventId)?.tasks.find((t) => t.id === taskId);
+      if (!cur) return;
+      patchEvent(eventId, (e) => ({ ...e, tasks: e.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t)) }));
+      const body = {};
+      if ("title" in patch) body.title = patch.title;
+      if ("dueDate" in patch) body.due_date = patch.dueDate || null;
+      const { error } = await planningDb(`/event_tasks?id=eq.${taskId}`, { method: "PATCH", body: JSON.stringify(body) });
+      if (error) {
+        patchEvent(eventId, (e) => ({ ...e, tasks: e.tasks.map((t) => (t.id === taskId ? cur : t)) }));
+        failed("spara", error);
+      }
+    },
+    remove: async (eventId, taskId) => {
+      const cur = events.find((e) => e.id === eventId)?.tasks.find((t) => t.id === taskId);
+      patchEvent(eventId, (e) => ({ ...e, tasks: e.tasks.filter((t) => t.id !== taskId) }));
+      const { error } = await planningDb(`/event_tasks?id=eq.${taskId}`, { method: "DELETE" });
+      if (error && cur) {
+        patchEvent(eventId, (e) => ({ ...e, tasks: [...e.tasks, cur] }));
+        failed("ta bort", error);
+      }
+    },
+    addTemplate: async (ev) => {
+      const fresh = buildTemplateTasks(ev.eventType, ev.date, ev.tasks.map((t) => t.title));
+      if (fresh.length === 0) {
+        showToast("Alla förslag finns redan i din checklista ✓");
+        return;
+      }
+      patchEvent(ev.id, (e) => ({ ...e, tasks: [...e.tasks, ...fresh] }));
+      const { error } = await planningDb("/event_tasks", {
+        method: "POST",
+        body: JSON.stringify(fresh.map((t) => ({ id: t.id, event_id: ev.id, title: t.title, done: false, due_date: t.dueDate }))),
+      });
+      if (error) {
+        patchEvent(ev.id, (e) => ({ ...e, tasks: e.tasks.filter((t) => !fresh.some((f) => f.id === t.id)) }));
+        failed("lägga in förslagen", error);
+      } else showToast(`${fresh.length} förslag tillagda ✓`);
+    },
+  };
+
+  const budgetApi = {
+    add: async (eventId, { label, estimated }) => {
+      const b = { id: newId(), label, estimated, actual: null, paid: false };
+      patchEvent(eventId, (e) => ({ ...e, budget: [...e.budget, b] }));
+      const { error } = await planningDb("/event_budget_items", { method: "POST", body: JSON.stringify({ id: b.id, event_id: eventId, label, estimated }) });
+      if (error) {
+        patchEvent(eventId, (e) => ({ ...e, budget: e.budget.filter((x) => x.id !== b.id) }));
+        failed("lägga till posten", error);
+      }
+    },
+    update: async (eventId, lineId, patch) => {
+      const cur = events.find((e) => e.id === eventId)?.budget.find((b) => b.id === lineId);
+      if (!cur) return;
+      patchEvent(eventId, (e) => ({ ...e, budget: e.budget.map((b) => (b.id === lineId ? { ...b, ...patch } : b)) }));
+      const { error } = await planningDb(`/event_budget_items?id=eq.${lineId}`, { method: "PATCH", body: JSON.stringify(patch) });
+      if (error) {
+        patchEvent(eventId, (e) => ({ ...e, budget: e.budget.map((b) => (b.id === lineId ? cur : b)) }));
+        failed("spara", error);
+      }
+    },
+    remove: async (eventId, lineId) => {
+      const cur = events.find((e) => e.id === eventId)?.budget.find((b) => b.id === lineId);
+      patchEvent(eventId, (e) => ({ ...e, budget: e.budget.filter((b) => b.id !== lineId) }));
+      const { error } = await planningDb(`/event_budget_items?id=eq.${lineId}`, { method: "DELETE" });
+      if (error && cur) {
+        patchEvent(eventId, (e) => ({ ...e, budget: [...e.budget, cur] }));
+        failed("ta bort", error);
+      }
+    },
+  };
+
+  const toggleFavorite = async (vendorId) => {
+    if (!session?.access_token) {
+      openAuthModal("signin");
+      showToast("Logga in för att spara leverantörer");
+      return;
+    }
+    const on = favoriteIds.has(vendorId);
+    setFavoriteIds((s) => {
+      const n = new Set(s);
+      if (on) n.delete(vendorId);
+      else n.add(vendorId);
+      return n;
+    });
+    const { error } = on
+      ? await planningDb(`/favorites?vendor_id=eq.${vendorId}&user_id=eq.${session.user.id}`, { method: "DELETE" })
+      : await planningDb("/favorites", { method: "POST", body: JSON.stringify({ user_id: session.user.id, vendor_id: vendorId }) });
+    if (error) {
+      setFavoriteIds((s) => {
+        const n = new Set(s);
+        if (on) n.add(vendorId);
+        else n.delete(vendorId);
+        return n;
+      });
+      failed("spara", error);
+    } else if (!on) showToast("Sparad ♥");
+  };
+
+  const savedProviders = [...favoriteIds].map((id) => customerProviders.find((p) => p.vendorDbId === id)).filter(Boolean);
+  const goPlanning = () => {
+    setView("planning");
+    setMobileMenuOpen(false);
   };
 
   const restart = () => {
@@ -7845,6 +8846,10 @@ export default function App() {
       >
         Mina bokningar
       </button>
+      <button onClick={goPlanning} className="flex items-center gap-1.5">
+        Min planering
+        {favoriteIds.size > 0 && <Heart size={12} fill={BADGE_RED} color={BADGE_RED} />}
+      </button>
       <button
         onClick={() => {
           if (view !== "home") goHome();
@@ -7959,12 +8964,15 @@ export default function App() {
   );
 
   return (
+    <FavoritesContext.Provider value={{ ids: favoriteIds, toggle: toggleFavorite }}>
     <div style={{ fontFamily: sans, backgroundColor: colors.cream, minHeight: "100%", color: colors.plum }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
         input[type="date"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator { cursor: pointer; }
         @keyframes planifest-wiggle { 0%,100% { transform: rotate(0); } 15% { transform: rotate(-14deg); } 30% { transform: rotate(12deg); } 45% { transform: rotate(-8deg); } 60% { transform: rotate(6deg); } 75% { transform: rotate(-3deg); } }
         @keyframes planifest-ring { 0% { box-shadow: 0 0 0 0 rgba(139,101,137,0.55), 0 8px 20px rgba(0,0,0,0.15); } 70%, 100% { box-shadow: 0 0 0 16px rgba(139,101,137,0), 0 8px 20px rgba(0,0,0,0.15); } }
+        @keyframes planifest-pop { 0% { transform: scale(1); } 40% { transform: scale(1.4); } 100% { transform: scale(1); } }
+        @keyframes planifest-confetti { 0% { transform: translate(0, 0) rotate(0); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); opacity: 0; } }
         @media (prefers-reduced-motion: reduce) { [style*="planifest-"] { animation: none !important; } }
       `}</style>
 
@@ -8173,10 +9181,33 @@ export default function App() {
           guestSubmitting={guestSubmitting}
           guestBlockReason={guestBlockReason}
           onOpenTerms={goTerms}
+          events={events}
+          eventChoice={bookingEventId || activeEventId || "none"}
+          onEventChoice={setBookingEventId}
         />
       )}
 
       {view === "confirmation" && <ConfirmationView booking={lastBooking} onRestart={restart} onMinaBokningar={goMinaBokningar} />}
+
+      {view === "planning" && (
+        <PlanningView
+          session={session}
+          events={events}
+          activeEventId={activeEventId}
+          onSelectEvent={setActiveEventId}
+          onCreateEvent={createEvent}
+          onUpdateEvent={updateEvent}
+          onDeleteEvent={deleteEvent}
+          taskApi={taskApi}
+          budgetApi={budgetApi}
+          bookings={bookings}
+          savedProviders={savedProviders}
+          onViewProvider={viewProfile}
+          party={party}
+          onLogin={() => openAuthModal("signin")}
+          onSignup={() => openAuthModal("signup")}
+        />
+      )}
 
       {view === "minaBokningar" && (
         <MinaBokningarView bookings={bookings} onCancelBooking={cancelBooking} onReviewItem={openReview} onChatItem={openBookingChat} />
@@ -8415,5 +9446,6 @@ export default function App() {
         <CookieConsentBanner onAcceptAll={() => setConsent("all")} onNecessaryOnly={() => setConsent("necessary")} onOpenPolicy={goCookiePolicy} />
       )}
     </div>
+    </FavoritesContext.Provider>
   );
 }
