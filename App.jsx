@@ -55,6 +55,24 @@ const SESSION_STORAGE_KEY = "planifest-session";
 const CHAT_POLL_MS = 5000; // how often an open conversation checks for new messages
 const INBOX_POLL_MS = 10000; // how often the message bubble checks for unread messages
 const SOUND_KEY = "planifest-sound";
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (v) => typeof v === "string" && UUID_RE.test(v);
+
+// Guest bookings go through one server function (it checks everything and sets the prices itself).
+async function guestRequest(payload) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/guest-booking`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return { error: data?.error || "Något gick fel. Försök igen." };
+    return { data };
+  } catch (e) {
+    return { error: "Kunde inte nå servern. Kontrollera din uppkoppling och försök igen." };
+  }
+}
 
 // ---- Request forms: every vendor decides what customers are asked, per category ----
 // A form is a list of fields. Choice fields can carry a price (an add-on), which feeds the guide price.
@@ -904,6 +922,7 @@ function mapVendorToProviders(vendor, bookings) {
       location: locationMap[vendor.baseLocation]?.name || vendor.baseLocation,
       distanceKm: getMockDistance(vendor.id, vendor.baseLocation),
       pricing,
+      serviceId: primaryService?.id || null,
       request,
       requestOnly: !request.direct,
       fromPrice: hasPrice ? pricing.amount : fieldsFrom,
@@ -2361,66 +2380,32 @@ function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddo
   );
 }
 
-function CheckoutView({ cart, party, onOpenCart, onConfirm, onOpenTerms }) {
+function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConfirm, onLogin, guestError, guestSubmitting, guestBlockReason, onOpenTerms }) {
   const [accepted, setAccepted] = useState(false);
+  const [gName, setGName] = useState("");
+  const [gEmail, setGEmail] = useState("");
+  const [gPhone, setGPhone] = useState("");
+  const [tried, setTried] = useState(false);
   const total = cart.reduce((sum, p) => sum + getLineTotal(p, p.chosenAddons, party), 0);
+  const isGuest = !session;
+  const gErrors = {
+    name: gName.trim() ? "" : "Fyll i ditt namn",
+    email: EMAIL_RE.test(gEmail.trim()) ? "" : "Ange en giltig e-postadress",
+    phone: gPhone.trim() ? "" : "Fyll i ditt telefonnummer",
+    date: party.date ? "" : "Välj ett datum för ditt event först",
+  };
+  const gValid = !Object.values(gErrors).some(Boolean);
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+  const err = (k) =>
+    tried && gErrors[k] ? (
+      <span className="text-xs" style={{ color: colors.coralDeep }}>
+        {gErrors[k]}
+      </span>
+    ) : null;
+
   return (
     <div className="mx-auto max-w-2xl px-6 pb-24 pt-10 sm:px-10">
       <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Din fest</h1>
-
-      <div className="mt-5 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}` }}>
-        <div className="flex flex-wrap gap-4 text-sm" style={{ color: colors.plumSoft }}>
-          <span className="flex items-center gap-1">
-            <Calendar size={14} /> {party.date || "Datum ej valt"}
-          </span>
-          <span className="flex items-center gap-1">
-            <Clock size={14} /> {party.startTime}–{party.endTime}
-          </span>
-          <span className="flex items-center gap-1">
-            <Users size={14} /> {party.guests} gäster
-          </span>
-          {party.occasion && occasionMap[party.occasion] && (
-            <span className="flex items-center gap-1">
-              {occasionMap[party.occasion].emoji} {occasionMap[party.occasion].label}
-            </span>
-          )}
-        </div>
-
-        <div className="mt-5 space-y-3" style={{ borderTop: `1px solid ${colors.beige}`, paddingTop: 16 }}>
-          <p className="text-sm font-semibold" style={{ color: colors.plum }}>
-            Dina leverantörer
-          </p>
-          {cart.map((p) => {
-            const chosen = p.chosenAddons || [];
-            const chosenAddonObjs = p.addons.filter((a) => chosen.includes(a.id));
-            return (
-              <div key={p.id} className="flex items-start justify-between text-sm">
-                <div>
-                  <span style={{ color: colors.plum }}>{p.name}</span>
-                  <p className="text-xs" style={{ color: colors.plumSoft }}>
-                    {getBreakdownText(p, party)}
-                    {chosenAddonObjs.length > 0 && ` + ${chosenAddonObjs.map((a) => a.name).join(", ")}`}
-                  </p>
-                </div>
-                <span className="whitespace-nowrap font-medium" style={{ color: colors.plum }}>
-                  {formatKr(getLineTotal(p, chosen, party))}
-                </span>
-              </div>
-            );
-          })}
-          <button onClick={onOpenCart} className="text-xs font-medium underline" style={{ color: colors.lilacDeep }}>
-            Redigera i Min fest
-          </button>
-        </div>
-
-        <div className="mt-5 flex items-center justify-between" style={{ borderTop: `1px solid ${colors.beige}`, paddingTop: 16 }}>
-          <span className="font-semibold" style={{ color: colors.plum }}>
-            Totalpris
-          </span>
-          <span style={{ fontFamily: serif, fontSize: 24, color: colors.plum }}>{formatKr(total)}</span>
-        </div>
-      </div>
-
       <div className="mt-6 rounded-2xl p-4 text-sm leading-relaxed" style={{ backgroundColor: colors.cream, color: colors.plumSoft }}>
         <p className="mb-1 font-semibold" style={{ color: colors.plum }}>
           Bokningsvillkor & avbokningsregler
@@ -2431,6 +2416,54 @@ function CheckoutView({ cart, party, onOpenCart, onConfirm, onOpenTerms }) {
         Planifests allmänna villkor.
       </div>
 
+      {isGuest && (
+        <div className="mt-4 rounded-2xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+          <p style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>Boka som gäst</p>
+          {guestBlockReason ? (
+            <>
+              <p className="mt-2 text-sm" style={{ color: colors.plumSoft }}>
+                {guestBlockReason}
+              </p>
+              <button onClick={onLogin} className="mt-3 rounded-full px-5 py-2.5 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+                Logga in
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
+                Du behöver inget konto för att boka. Vi mejlar dig en länk att bekräfta, och en länk där du följer och kan avboka din bokning.
+              </p>
+              <label className="mt-4 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+                Namn
+                <input value={gName} onChange={(e) => setGName(e.target.value)} maxLength={100} autoComplete="name" className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+                {err("name")}
+              </label>
+              <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+                E-post
+                <input type="email" value={gEmail} onChange={(e) => setGEmail(e.target.value)} maxLength={254} autoComplete="email" className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+                {err("email")}
+              </label>
+              <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+                Telefonnummer
+                <input type="tel" value={gPhone} onChange={(e) => setGPhone(e.target.value)} maxLength={40} autoComplete="tel" className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+                {err("phone")}
+              </label>
+              {tried && gErrors.date && (
+                <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
+                  {gErrors.date}
+                </p>
+              )}
+              <p className="mt-3 text-xs" style={{ color: colors.plumSoft }}>
+                Dina uppgifter delas med en leverantör först när hen har accepterat din bokning. Med ett konto kan du också chatta med leverantörer, spara favoriter och planera din fest.{" "}
+                <button type="button" onClick={onLogin} className="font-semibold underline" style={{ color: colors.lilacDeep }}>
+                  Logga in
+                </button>
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
       <label className="mt-4 flex items-start gap-3 text-sm" style={{ color: colors.plum }}>
         <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} className="mt-1" />
         Jag har läst och godkänner Planifests{" "}
@@ -2440,18 +2473,203 @@ function CheckoutView({ cart, party, onOpenCart, onConfirm, onOpenTerms }) {
         .
       </label>
 
-      <button
-        disabled={!accepted || cart.length === 0}
-        onClick={onConfirm}
-        className="mt-5 flex w-full items-center justify-center gap-2 rounded-full py-3 text-base font-semibold"
-        style={{ backgroundColor: colors.coral, color: colors.white, opacity: accepted && cart.length > 0 ? 1 : 0.45 }}
-      >
-        Boka &amp; betala
-      </button>
+      {isGuest ? (
+        <>
+          {guestError && (
+            <p className="mt-3 text-sm" style={{ color: colors.coralDeep }}>
+              {guestError}
+            </p>
+          )}
+          <button
+            disabled={!accepted || cart.length === 0 || !!guestBlockReason || guestSubmitting}
+            onClick={() => {
+              setTried(true);
+              if (gValid) onGuestConfirm({ name: gName.trim(), email: gEmail.trim(), phone: gPhone.trim() });
+            }}
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-full py-3 text-base font-semibold"
+            style={{ backgroundColor: colors.coral, color: colors.white, opacity: accepted && cart.length > 0 && !guestBlockReason && !guestSubmitting ? 1 : 0.45 }}
+          >
+            {guestSubmitting ? "Skickar..." : "Skicka förfrågan som gäst"}
+          </button>
+        </>
+      ) : (
+        <button
+          disabled={!accepted || cart.length === 0}
+          onClick={onConfirm}
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-full py-3 text-base font-semibold"
+          style={{ backgroundColor: colors.coral, color: colors.white, opacity: accepted && cart.length > 0 ? 1 : 0.45 }}
+        >
+          Boka &amp; betala
+        </button>
+      )}
       <p className="mt-2 text-center text-xs" style={{ color: colors.plumSoft }}>
         Detta skickar en bokningsförfrågan till leverantörerna. Ingen betalning sker i denna prototyp.
       </p>
     </div>
+  );
+}
+
+// "Check your email": shown right after a guest sends their booking.
+function GuestCheckView({ email, onHome }) {
+  return (
+    <div className="mx-auto max-w-xl px-6 pb-24 pt-14 text-center sm:px-10">
+      <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full" style={{ backgroundColor: colors.coralSoft }}>
+        <Check size={28} color={colors.coral} />
+      </div>
+      <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Bekräfta din e-post</h1>
+      <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
+        Vi har skickat ett mejl till <strong>{email}</strong>. Klicka på knappen i mejlet så skickas din förfrågan vidare till leverantörerna.
+      </p>
+      <p className="mx-auto mt-2 max-w-sm text-xs" style={{ color: colors.plumSoft }}>
+        Hittar du inget mejl? Titta i skräpposten. Förfrågan skickas inte vidare förrän du har bekräftat.
+      </p>
+      <button onClick={onHome} className="mt-6 w-full rounded-full py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+        Till startsidan
+      </button>
+    </div>
+  );
+}
+
+// The guest's own booking page, reached from the link in their emails.
+function GuestBookingView({ state, onCancel, onHome, onCreateAccount }) {
+  const [confirming, setConfirming] = useState(false);
+  const { loading, error, data, justVerified } = state;
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-xl px-6 pb-24 pt-14 text-center sm:px-10">
+        <p className="text-sm" style={{ color: colors.plumSoft }}>
+          Hämtar din bokning...
+        </p>
+      </div>
+    );
+  }
+  if (error || !data) {
+    return (
+      <div className="mx-auto max-w-xl px-6 pb-24 pt-14 text-center sm:px-10">
+        <h1 style={{ fontFamily: serif, fontSize: 26, color: colors.plum }}>Länken fungerar inte</h1>
+        <p className="mx-auto mt-3 max-w-sm text-sm" style={{ color: colors.plumSoft }}>
+          {error || "Bokningen hittades inte."} Kontakta oss på info@planifest.se om du behöver hjälp.
+        </p>
+        <button onClick={onHome} className="mt-6 w-full rounded-full py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+          Till startsidan
+        </button>
+      </div>
+    );
+  }
+  const total = data.items.reduce((sum, i) => sum + Number(i.price || 0), 0);
+  const time = data.start_time && data.end_time ? `${String(data.start_time).slice(0, 5)}–${String(data.end_time).slice(0, 5)}` : "";
+  return (
+    <div className="mx-auto max-w-xl px-6 pb-24 pt-12 sm:px-10">
+      {justVerified && !data.cancelled && (
+        <div className="mb-5 rounded-2xl p-4 text-center" style={{ backgroundColor: "#E3F3E9" }}>
+          <p className="font-semibold" style={{ color: colors.green }}>
+            Tack! Din förfrågan är skickad
+          </p>
+          <p className="mt-1 text-sm" style={{ color: colors.plum }}>
+            Leverantörerna svarar normalt inom 24 timmar. Du får ett mejl så fort någon har svarat.
+          </p>
+        </div>
+      )}
+      <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Din bokning</h1>
+      <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
+        {data.booking_number} · {data.date}
+        {time ? `, ${time}` : ""} · {data.guests} gäster
+      </p>
+      {data.cancelled && (
+        <div className="mt-4 rounded-2xl p-4 text-sm font-semibold" style={{ backgroundColor: colors.beige, color: colors.plum }}>
+          Den här bokningen är avbokad.
+        </div>
+      )}
+      <div className="mt-5 space-y-2">
+        {data.items.map((i, k) => {
+          const meta = BOOKING_STATUS_META[data.cancelled ? "cancelled" : i.status] || BOOKING_STATUS_META.pending;
+          return (
+            <div key={k} className="flex items-center justify-between gap-3 rounded-2xl p-4" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+              <div>
+                <p className="font-semibold" style={{ color: colors.plum }}>
+                  {i.name}
+                </p>
+                <p className="text-xs" style={{ color: colors.plumSoft }}>
+                  {catMap[i.category_id]?.label || ""} · {formatKr(i.price)}
+                </p>
+              </div>
+              <span className="flex-shrink-0 rounded-full px-2.5 py-1 text-xs font-medium" style={{ backgroundColor: meta.bg, color: meta.fg }}>
+                {meta.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-4 flex items-center justify-between">
+        <span className="text-sm font-semibold" style={{ color: colors.plum }}>
+          Totalt
+        </span>
+        <span style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>{formatKr(total)}</span>
+      </div>
+
+      {!data.cancelled && (
+        <div className="mt-6">
+          {confirming ? (
+            <div className="rounded-2xl p-4" style={{ backgroundColor: colors.cream }}>
+              <p className="text-sm" style={{ color: colors.plum }}>
+                Vill du avboka hela bokningen? Avbokning senare än 14 dagar innan eventet kan medföra kostnad enligt leverantörens villkor.
+              </p>
+              <div className="mt-3 flex gap-2">
+                <button onClick={() => setConfirming(false)} className="flex-1 rounded-full px-4 py-2.5 text-sm font-medium" style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}>
+                  Behåll
+                </button>
+                <button
+                  onClick={async () => {
+                    await onCancel();
+                    setConfirming(false);
+                  }}
+                  className="flex-1 rounded-full px-4 py-2.5 text-sm font-semibold"
+                  style={{ backgroundColor: colors.coralDeep, color: colors.white }}
+                >
+                  Ja, avboka
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setConfirming(true)} className="w-full rounded-full py-2.5 text-sm font-medium" style={{ border: `1.5px solid ${colors.coral}`, color: colors.coral, backgroundColor: colors.white }}>
+              Avboka bokningen
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="mt-8 rounded-2xl p-5" style={{ backgroundColor: colors.lilacSoft }}>
+        <p className="font-semibold" style={{ color: colors.plum }}>
+          Vill du chatta, spara favoriter och planera din fest?
+        </p>
+        <p className="mt-1 text-sm" style={{ color: colors.plum }}>
+          Med ett gratis konto kan du prata med leverantörerna, spara dem och använda checklistor och budget.
+        </p>
+        <button onClick={onCreateAccount} className="mt-3 rounded-full px-5 py-2.5 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+          Skapa konto
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Vendor side: a guest's contact details, shown only once the vendor has accepted the booking.
+function GuestContact({ bookingId, fetchContact }) {
+  const [contact, setContact] = useState(null);
+  useEffect(() => {
+    let stop = false;
+    if (bookingId) fetchContact(bookingId).then((c) => !stop && setContact(c));
+    return () => {
+      stop = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingId]);
+  if (!contact) return null;
+  return (
+    <p className="mt-2 text-xs" style={{ color: colors.plum }}>
+      <strong>Gäst:</strong> {contact.name}
+      {contact.phone ? ` · ${contact.phone}` : ""} · {contact.email}
+    </p>
   );
 }
 
@@ -3854,6 +4072,8 @@ function getVendorBookingItems(vendor, bookings) {
         .map((item) => ({
           ...item,
           bookingNumber: b.bookingNumber,
+          bookingId: b.bookingId,
+          isGuest: !!b.isGuest,
           date: b.date,
           startTime: b.startTime,
           endTime: b.endTime,
@@ -5156,10 +5376,10 @@ function RequestFormEditor({ categoryId, form, hasPrice, onChange }) {
                 <input type="checkbox" checked={!!f.required} onChange={(e) => setField(i, { required: e.target.checked })} /> Obligatorisk
               </label>
               <button onClick={() => move(i, -1)} disabled={i === 0} aria-label="Flytta upp" className="underline disabled:opacity-30">
-                Upp
+                ↑ Flytta upp
               </button>
               <button onClick={() => move(i, 1)} disabled={i === fields.length - 1} aria-label="Flytta ner" className="underline disabled:opacity-30">
-                Ner
+                ↓ Flytta ner
               </button>
               <button onClick={() => emit({ fields: fields.filter((_, j) => j !== i) })} aria-label="Ta bort fråga" className="font-medium underline" style={{ color: colors.coralDeep }}>
                 Ta bort
@@ -5332,7 +5552,7 @@ function MessagesPanel({ open, conversations, soundOn, onToggleSound, onOpen, on
   );
 }
 
-function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime, onRemoveBlockedTime, onShowToast }) {
+function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime, onRemoveBlockedTime, onShowToast, onFetchGuestContact }) {
   const [blockDate, setBlockDate] = useState("");
   const [blockStart, setBlockStart] = useState("09:00");
   const [blockEnd, setBlockEnd] = useState("17:00");
@@ -5499,11 +5719,14 @@ function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime,
           <div className="space-y-2">
             {upcomingEntries.map((e, i) =>
               e.type === "booking" ? (
-                <div key={`b-${i}`} className="flex items-center justify-between rounded-xl p-3 text-sm" style={{ backgroundColor: "#E3F3E9" }}>
-                  <span className="flex items-center gap-2" style={{ color: colors.plum }}>
-                    <Check size={14} color={colors.green} /> {e.date}, {e.startTime}–{e.endTime}
-                  </span>
-                  <span style={{ color: colors.plumSoft }}>{formatKr(e.item.price)}</span>
+                <div key={`b-${i}`} className="rounded-xl p-3 text-sm" style={{ backgroundColor: "#E3F3E9" }}>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2" style={{ color: colors.plum }}>
+                      <Check size={14} color={colors.green} /> {e.date}, {e.startTime}–{e.endTime}
+                    </span>
+                    <span style={{ color: colors.plumSoft }}>{formatKr(e.item.price)}</span>
+                  </div>
+                  {e.item.isGuest && onFetchGuestContact && <GuestContact bookingId={e.item.bookingId} fetchContact={onFetchGuestContact} />}
                 </div>
               ) : (
                 <div key={`x-${i}`} className="flex items-center justify-between rounded-xl p-3 text-sm" style={{ backgroundColor: colors.beige }}>
@@ -6183,6 +6406,10 @@ const emptyVendorForm = () => ({
 export default function App() {
   const [view, setView] = useState("home");
   const [recoverySession, setRecoverySession] = useState(null);
+  const [guestError, setGuestError] = useState("");
+  const [guestSubmitting, setGuestSubmitting] = useState(false);
+  const [guestPendingEmail, setGuestPendingEmail] = useState("");
+  const [guestBooking, setGuestBooking] = useState({ loading: false, error: "", data: null, justVerified: false, token: "" });
   const [pollTick, setPollTick] = useState(0); // bumps every 20 s while a vendor view is open, to refresh requests and conversations
   useEffect(() => {
     if (!["vendorDashboard", "vendorBookings", "vendorInbox"].includes(view)) return;
@@ -6215,6 +6442,20 @@ export default function App() {
       showToast("Kontot är bekräftat ✓ Logga in för att fortsätta.");
       window.history.replaceState(null, "", window.location.pathname);
     }
+  }, []);
+  // A guest's emails link back here: ?gast=verifiera&t=... (confirm the booking) or ?gast=bokning&t=... (follow / cancel it).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const kind = params.get("gast");
+    const token = params.get("t");
+    if (!kind || !token) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    setGuestBooking({ loading: true, error: "", data: null, justVerified: false, token });
+    setView("guestBooking");
+    (async () => {
+      const { data, error } = await guestRequest({ action: kind === "verifiera" ? "verify" : "get", token });
+      setGuestBooking({ loading: false, error: error || "", data: data?.booking || null, justVerified: kind === "verifiera" && !error, token });
+    })();
   }, []);
   const [party, setParty] = useState(emptyParty);
   const [cartItems, setCartItems] = useState([]); // [{ id, addons: [addonId, ...] }]
@@ -6480,7 +6721,7 @@ export default function App() {
     if (!vendorId || vendorId.startsWith("VND-") || !session?.access_token) return;
     if (!["vendorDashboard", "vendorBookings"].includes(view)) return;
     supabaseRestRequest(
-      `/booking_items?vendor_id=eq.${vendorId}&select=*,bookings(booking_number,date,start_time,end_time,guests,occasion,cancelled)`,
+      `/booking_items?vendor_id=eq.${vendorId}&select=*,bookings(id,booking_number,date,start_time,end_time,guests,occasion,cancelled,customer_id)`,
       session.access_token
     ).then(({ data, error }) => {
       if (error || !data) return;
@@ -6505,9 +6746,11 @@ export default function App() {
             const newItems = [...next[idx].items];
             if (itemIdx >= 0) newItems[itemIdx] = localItem;
             else newItems.push(localItem);
-            next[idx] = { ...next[idx], items: newItems, cancelled: b.cancelled };
+            next[idx] = { ...next[idx], items: newItems, cancelled: b.cancelled, bookingId: b.id, isGuest: !b.customer_id };
           } else {
             next.push({
+              bookingId: b.id,
+              isGuest: !b.customer_id,
               bookingNumber: b.booking_number,
               date: b.date,
               startTime: b.start_time,
@@ -6856,12 +7099,10 @@ export default function App() {
       showToast("Logga in för att slutföra bokningen");
       return;
     }
-    const newBookingNumber = "EVT-" + Math.floor(1000 + Math.random() * 9000);
     const { data: bookingRows, error: bookingError } = await supabaseRestRequest("/bookings", session.access_token, {
       method: "POST",
       headers: { Prefer: "return=representation" },
       body: JSON.stringify({
-        booking_number: newBookingNumber,
         customer_id: session.user.id,
         date: party.date || null,
         start_time: party.startTime || null,
@@ -6875,6 +7116,7 @@ export default function App() {
       return;
     }
     const bookingRow = bookingRows[0];
+    const newBookingNumber = bookingRow.booking_number; // handed out by the database
     const itemsPayload = cart.map((p) => ({
       booking_id: bookingRow.id,
       vendor_id: p.vendorDbId || null,
@@ -6883,6 +7125,8 @@ export default function App() {
       price: getLineTotal(p, p.chosenAddons, party),
       status: "pending",
       quote_message_id: p.quoteMessageId || null,
+      service_id: isUuid(p.serviceId) ? p.serviceId : null,
+      addon_ids: (p.chosenAddons || []).filter(isUuid),
     }));
     const { data: itemRows, error: itemsError } = await supabaseRestRequest("/booking_items", session.access_token, {
       method: "POST",
@@ -6920,6 +7164,47 @@ export default function App() {
     setLastBooking(newBooking);
     setCartItems([]);
     setView("confirmation");
+  };
+
+  // --- Guest booking ---
+  const guestBlockReason = cart.some((p) => !p.vendorDbId || !isUuid(p.serviceId) || p.quoteMessageId || p.requestOnly)
+    ? "En eller flera leverantörer i din fest kräver ett konto (till exempel en offert eller en förfrågan). Logga in för att boka."
+    : "";
+
+  const submitGuestBooking = async ({ name, email, phone }) => {
+    setGuestError("");
+    setGuestSubmitting(true);
+    const { error } = await guestRequest({
+      action: "create",
+      name,
+      email,
+      phone,
+      party: { date: party.date, start: party.startTime, end: party.endTime, guests: Number(party.guests) || 1, occasion: party.occasion || "" },
+      items: cart.map((p) => ({ vendor_id: p.vendorDbId, category_id: p.category, name: p.name, service_id: p.serviceId, addon_ids: (p.chosenAddons || []).filter(isUuid) })),
+    });
+    setGuestSubmitting(false);
+    if (error) {
+      setGuestError(error);
+      return;
+    }
+    setGuestPendingEmail(email);
+    setCartItems([]);
+    setView("guestCheck");
+  };
+
+  const cancelGuestBooking = async () => {
+    const { data, error } = await guestRequest({ action: "cancel", token: guestBooking.token });
+    if (error) {
+      showToast(error);
+      return;
+    }
+    setGuestBooking((g) => ({ ...g, data: data.booking }));
+    showToast("Bokningen är avbokad");
+  };
+
+  const fetchGuestContact = async (bookingId) => {
+    const { data } = await supabaseRestRequest("/rpc/vendor_guest_contact", session.access_token, { method: "POST", body: JSON.stringify({ p_booking_id: bookingId }) });
+    return Array.isArray(data) ? data[0] || null : null;
   };
 
   const restart = () => {
@@ -7869,8 +8154,26 @@ export default function App() {
         />
       )}
 
+      {view === "guestCheck" && <GuestCheckView email={guestPendingEmail} onHome={goHome} />}
+
+      {view === "guestBooking" && (
+        <GuestBookingView state={guestBooking} onCancel={cancelGuestBooking} onHome={goHome} onCreateAccount={() => openAuthModal("signup")} />
+      )}
+
       {view === "checkout" && (
-        <CheckoutView cart={cart} party={party} onOpenCart={() => setCartOpen(true)} onConfirm={confirmBooking} onOpenTerms={goTerms} />
+        <CheckoutView
+          cart={cart}
+          party={party}
+          session={session}
+          onOpenCart={() => setCartOpen(true)}
+          onConfirm={confirmBooking}
+          onGuestConfirm={submitGuestBooking}
+          onLogin={() => openAuthModal("signin")}
+          guestError={guestError}
+          guestSubmitting={guestSubmitting}
+          guestBlockReason={guestBlockReason}
+          onOpenTerms={goTerms}
+        />
       )}
 
       {view === "confirmation" && <ConfirmationView booking={lastBooking} onRestart={restart} onMinaBokningar={goMinaBokningar} />}
@@ -7975,6 +8278,7 @@ export default function App() {
           onRespond={respondToBookingItem}
           onAddBlockedTime={addBlockedTime}
           onRemoveBlockedTime={removeBlockedTime}
+          onFetchGuestContact={fetchGuestContact}
         />
       )}
 
