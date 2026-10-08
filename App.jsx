@@ -182,6 +182,10 @@ const mapGuest = (g) => ({
   dietary: g.dietary || "",
   message: g.message || "",
   source: g.source,
+  email: g.email || "",
+  emailOptout: !!g.email_optout,
+  invitedAt: g.invited_at || null,
+  lastRemindedAt: g.last_reminded_at || null,
 });
 
 const normalizeEvent = (e) => ({
@@ -5586,6 +5590,10 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
   const [showInvite, setShowInvite] = useState(false);
   const [open, setOpen] = useState(null); // guest id with the edit panel open
   const [copied, setCopied] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [confirmMail, setConfirmMail] = useState(null); // { kind, ids, n } while the host is asked "send N mails?"
+  const [mailMsg, setMailMsg] = useState("");
+  const [mailBusy, setMailBusy] = useState(false);
   const [loc, setLoc] = useState(ev.location);
   const [time, setTime] = useState(ev.eventTime);
   const [msg, setMsg] = useState(ev.inviteMessage);
@@ -5624,19 +5632,43 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
 
   const addOne = () => {
     if (!name.trim()) return;
-    guestApi.add(ev.id, [name.trim()]);
+    if (newEmail.trim() && !EMAIL_RE.test(newEmail.trim())) {
+      setMailMsg("Den e-postadressen ser inte rätt ut.");
+      return;
+    }
+    guestApi.add(ev.id, [{ name: name.trim(), email: newEmail.trim() }]);
     setName("");
+    setNewEmail("");
+    setMailMsg("");
   };
+  // One guest per line: "Kalle kalle@epost.se" or "Kalle, kalle@epost.se". A line with no address may hold several names ("Lisa, Pelle").
   const addBulk = () => {
-    const names = bulk
-      .split(/\n|,|;/)
-      .map((n) => n.trim())
-      .filter(Boolean)
-      .slice(0, 100);
-    if (names.length === 0) return;
-    guestApi.add(ev.id, names);
+    const people = [];
+    bulk.split(/\n/).forEach((line) => {
+      const m = line.match(/[^\s<>,;]+@[^\s<>,;]+\.[^\s<>,;]+/);
+      if (m) people.push({ name: line.replace(m[0], "").replace(/[<>,;]+/g, " ").replace(/\s+/g, " ").trim(), email: m[0] });
+      else line.split(/,|;/).forEach((n) => people.push({ name: n.trim(), email: "" }));
+    });
+    const clean = people.filter((x) => x.name).slice(0, 100);
+    if (clean.length === 0) return;
+    guestApi.add(ev.id, clean);
     setBulk("");
     setShowBulk(false);
+  };
+
+  // who the mail buttons would reach right now
+  const reachable = guests.filter((g) => g.email && !g.emailOptout);
+  const toInvite = reachable.filter((g) => !g.invitedAt);
+  const deadlinePassed = ev.rsvpDeadline && ev.rsvpDeadline < todayISO();
+  const toRemind = deadlinePassed ? [] : reachable.filter((g) => g.status === "pending" && (!g.lastRemindedAt || Date.now() - new Date(g.lastRemindedAt).getTime() > 86400000));
+  const optedOut = guests.filter((g) => g.email && g.emailOptout).length;
+  const runMail = async () => {
+    if (!confirmMail) return;
+    setMailBusy(true);
+    const res = await guestApi.sendEmails(ev.id, confirmMail.kind, confirmMail.ids);
+    setMailBusy(false);
+    setConfirmMail(null);
+    setMailMsg(res.error ? res.error : res.count === 0 ? "Inga mejl behövde skickas." : `${res.count} ${res.count === 1 ? "mejl skickas" : "mejl skickas"} ✓`);
   };
   const flash = (key) => {
     setCopied(key);
@@ -5741,8 +5773,63 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
         )}
       </div>
 
+      {reachable.length + optedOut > 0 && (
+        <div className="mt-4 rounded-2xl p-4" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+          <p className="text-sm font-semibold" style={{ color: colors.plum }}>
+            Mejl från Planifest
+          </p>
+          <p className="mt-1 text-xs leading-relaxed" style={{ color: colors.plumSoft }}>
+            Vi mejlar inbjudan och påminnelser åt dig, i ditt namn. Gäster som svarar på mejlet når dig på din e-post, och varje mejl har en avanmälningslänk. Du ansvarar för att dina gäster är okej med att få mejl.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => setConfirmMail({ kind: "invite", ids: null, n: toInvite.length })}
+              disabled={toInvite.length === 0 || mailBusy}
+              className="rounded-full px-4 py-2 text-sm font-semibold"
+              style={{ backgroundColor: colors.coral, color: colors.white, opacity: toInvite.length === 0 ? 0.4 : 1 }}
+            >
+              Mejla inbjudan till {toInvite.length} {toInvite.length === 1 ? "gäst" : "gäster"}
+            </button>
+            <button
+              onClick={() => setConfirmMail({ kind: "reminder", ids: null, n: toRemind.length })}
+              disabled={toRemind.length === 0 || mailBusy}
+              className="rounded-full px-4 py-2 text-sm font-semibold"
+              style={{ border: `1.5px solid ${colors.coral}`, color: colors.coral, backgroundColor: colors.white, opacity: toRemind.length === 0 ? 0.4 : 1 }}
+            >
+              Påminn {toRemind.length} som inte svarat
+            </button>
+          </div>
+          {confirmMail && (
+            <div className="mt-3 rounded-xl p-3 text-sm" style={{ backgroundColor: colors.cream, color: colors.plum }}>
+              <p>
+                Skicka {confirmMail.n} {confirmMail.kind === "invite" ? (confirmMail.n === 1 ? "inbjudan" : "inbjudningar") : confirmMail.n === 1 ? "påminnelse" : "påminnelser"} nu?
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => setConfirmMail(null)} className="rounded-full px-4 py-1.5 text-xs font-medium" style={{ border: `1.5px solid ${colors.beige}`, backgroundColor: colors.white }}>
+                  Avbryt
+                </button>
+                <button onClick={runMail} disabled={mailBusy} className="rounded-full px-4 py-1.5 text-xs font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+                  {mailBusy ? "Skickar..." : "Ja, skicka"}
+                </button>
+              </div>
+            </div>
+          )}
+          {optedOut > 0 && (
+            <p className="mt-2 text-xs" style={{ color: colors.plumSoft }}>
+              {optedOut} {optedOut === 1 ? "gäst har" : "gäster har"} avanmält sig från mejl och får inga fler.
+            </p>
+          )}
+        </div>
+      )}
+      {mailMsg && (
+        <p className="mt-2 text-sm font-medium" style={{ color: mailMsg.endsWith("✓") ? "#3D7A52" : colors.coralDeep }}>
+          {mailMsg}
+        </p>
+      )}
+
       <div className="mt-5 flex flex-wrap gap-2">
         <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addOne()} maxLength={100} placeholder="Lägg till en gäst..." aria-label="Ny gäst" className="min-w-[160px] flex-1 rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
+        <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addOne()} maxLength={254} placeholder="E-post (valfritt)" aria-label="Gästens e-post" className="min-w-[160px] flex-1 rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
         <button onClick={addOne} className="rounded-full px-5 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
           Lägg till
         </button>
@@ -5752,7 +5839,7 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
       </button>
       {showBulk && (
         <div className="mt-2">
-          <textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5} aria-label="Flera gäster" placeholder={"Ett namn per rad:\nFarmor\nKalle och Lisa"} className="w-full rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
+          <textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5} aria-label="Flera gäster" placeholder={"Ett namn per rad, gärna med e-post:\nFarmor\nKalle kalle@epost.se"} className="w-full rounded-xl px-3 py-2 text-sm" style={fieldStyle} />
           <button onClick={addBulk} className="mt-2 rounded-full px-5 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
             Lägg till alla
           </button>
@@ -5790,6 +5877,12 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
                   </span>
                 )}
               </div>
+              {g.email && (
+                <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                  {g.email}
+                  {g.emailOptout ? " · avanmäld från mejl" : [g.invitedAt ? ` · inbjuden ${shortDate(g.invitedAt.slice(0, 10))}` : "", g.lastRemindedAt ? ` · påmind ${shortDate(g.lastRemindedAt.slice(0, 10))}` : ""].join("")}
+                </p>
+              )}
               {(g.dietary || g.message) && (
                 <p className="mt-1 text-xs italic" style={{ color: colors.plumSoft }}>
                   {[g.dietary, g.message && `"${g.message}"`].filter(Boolean).join(" · ")}
@@ -5830,6 +5923,11 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
                 <button onClick={() => send(g)} className="rounded-full px-3 py-1.5 font-semibold" style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}>
                   {copied === `i-${g.id}` ? "Klart ✓" : "Skicka inbjudan"}
                 </button>
+                {g.email && !g.emailOptout && (
+                  <button onClick={() => setConfirmMail({ kind: "invite", ids: [g.id], n: 1 })} className="font-medium underline" style={{ color: colors.lilacDeep }}>
+                    {g.invitedAt ? "Mejla igen" : "Mejla inbjudan"}
+                  </button>
+                )}
                 <button onClick={() => copyLink(g)} className="font-medium underline" style={{ color: colors.lilacDeep }}>
                   {copied === `l-${g.id}` ? "Kopierad ✓" : "Kopiera länk"}
                 </button>
@@ -5863,6 +5961,27 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
                         </option>
                       ))}
                     </select>
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    E-post
+                    <input
+                      defaultValue={g.email}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        if (v === g.email) return;
+                        if (v && !EMAIL_RE.test(v)) {
+                          setMailMsg("Den e-postadressen ser inte rätt ut.");
+                          return;
+                        }
+                        guestApi.update(ev.id, g.id, { email: v });
+                      }}
+                      maxLength={254}
+                      type="email"
+                      aria-label={`E-post för ${g.name}`}
+                      placeholder="namn@epost.se"
+                      className="w-48 rounded-lg px-2 py-1"
+                      style={fieldStyle}
+                    />
                   </label>
                   <span style={{ color: colors.plumSoft }}>Platser = hur många som får komma, inklusive gästen.</span>
                 </div>
@@ -5901,6 +6020,49 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
 }
 
 // What a guest sees when they open their link. No account, no login.
+// The link in every guest mail. It asks first (a mail scanner that opens links must not opt anyone out by accident).
+function OptOutView({ state, onConfirm, onHome }) {
+  const wrap = (children) => <div className="mx-auto max-w-md px-6 pb-24 pt-14 text-center sm:px-10">{children}</div>;
+  if (state.error) {
+    return wrap(
+      <>
+        <h1 style={{ fontFamily: serif, fontSize: 26, color: colors.plum }}>Länken fungerar inte</h1>
+        <p className="mt-3 text-sm" style={{ color: colors.plumSoft }}>
+          {state.error}
+        </p>
+      </>
+    );
+  }
+  if (state.done) {
+    return wrap(
+      <>
+        <p style={{ fontFamily: hand, fontSize: 30, color: colors.lilacDeep }}>klart</p>
+        <h1 style={{ fontFamily: serif, fontSize: 26, color: colors.plum }}>Du får inga fler mejl</h1>
+        <p className="mt-3 text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
+          Vi skickar inga fler mejl om fester till den här adressen. Du kan fortfarande svara på en inbjudan om du öppnar länken du fått.
+        </p>
+        <button onClick={onHome} className="mt-6 rounded-full px-6 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+          Till Planifest
+        </button>
+      </>
+    );
+  }
+  return wrap(
+    <>
+      <h1 style={{ fontFamily: serif, fontSize: 26, color: colors.plum }}>Vill du inte ha fler mejl?</h1>
+      <p className="mt-3 text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
+        Om du avanmäler dig skickar Planifest inga fler mejl om fester till den här adressen, från någon som bjuder in dig.
+      </p>
+      <button onClick={onConfirm} disabled={state.loading} className="mt-6 rounded-full px-6 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white, opacity: state.loading ? 0.6 : 1 }}>
+        {state.loading ? "Ett ögonblick..." : "Ja, avanmäl mig"}
+      </button>
+      <p className="mt-4 text-xs" style={{ color: colors.plumSoft }}>
+        Ändrade du dig? Du kan bara stänga den här sidan.
+      </p>
+    </>
+  );
+}
+
 function RsvpView({ state, onSubmit, onHome }) {
   const { loading, error, data, saved } = state;
   const [status, setStatus] = useState("");
@@ -7888,6 +8050,7 @@ export default function App() {
   const [favoriteIds, setFavoriteIds] = useState(() => new Set());
   const [bookingEventId, setBookingEventId] = useState(undefined); // undefined = the active planning, "none" = no planning
   const [rsvp, setRsvp] = useState({ loading: false, error: "", data: null, token: "", openToken: "", saved: null });
+  const [optOut, setOptOut] = useState({ token: "", loading: false, done: false, error: "" });
   const [guestError, setGuestError] = useState("");
   const [guestSubmitting, setGuestSubmitting] = useState(false);
   const [guestPendingEmail, setGuestPendingEmail] = useState("");
@@ -7939,6 +8102,20 @@ export default function App() {
       setGuestBooking({ loading: false, error: error || "", data: data?.booking || null, justVerified: kind === "verifiera" && !error, token });
     })();
   }, []);
+  // The opt-out link in guest mails: ?avanmal=TOKEN (nothing happens until the guest presses the button)
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("avanmal");
+    if (!token) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    setOptOut({ token, loading: false, done: false, error: "" });
+    setView("rsvpOptout");
+  }, []);
+  const confirmOptOut = async () => {
+    setOptOut((o) => ({ ...o, loading: true }));
+    const { data, error } = await rpcAnon("rsvp_optout", { p_token: optOut.token });
+    if (error || !data) setOptOut((o) => ({ ...o, loading: false, error: "Länken fungerar inte. Om du fortfarande får mejl, svara på ett av dem så hjälper vi dig." }));
+    else setOptOut((o) => ({ ...o, loading: false, done: true }));
+  };
   // A guest's invitation link: ?svara=TOKEN. Their personal link answers for them; the open link adds them to the list.
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("svara");
@@ -8908,20 +9085,21 @@ export default function App() {
   };
 
   const guestApi = {
-    add: async (eventId, names) => {
+    add: async (eventId, people) => {
       const have = new Set((events.find((e) => e.id === eventId)?.guestList || []).map((g) => g.name.toLowerCase()));
       const rows = [];
-      names.forEach((name) => {
+      people.forEach((person) => {
+        const { name, email } = typeof person === "string" ? { name: person, email: "" } : person;
         if (have.has(name.toLowerCase())) return;
         have.add(name.toLowerCase());
-        rows.push({ id: newId(), name: name.slice(0, 100), token: `${newId()}${newId()}`.replace(/-/g, ""), status: "pending", allowedParty: 1, partySize: 1, dietary: "", message: "", source: "host" });
+        rows.push({ id: newId(), name: name.slice(0, 100), token: `${newId()}${newId()}`.replace(/-/g, ""), status: "pending", allowedParty: 1, partySize: 1, dietary: "", message: "", source: "host", email: EMAIL_RE.test(email || "") ? email.trim() : "", emailOptout: false, invitedAt: null, lastRemindedAt: null });
       });
       if (rows.length === 0) {
         showToast("Den gästen finns redan i listan");
         return;
       }
       patchEvent(eventId, (e) => ({ ...e, guestList: [...e.guestList, ...rows] }));
-      const { error } = await planningDb("/event_guests", { method: "POST", body: JSON.stringify(rows.map((g) => ({ id: g.id, event_id: eventId, name: g.name, token: g.token }))) });
+      const { error } = await planningDb("/event_guests", { method: "POST", body: JSON.stringify(rows.map((g) => ({ id: g.id, event_id: eventId, name: g.name, token: g.token, email: g.email || null }))) });
       if (error) {
         patchEvent(eventId, (e) => ({ ...e, guestList: e.guestList.filter((g) => !rows.some((r) => r.id === g.id)) }));
         failed("lägga till gästerna", error);
@@ -8940,6 +9118,7 @@ export default function App() {
       if ("allowedParty" in next) body.allowed_party = next.allowedParty;
       if ("partySize" in next) body.party_size = next.partySize;
       if ("dietary" in next) body.dietary = next.dietary;
+      if ("email" in next) body.email = next.email || null;
       const { error } = await planningDb(`/event_guests?id=eq.${guestId}`, { method: "PATCH", body: JSON.stringify(body) });
       if (error) {
         patchEvent(eventId, (e) => ({ ...e, guestList: e.guestList.map((g) => (g.id === guestId ? cur : g)) }));
@@ -8962,6 +9141,18 @@ export default function App() {
         return;
       }
       patchEvent(ev.id, (e) => ({ ...e, inviteToken: typeof data === "string" ? data : null }));
+    },
+    // The host asks Planifest to email invitations or reminders. The database decides who is eligible and enforces the daily ceiling.
+    sendEmails: async (eventId, kind, ids) => {
+      const { data, error } = await planningDb("/rpc/send_guest_emails", { method: "POST", body: JSON.stringify({ p_event_id: eventId, p_kind: kind, p_guest_ids: ids || null }) });
+      if (error) {
+        const m = error.message || "";
+        return {
+          error: m.includes("mail:limit") ? "Max 100 mejl per fest och dygn. Försök igen i morgon." : m.includes("mail:past") ? "Festen har redan varit." : m.includes("mail:closed") ? "Svarstiden har gått ut, så det går inte att påminna längre." : "Kunde inte skicka mejlen. Försök igen.",
+        };
+      }
+      await guestApi.refresh(eventId);
+      return { count: Number(data) || 0 };
     },
     // answers can arrive at any time (a guest answering from their phone): fetch the list again
     refresh: async (eventId) => {
@@ -10026,6 +10217,8 @@ export default function App() {
       {view === "confirmation" && <ConfirmationView booking={lastBooking} onRestart={restart} onMinaBokningar={goMinaBokningar} />}
 
       {view === "rsvp" && <RsvpView state={rsvp} onSubmit={submitRsvp} onHome={goHome} />}
+
+      {view === "rsvpOptout" && <OptOutView state={optOut} onConfirm={confirmOptOut} onHome={goHome} />}
 
       {view === "planning" && (
         <PlanningView
