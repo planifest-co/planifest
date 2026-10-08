@@ -126,10 +126,10 @@ function buildTemplateTasks(eventType, eventDate, existingTitles = []) {
 }
 // ---- Gästlista & RSVP ----
 const RSVP_STATUS = {
-  yes: { label: "Kommer", bg: "#E3F3E9", fg: "#3D7A52" },
-  maybe: { label: "Kanske", bg: "#EFE3EE", fg: "#8B6589" },
-  no: { label: "Kan inte", bg: "#FBE4E1", fg: "#A5483F" },
-  pending: { label: "Ej svarat", bg: "#EFE6DE", fg: "#8F7A6C" },
+  yes: { label: "Kommer", bg: "#DCEBD3", fg: "#2F5A2C" },
+  maybe: { label: "Kanske", bg: "#F8DDE3", fg: "#7D2248" },
+  no: { label: "Kan inte", bg: "#FBDCD8", fg: "#9B2B3A" },
+  pending: { label: "Ej svarat", bg: "#F3E8DB", fg: "#6E4F62" },
 };
 const DIETARY_OPTIONS = ["Vegetarian", "Vegan", "Glutenfri", "Laktosfri", "Nötfri"];
 const guestLink = (token) => `${typeof window !== "undefined" ? window.location.origin : ""}/?svara=${token}`;
@@ -371,7 +371,7 @@ function priceFromAnswers(fields, getPicked) {
   });
   return extra;
 }
-const BADGE_RED = "#C8554B";
+const BADGE_RED = "#E85D48";
 
 // A short two-note "ping", generated in the browser (no audio file needed).
 // Browsers only allow sound after the person has clicked or tapped something on
@@ -665,26 +665,30 @@ async function saveVendorProfile(vendor, accessToken) {
 // Design tokens
 // ---------------------------------------------------------------------------
 const colors = {
-  cream: "#F6E5DC",
-  coral: "#4C3326", // primary CTA / accent — deep espresso brown, not bright coral anymore
-  coralDeep: "#382318",
-  coralSoft: "#F4DFD6",
-  lilac: "#BD9BBD", // dusty mauve secondary accent
-  lilacDeep: "#8B6589",
-  lilacSoft: "#F1E7F0",
-  pink: "#E3C2BD", // dusty rose
-  pinkSoft: "#F9EEEC",
-  peach: "#E5D5C3", // warm tan
-  peachSoft: "#F9F1E7",
-  plum: "#4C3326", // primary text — same deep brown as the accent, for a quiet monochrome feel
-  plumSoft: "#8F7A6C",
-  beige: "#E5D5C3",
+  // Hallonsorbet — hallon, korall, lila och champagne
+  cream: "#FBF3E8", // champagne background
+  coral: "#7D2248", // primary CTA / accent — hallon
+  coralDeep: "#521333", // pressed hallon
+  coralSoft: "#F6D3D0", // rosé
+  lilac: "#D98BA8", // mid raspberry-pink (was purple)
+  lilacDeep: "#7D2248", // hallon (was purple)
+  lilacSoft: "#F8DDE3", // pale raspberry tint (was pale lilac)
+  pink: "#F6D3D0", // rosé
+  pinkSoft: "#FCE9E6",
+  peach: "#FFD0C6", // apricot
+  peachSoft: "#FFEDE7",
+  korall: "#FF7F6B", // playful accent: bubbles, progress
+  syren: "#F2B8C6",
+  plum: "#4A1538", // primary text — deep wine
+  plumSoft: "#6E4F62",
+  beige: "#E7D5C2", // champagne border
   white: "#FFFFFF",
-  green: "#5C6B4E", // muted sage, replaces the brighter green for success/available states
+  green: "#2F5A2C", // success text
+  greenSoft: "#DCEBD3", // success background
 };
 
 const serif = "'Fraunces', 'Georgia', serif";
-const sans = "'Inter', system-ui, sans-serif";
+const sans = "'Figtree', system-ui, sans-serif";
 
 // ---------------------------------------------------------------------------
 // Demo data switch. When false (the default for real visitors) the seed
@@ -1444,7 +1448,7 @@ function CalendarLegend({ compact = false }) {
   return (
     <div className={compact ? "mt-2 flex flex-wrap gap-2 text-[10px]" : "mt-3 flex flex-wrap gap-3 text-xs"} style={{ color: colors.plumSoft }}>
       <span className="flex items-center gap-1">
-        <span className={compact ? "inline-block h-1.5 w-1.5 rounded-full" : "inline-block h-2.5 w-2.5 rounded-full"} style={{ backgroundColor: "#EAF4EE", border: `1px solid ${colors.green}` }} /> Ledig
+        <span className={compact ? "inline-block h-1.5 w-1.5 rounded-full" : "inline-block h-2.5 w-2.5 rounded-full"} style={{ backgroundColor: colors.greenSoft, border: `1px solid ${colors.green}` }} /> Ledig
       </span>
       <span className="flex items-center gap-1">
         <span className={compact ? "inline-block h-1.5 w-1.5 rounded-full" : "inline-block h-2.5 w-2.5 rounded-full"} style={{ backgroundColor: colors.peachSoft }} /> Bokad
@@ -1459,7 +1463,7 @@ function CalendarLegend({ compact = false }) {
 function MonthCalendar({ year, month, onPrevMonth, onNextMonth, getDayStatus, onDayClick, interactive, highlightDate, compact = false }) {
   const cells = getMonthGrid(year, month);
   const statusStyle = {
-    open: { bg: "#EAF4EE", fg: colors.green },
+    open: { bg: colors.greenSoft, fg: colors.green },
     booked: { bg: colors.peachSoft, fg: colors.coralDeep },
     closed: { bg: colors.beige, fg: colors.plumSoft },
     past: { bg: "transparent", fg: colors.beige },
@@ -2287,7 +2291,7 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
             <div
               className="mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
               style={{
-                backgroundColor: party.date && provider.closedDates?.includes(party.date) ? "#F3EFE9" : "#EAF4EE",
+                backgroundColor: party.date && provider.closedDates?.includes(party.date) ? "#F3E8DB" : colors.greenSoft,
                 color: party.date && provider.closedDates?.includes(party.date) ? colors.plumSoft : colors.green,
               }}
             >
@@ -2410,7 +2414,7 @@ function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddo
 
   return (
     <>
-      {open && <div className="fixed inset-0 z-40" style={{ backgroundColor: "rgba(60,47,69,0.35)" }} onClick={onClose} />}
+      {open && <div className="fixed inset-0 z-40" style={{ backgroundColor: "rgba(74,21,56,0.35)" }} onClick={onClose} />}
       <div
         className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col shadow-2xl transition-transform"
         style={{
@@ -2760,7 +2764,7 @@ function GuestBookingView({ state, onCancel, onHome, onCreateAccount }) {
   return (
     <div className="mx-auto max-w-xl px-6 pb-24 pt-12 sm:px-10">
       {justVerified && !data.cancelled && (
-        <div className="mb-5 rounded-2xl p-4 text-center" style={{ backgroundColor: "#E3F3E9" }}>
+        <div className="mb-5 rounded-2xl p-4 text-center" style={{ backgroundColor: colors.greenSoft }}>
           <p className="font-semibold" style={{ color: colors.green }}>
             Tack! Din förfrågan är skickad
           </p>
@@ -3100,7 +3104,7 @@ function ReviewModal({ target, onSubmit, onClose }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
-      style={{ backgroundColor: "rgba(60,47,69,0.45)" }}
+      style={{ backgroundColor: "rgba(74,21,56,0.45)" }}
       onClick={onClose}
     >
       <div
@@ -3212,7 +3216,7 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
-      style={{ backgroundColor: "rgba(60,47,69,0.45)" }}
+      style={{ backgroundColor: "rgba(74,21,56,0.45)" }}
       onClick={onClose}
     >
       <div
@@ -3281,7 +3285,7 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
                       <span
                         className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
                         style={{
-                          backgroundColor: m.quote_status === "accepted" ? "#E3F3E9" : colors.beige,
+                          backgroundColor: m.quote_status === "accepted" ? colors.greenSoft : colors.beige,
                           color: m.quote_status === "accepted" ? colors.green : colors.plumSoft,
                         }}
                       >
@@ -3438,7 +3442,7 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
-      style={{ backgroundColor: "rgba(60,47,69,0.45)" }}
+      style={{ backgroundColor: "rgba(74,21,56,0.45)" }}
       onClick={closeAndReset}
     >
       <div className="w-full max-w-md rounded-t-3xl p-6 sm:rounded-3xl" style={{ backgroundColor: colors.cream }} onClick={(e) => e.stopPropagation()}>
@@ -3604,7 +3608,7 @@ function SupportModal({ open, onClose, onSubmit, defaultEmail }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
-      style={{ backgroundColor: "rgba(60,47,69,0.45)" }}
+      style={{ backgroundColor: "rgba(74,21,56,0.45)" }}
       onClick={closeAndReset}
     >
       <div className="w-full max-w-md rounded-t-3xl p-6 sm:rounded-3xl" style={{ backgroundColor: colors.cream }} onClick={(e) => e.stopPropagation()}>
@@ -4335,17 +4339,17 @@ function getVendorBookingItems(vendor, bookings) {
 
 const STATUS_META = {
   pending: { emoji: "🟡", label: "Väntar på granskning", bg: colors.lilacSoft, fg: colors.lilacDeep },
-  approved: { emoji: "🟢", label: "Godkänd", bg: "#E3F3E9", fg: colors.green },
-  rejected: { emoji: "🔴", label: "Avslagen", bg: "#FBE4E1", fg: colors.coralDeep },
+  approved: { emoji: "🟢", label: "Godkänd", bg: colors.greenSoft, fg: colors.green },
+  rejected: { emoji: "🔴", label: "Avslagen", bg: "#FBDCD8", fg: colors.coralDeep },
 };
 
 // Status of a single vendor item inside a customer booking (separate from
 // STATUS_META above, which describes a vendor's admin-approval status).
 const BOOKING_STATUS_META = {
   pending: { label: "Väntar på svar", bg: colors.lilacSoft, fg: colors.lilacDeep },
-  confirmed: { label: "Bekräftad", bg: "#E3F3E9", fg: colors.green },
-  declined: { label: "Nekad", bg: "#FBE4E1", fg: colors.coralDeep },
-  completed: { label: "Genomförd", bg: "#E3F3E9", fg: colors.green },
+  confirmed: { label: "Bekräftad", bg: colors.greenSoft, fg: colors.green },
+  declined: { label: "Nekad", bg: "#FBDCD8", fg: colors.coralDeep },
+  completed: { label: "Genomförd", bg: colors.greenSoft, fg: colors.green },
   cancelled: { label: "Avbokad", bg: colors.beige, fg: colors.plumSoft },
 };
 
@@ -4410,9 +4414,9 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
       title: "Din ansökan granskas",
       text: "Vi går igenom din ansökan och mejlar dig så fort den är klar. Du kan fylla i din profil under tiden.",
     },
-    approved: { bg: "#E3F3E9", fg: colors.green, title: "Du är godkänd!", text: "Din profil är publicerad och syns för kunder på Planifest." },
+    approved: { bg: colors.greenSoft, fg: colors.green, title: "Du är godkänd!", text: "Din profil är publicerad och syns för kunder på Planifest." },
     rejected: {
-      bg: "#FBE4E1",
+      bg: "#FBDCD8",
       fg: colors.coralDeep,
       title: "Din ansökan godkändes inte den här gången",
       text: "Du är välkommen att höra av dig om du vill veta mer eller komplettera dina uppgifter.",
@@ -4525,7 +4529,7 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
           </h2>
           <div className="space-y-2">
             {upcomingAll.slice(0, 3).map((i) => (
-              <div key={`${i.bookingNumber}-${i.id}`} className="flex items-center justify-between rounded-xl p-3 text-sm" style={{ backgroundColor: "#E3F3E9" }}>
+              <div key={`${i.bookingNumber}-${i.id}`} className="flex items-center justify-between rounded-xl p-3 text-sm" style={{ backgroundColor: colors.greenSoft }}>
                 <span className="flex items-center gap-2" style={{ color: colors.plum }}>
                   <Check size={14} color={colors.green} /> {i.date}, {hhmm(i.startTime)}–{hhmm(i.endTime)} · {i.name}
                 </span>
@@ -4770,7 +4774,7 @@ function VendorProfileEditorView({
                 <button
                   onClick={() => onRemoveImage(i)}
                   className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full"
-                  style={{ backgroundColor: "rgba(60,47,69,0.7)" }}
+                  style={{ backgroundColor: "rgba(74,21,56,0.7)" }}
                 >
                   <X size={11} color={colors.white} />
                 </button>
@@ -5179,7 +5183,7 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
                   <span
                     className="mt-2 inline-block rounded-full px-2 py-0.5 text-xs font-medium"
                     style={{
-                      backgroundColor: m.quote_status === "accepted" ? "#E3F3E9" : m.quote_status === "declined" ? colors.beige : colors.white,
+                      backgroundColor: m.quote_status === "accepted" ? colors.greenSoft : m.quote_status === "declined" ? colors.beige : colors.white,
                       color: m.quote_status === "accepted" ? colors.green : colors.plumSoft,
                     }}
                   >
@@ -5346,7 +5350,7 @@ function HeartButton({ vendorId, small, className = "" }) {
 
 // A small burst of paper confetti, e.g. when the last item on the checklist is ticked.
 function Confetti() {
-  const palette = [colors.lilac, BADGE_RED, "#E8B86B", colors.lilacDeep, "#8DB596", colors.coral];
+  const palette = [colors.lilac, colors.korall, colors.syren, colors.lilacDeep, colors.peach, colors.coral];
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center" aria-hidden="true">
       {Array.from({ length: 26 }, (_, i) => (
@@ -5375,7 +5379,7 @@ function HandCheck({ done, onToggle, label }) {
   return (
     <button type="button" onClick={onToggle} aria-label={label} aria-pressed={done} className="flex h-7 w-7 flex-shrink-0 items-center justify-center">
       <svg viewBox="0 0 28 28" width="26" height="26" fill="none">
-        <path d="M5 4.6 C 11 3.4, 18 3.6, 23.2 4.4 C 24.2 10, 24 17, 23.4 23.2 C 17 24.4, 11 24.2, 4.8 23.4 C 3.8 17, 4 10, 5 4.6 Z" stroke={done ? colors.green : colors.lilac} strokeWidth="1.8" fill={done ? "#E3F3E9" : colors.white} strokeLinejoin="round" />
+        <path d="M5 4.6 C 11 3.4, 18 3.6, 23.2 4.4 C 24.2 10, 24 17, 23.4 23.2 C 17 24.4, 11 24.2, 4.8 23.4 C 3.8 17, 4 10, 5 4.6 Z" stroke={done ? colors.green : colors.lilac} strokeWidth="1.8" fill={done ? colors.greenSoft : colors.white} strokeLinejoin="round" />
         <path d="M8 14.5 L12.3 19 L20.5 8.5" stroke={colors.green} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ strokeDasharray: 26, strokeDashoffset: done ? 0 : 26, transition: "stroke-dashoffset 0.35s ease" }} />
       </svg>
     </button>
@@ -5421,7 +5425,7 @@ function EventFormModal({ open, mode, initial, onClose, onSubmit, onDelete }) {
     if (ok !== false) onClose();
   };
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" style={{ backgroundColor: "rgba(60,47,69,0.45)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" style={{ backgroundColor: "rgba(74,21,56,0.45)" }} onClick={onClose}>
       <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl p-6 sm:rounded-3xl" style={{ backgroundColor: colors.cream }} onClick={(e) => e.stopPropagation()}>
         <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>{mode === "create" ? "Ny planering" : "Redigera din fest"}</p>
         <label className="mt-4 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
@@ -5552,7 +5556,7 @@ function NotesPad({ initial, onSave }) {
   );
   return (
     <div className="relative mt-4">
-      <span aria-hidden="true" className="absolute left-1/2 -top-3 h-6 w-24 -translate-x-1/2 rotate-[-2deg] rounded-sm" style={{ backgroundColor: "rgba(189,155,189,0.45)" }} />
+      <span aria-hidden="true" className="absolute left-1/2 -top-3 h-6 w-24 -translate-x-1/2 rotate-[-2deg] rounded-sm" style={{ backgroundColor: "rgba(217,139,168,0.45)" }} />
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -5567,12 +5571,12 @@ function NotesPad({ initial, onSave }) {
           lineHeight: "28px",
           padding: "8px 16px 8px 44px",
           color: colors.plum,
-          backgroundColor: "#FFFDF8",
-          backgroundImage: "repeating-linear-gradient(transparent, transparent 27px, rgba(189,155,189,0.4) 28px)",
+          backgroundColor: "#FFFAF3",
+          backgroundImage: "repeating-linear-gradient(transparent, transparent 27px, rgba(217,139,168,0.4) 28px)",
           backgroundAttachment: "local",
           border: `1.5px solid ${colors.beige}`,
-          borderLeft: "3px solid rgba(200,85,75,0.35)",
-          boxShadow: "0 6px 14px rgba(76,51,38,0.07)",
+          borderLeft: "3px solid rgba(255,127,107,0.45)",
+          boxShadow: "0 6px 14px rgba(74,21,56,0.07)",
         }}
       />
       <p className="mt-1 text-right text-xs" style={{ color: colors.plumSoft }}>
@@ -5822,7 +5826,7 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
         </div>
       )}
       {mailMsg && (
-        <p className="mt-2 text-sm font-medium" style={{ color: mailMsg.endsWith("✓") ? "#3D7A52" : colors.coralDeep }}>
+        <p className="mt-2 text-sm font-medium" style={{ color: mailMsg.endsWith("✓") ? colors.green : colors.coralDeep }}>
           {mailMsg}
         </p>
       )}
@@ -6127,7 +6131,7 @@ function RsvpView({ state, onSubmit, onHome }) {
   };
 
   const card = (
-    <div className="relative overflow-hidden rounded-3xl p-6 text-center" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}`, boxShadow: "0 10px 30px rgba(76,51,38,0.08)" }}>
+    <div className="relative overflow-hidden rounded-3xl p-6 text-center" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}`, boxShadow: "0 10px 30px rgba(74,21,56,0.08)" }}>
       {saved?.status === "yes" && <Confetti key={saved.guestToken} />}
       <p style={{ fontFamily: hand, fontSize: 26, color: colors.lilacDeep }}>{host}</p>
       <p className="mt-1 text-4xl">{occ.emoji}</p>
@@ -6169,8 +6173,8 @@ function RsvpView({ state, onSubmit, onHome }) {
             {data.guest && data.guest.status !== "pending" && <span> Ditt svar var: <strong>{meta.label}</strong>.</span>}
           </div>
         ) : answered ? (
-          <div className="rounded-2xl p-5 text-center" style={{ backgroundColor: "#E3F3E9" }}>
-            <p style={{ fontFamily: hand, fontSize: 28, color: "#3D7A52" }}>Tack, ditt svar är sparat!</p>
+          <div className="rounded-2xl p-5 text-center" style={{ backgroundColor: colors.greenSoft }}>
+            <p style={{ fontFamily: hand, fontSize: 28, color: colors.green }}>Tack, ditt svar är sparat!</p>
             <p className="mt-1 text-sm" style={{ color: colors.plum }}>
               {data.guest?.name ? `${data.guest.name}: ` : ""}
               <strong>{meta.label}</strong>
@@ -6790,7 +6794,7 @@ function RequestFormModal({ provider, party, onUpdateParty, onSend, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" style={{ backgroundColor: "rgba(60,47,69,0.45)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" style={{ backgroundColor: "rgba(74,21,56,0.45)" }} onClick={onClose}>
       <div
         className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl"
         style={{ backgroundColor: colors.cream }}
@@ -7350,7 +7354,7 @@ function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime,
           <div className="space-y-2">
             {upcomingEntries.map((e, i) =>
               e.type === "booking" ? (
-                <div key={`b-${i}`} className="rounded-xl p-3 text-sm" style={{ backgroundColor: "#E3F3E9" }}>
+                <div key={`b-${i}`} className="rounded-xl p-3 text-sm" style={{ backgroundColor: colors.greenSoft }}>
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-2" style={{ color: colors.plum }}>
                       <Check size={14} color={colors.green} /> {e.date}, {e.startTime}–{e.endTime}
@@ -9905,14 +9909,14 @@ export default function App() {
         setMobileMenuOpen(false);
       }}
       className="flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold"
-      style={{ backgroundColor: colors.lilacDeep, color: colors.white }}
+      style={{ backgroundColor: colors.coral, color: colors.white }}
     >
       <PartyPopper size={15} />
       Min fest
       {cartItems.length > 0 && (
         <span
           className="flex h-5 w-5 items-center justify-center rounded-full text-xs"
-          style={{ backgroundColor: colors.coral, color: colors.white }}
+          style={{ backgroundColor: colors.korall, color: colors.white }}
         >
           {cartItems.length}
         </span>
@@ -9994,17 +9998,17 @@ export default function App() {
     <FavoritesContext.Provider value={{ ids: favoriteIds, toggle: toggleFavorite }}>
     <div style={{ fontFamily: sans, backgroundColor: colors.cream, minHeight: "100%", color: colors.plum }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Figtree:wght@400;500;600;700;800&display=swap');
         input[type="date"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator { cursor: pointer; }
         @keyframes planifest-wiggle { 0%,100% { transform: rotate(0); } 15% { transform: rotate(-14deg); } 30% { transform: rotate(12deg); } 45% { transform: rotate(-8deg); } 60% { transform: rotate(6deg); } 75% { transform: rotate(-3deg); } }
-        @keyframes planifest-ring { 0% { box-shadow: 0 0 0 0 rgba(139,101,137,0.55), 0 8px 20px rgba(0,0,0,0.15); } 70%, 100% { box-shadow: 0 0 0 16px rgba(139,101,137,0), 0 8px 20px rgba(0,0,0,0.15); } }
+        @keyframes planifest-ring { 0% { box-shadow: 0 0 0 0 rgba(125,34,72,0.55), 0 8px 20px rgba(0,0,0,0.15); } 70%, 100% { box-shadow: 0 0 0 16px rgba(125,34,72,0), 0 8px 20px rgba(0,0,0,0.15); } }
         @keyframes planifest-pop { 0% { transform: scale(1); } 40% { transform: scale(1.4); } 100% { transform: scale(1); } }
         @keyframes planifest-confetti { 0% { transform: translate(0, 0) rotate(0); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); opacity: 0; } }
         @media (prefers-reduced-motion: reduce) { [style*="planifest-"] { animation: none !important; } }
       `}</style>
 
       {/* Top nav */}
-      <div className="sticky top-0 z-30" style={{ backgroundColor: "rgba(251,244,238,0.92)", backdropFilter: "blur(6px)", borderBottom: `1px solid ${colors.beige}` }}>
+      <div className="sticky top-0 z-30" style={{ backgroundColor: "rgba(251,243,232,0.92)", backdropFilter: "blur(6px)", borderBottom: `1px solid ${colors.beige}` }}>
         <div className="flex items-center justify-between gap-4 px-6 py-4 sm:px-10">
           <div className="flex items-center gap-8">
             <Logo onClick={vendorMode ? goVendorDashboard : goHome} />
@@ -10402,7 +10406,7 @@ export default function App() {
         <button
           onClick={() => setCartOpen(true)}
           className="fixed bottom-6 right-6 z-30 flex items-center gap-2 rounded-full px-5 py-3 shadow-lg"
-          style={{ backgroundColor: colors.plum, color: colors.white }}
+          style={{ backgroundColor: colors.coral, color: colors.white }}
         >
           <ShoppingBag size={18} />
           <span className="text-sm font-semibold">
