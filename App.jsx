@@ -1260,40 +1260,23 @@ function BalloonMark({ size = 26, color }) {
 // with a small ribbon bow — matches the brand board (three balloons above the
 // PLAN·FEST wordmark), used for the header and hero logo.
 function LogoBalloons({ size = 40 }) {
-  const h = size * 1.4;
+  const h = size * 1.3;
   return (
-    <svg width={size} height={h} viewBox="0 0 64 90" fill="none" aria-hidden="true">
-      <ellipse cx="37" cy="23" rx="14" ry="17" fill={colors.lilac} />
-      <ellipse cx="32" cy="16" rx="3.5" ry="4.5" fill="rgba(255,255,255,0.35)" />
-      <polygon points="33,39 41,39 37,45" fill={colors.lilac} />
-
-      <ellipse cx="47" cy="40" rx="10" ry="12" fill={colors.peach} />
-      <ellipse cx="44" cy="34" rx="2.8" ry="3.5" fill="rgba(255,255,255,0.4)" />
-      <polygon points="43,50 51,50 47,55" fill={colors.peach} />
-
-      <ellipse cx="20" cy="36" rx="16" ry="19" fill={colors.pink} />
-      <ellipse cx="14" cy="28" rx="4.2" ry="5.2" fill="rgba(255,255,255,0.4)" />
-      <polygon points="15,53 25,53 20,60" fill={colors.pink} />
-
-      <path d="M37 45 Q 34 62 31 76" stroke={colors.plum} strokeWidth="1" fill="none" opacity="0.5" />
-      <path d="M47 55 Q 38 68 31 76" stroke={colors.plum} strokeWidth="1" fill="none" opacity="0.5" />
-      <path d="M20 60 Q 25 70 31 76" stroke={colors.plum} strokeWidth="1" fill="none" opacity="0.5" />
-
-      <path d="M25 78 Q 31 73 37 78 Q 31 83 25 78 Z" fill={colors.pink} />
-      <circle cx="31" cy="78" r="1.6" fill={colors.plum} />
+    <svg width={size} height={h} viewBox="0 0 64 84" fill="none" aria-hidden="true">
+      <ellipse cx="22" cy="30" rx="16" ry="19" fill={colors.korall} />
+      <ellipse cx="16" cy="22" rx="4" ry="5.5" fill="#fff" fillOpacity="0.45" />
+      <ellipse cx="42" cy="26" rx="14" ry="17" fill={colors.syren} />
+      <ellipse cx="37" cy="19" rx="3.4" ry="4.6" fill="#fff" fillOpacity="0.5" />
+      <ellipse cx="50" cy="44" rx="10" ry="12" fill={colors.coral} />
+      <path d="M22 49Q27 62 33 76M42 43Q38 60 33 76M50 56Q42 66 33 76" stroke={colors.plum} strokeOpacity="0.5" strokeWidth="1.2" />
     </svg>
   );
 }
 
-function Wordmark({ fontSize = 20, letterSpacing = "0.06em" }) {
-  // A real lowercase "i", tinted as a small brand accent, instead of a
-  // hand-built dot+bar graphic — guarantees it sits correctly with the rest
-  // of the word since it's the same text run, not a separate element next to it.
+function Wordmark({ fontSize = 20 }) {
   return (
-    <span style={{ fontFamily: serif, fontWeight: 600, fontSize, letterSpacing, color: colors.plum }}>
-      <span className="uppercase">Plan</span>
-      <span style={{ color: colors.pink }}>i</span>
-      <span className="uppercase">Fest</span>
+    <span style={{ fontFamily: serif, fontWeight: 700, fontSize, letterSpacing: "-0.01em", color: colors.plum }}>
+      Planifest
     </span>
   );
 }
@@ -1324,8 +1307,8 @@ function Logo({ onClick, size = "normal" }) {
   const large = size === "large";
   return (
     <button onClick={onClick} className="flex items-center gap-2" style={{ background: "none", border: "none", cursor: "pointer" }}>
-      <LogoBalloons size={large ? 46 : 24} />
-      <Wordmark fontSize={large ? 40 : 19} letterSpacing={large ? "0.14em" : "0.05em"} />
+      <LogoBalloons size={large ? 46 : 30} />
+      <Wordmark fontSize={large ? 40 : 28} />
     </button>
   );
 }
@@ -1350,20 +1333,20 @@ function CategoryChip({ active, onClick, icon: Icon, emoji, label, size = "lg" }
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-center gap-1.5 rounded-2xl px-3 py-2.5 text-center transition-colors"
+      className="flex flex-col items-center gap-1.5 rounded-3xl px-3 py-2.5 text-center transition-colors"
       style={{
-        border: `1.5px solid ${active ? colors.coral : colors.lilac}`,
-        backgroundColor: active ? colors.coral : colors.white,
-        minWidth: 74,
+        border: `2px solid ${active ? colors.coral : "transparent"}`,
+        backgroundColor: active ? colors.coral : colors.cream,
+        minWidth: 78,
       }}
     >
       <span
-        className="flex h-8 w-8 items-center justify-center rounded-full"
-        style={{ backgroundColor: active ? "rgba(255,255,255,0.28)" : colors.lilacSoft }}
+        className="flex h-9 w-9 items-center justify-center rounded-full"
+        style={{ backgroundColor: active ? "rgba(255,255,255,0.28)" : colors.white }}
       >
-        {Icon ? <Icon size={16} color={active ? colors.white : colors.lilacDeep} /> : <span style={{ fontSize: 15, lineHeight: 1 }}>{emoji}</span>}
+        {Icon ? <Icon size={17} color={active ? colors.cream : colors.coral} /> : <span style={{ fontSize: 16, lineHeight: 1 }}>{emoji}</span>}
       </span>
-      <span className="text-xs font-semibold leading-tight" style={{ color: active ? colors.white : colors.plum }}>
+      <span className="text-xs font-bold leading-tight" style={{ color: active ? colors.cream : colors.plum }}>
         {label}
       </span>
     </button>
@@ -1621,7 +1604,7 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
 // ---------------------------------------------------------------------------
 // Views
 // ---------------------------------------------------------------------------
-function HomeView({ party, setParty, onSubmit, howItWorksRef }) {
+function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
   const builderRef = useRef(null);
   const toggleCategory = (id) => {
     setParty((p) => ({
@@ -1637,36 +1620,59 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef }) {
 
   return (
     <div>
-      <section className="relative overflow-hidden px-6 pb-14 pt-16 sm:px-10 sm:pb-20 sm:pt-24">
-        <EdgeBalloons />
-        <div className="relative mx-auto max-w-xl text-center">
-          <div className="flex flex-col items-center gap-2">
-            <LogoBalloons size={56} />
-            <Wordmark fontSize={40} letterSpacing="0.14em" />
-          </div>
-          <p className="mx-auto mt-5 max-w-sm text-lg italic sm:text-xl" style={{ fontFamily: serif, color: colors.plumSoft }}>
-            För stunder värda att planera.
-          </p>
-          <div className="mt-4 flex items-center justify-center gap-3">
-            <span style={{ width: 24, height: 1, backgroundColor: colors.lilac }} />
-            <p className="text-xs font-semibold" style={{ letterSpacing: "0.22em", color: colors.lilacDeep }}>
-              PLAN | CREATE | CELEBRATE
+      <section className="relative overflow-hidden px-6 pb-10 pt-10 sm:px-10 sm:pt-16">
+        <div className="mx-auto flex max-w-6xl flex-col items-center gap-10 lg:flex-row lg:gap-14">
+          <div className="min-w-0 flex-1 text-center lg:text-left">
+            <p className="mb-4 text-xs font-bold sm:text-sm" style={{ letterSpacing: "0.22em", color: colors.plumSoft }}>
+              PLAN · CREATE · CELEBRATE
             </p>
-            <span style={{ width: 24, height: 1, backgroundColor: colors.lilac }} />
+            <h1 style={{ fontFamily: serif, fontWeight: 700, lineHeight: 1.04, letterSpacing: "-0.02em", color: colors.plum }} className="text-5xl sm:text-6xl lg:text-7xl">
+              För stunder värda att{" "}
+              <span style={{ boxShadow: `inset 0 -0.34em 0 ${colors.syren}` }}>planera.</span>
+            </h1>
+            <p className="mx-auto mt-6 max-w-md text-lg lg:mx-0 lg:text-xl" style={{ color: colors.plumSoft, lineHeight: 1.5 }}>
+              Berätta om ditt event, jämför leverantörer och boka allt på ett ställe.
+            </p>
+            <div className="mt-8 flex flex-wrap justify-center gap-3 lg:justify-start">
+              <button
+                onClick={scrollToBuilder}
+                className="inline-flex items-center gap-2 rounded-full px-7 py-4 text-base font-bold"
+                style={{ backgroundColor: colors.coral, color: colors.cream, boxShadow: `0 5px 0 ${colors.coralDeep}` }}
+              >
+                Börja planera <ArrowRight size={18} />
+              </button>
+              <button
+                onClick={() => howItWorksRef?.current?.scrollIntoView({ behavior: "smooth" })}
+                className="inline-flex items-center rounded-full px-7 py-3.5 text-base font-bold"
+                style={{ border: `2px solid ${colors.coral}`, color: colors.coral }}
+              >
+                Så fungerar det
+              </button>
+            </div>
           </div>
-          <button
-            onClick={scrollToBuilder}
-            className="mt-8 rounded-full px-8 py-3.5 text-sm font-semibold uppercase"
-            style={{ backgroundColor: colors.coral, color: colors.white, letterSpacing: "0.08em" }}
-          >
-            Börja planera
-          </button>
+
+          {/* Arch with bubbles */}
+          <div className="relative w-full max-w-[420px] flex-shrink-0" style={{ height: 440 }} aria-hidden="true">
+            <div className="absolute inset-x-6 bottom-0 top-6 overflow-hidden" style={{ backgroundColor: colors.coralSoft, borderRadius: "999px 999px 32px 32px" }}>
+              <Bubble size={200} left="22%" top="14%" bg={colors.korall} icon={Cake} iconSize={70} fg={colors.plum} />
+              <Bubble size={120} left="58%" top="2%" bg={colors.syren} icon={Music2} iconSize={42} fg={colors.plum} />
+              <Bubble size={104} left="52%" top="56%" bg={colors.coral} icon={Camera} iconSize={38} fg={colors.cream} />
+              <Bubble size={92} left="6%" top="62%" bg={colors.peach} icon={Flower2} iconSize={34} fg={colors.plum} />
+              <Bubble size={28} left="40%" top="82%" bg={colors.korall} opacity={0.7} />
+            </div>
+            <div
+              className="absolute left-0 top-2 text-sm font-bold"
+              style={{ backgroundColor: colors.coral, color: colors.cream, padding: "10px 18px", borderRadius: 999, transform: "rotate(-7deg)" }}
+            >
+              Boka och betala på ett ställe
+            </div>
+          </div>
         </div>
       </section>
 
       <section ref={builderRef} className="px-6 pb-10 sm:px-10">
-        <div className="relative mx-auto max-w-2xl rounded-3xl p-6 shadow-sm sm:p-8" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
-          <h2 style={{ fontFamily: serif, fontSize: 22, color: colors.plum }} className="mb-5">
+        <div className="relative mx-auto max-w-2xl p-6 sm:p-9" style={{ backgroundColor: colors.white, borderRadius: 40, boxShadow: "0 24px 70px rgba(74,21,56,0.14)" }}>
+          <h2 style={{ fontFamily: serif, fontWeight: 700, fontSize: 30, color: colors.plum }} className="mb-5">
             Bygg din fest
           </h2>
 
@@ -1679,8 +1685,8 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef }) {
                 type="date"
                 value={party.date}
                 onChange={(e) => setParty((p) => ({ ...p, date: e.target.value }))}
-                className="rounded-xl px-3 py-2 text-sm"
-                style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum }}
+                className="rounded-2xl px-4 py-3 text-sm"
+                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum }}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm" style={{ color: colors.plumSoft }}>
@@ -1691,8 +1697,8 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef }) {
                 type="time"
                 value={party.startTime}
                 onChange={(e) => setParty((p) => ({ ...p, startTime: e.target.value }))}
-                className="rounded-xl px-3 py-2 text-sm"
-                style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum }}
+                className="rounded-2xl px-4 py-3 text-sm"
+                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum }}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm" style={{ color: colors.plumSoft }}>
@@ -1703,8 +1709,8 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef }) {
                 type="time"
                 value={party.endTime}
                 onChange={(e) => setParty((p) => ({ ...p, endTime: e.target.value }))}
-                className="rounded-xl px-3 py-2 text-sm"
-                style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum }}
+                className="rounded-2xl px-4 py-3 text-sm"
+                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum }}
               />
             </label>
             <label className="col-span-2 flex flex-col gap-1 text-sm sm:col-span-1" style={{ color: colors.plumSoft }}>
@@ -1725,8 +1731,8 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef }) {
                   if (!Number.isNaN(n)) setParty((p) => ({ ...p, guests: n }));
                 }}
                 onBlur={() => setParty((p) => ({ ...p, guests: p.guests === "" || p.guests < 1 ? 1 : p.guests }))}
-                className="rounded-xl px-3 py-2 text-sm"
-                style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum }}
+                className="rounded-2xl px-4 py-3 text-sm"
+                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum }}
               />
             </label>
           </div>
@@ -1752,10 +1758,11 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef }) {
           <button
             disabled={!canSubmit}
             onClick={onSubmit}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-full py-3 text-base font-semibold transition-opacity"
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-full py-4 text-base font-bold transition-opacity"
             style={{
               backgroundColor: colors.coral,
-              color: colors.white,
+              color: colors.cream,
+              boxShadow: `0 5px 0 ${colors.coralDeep}`,
               opacity: canSubmit ? 1 : 0.45,
               cursor: canSubmit ? "pointer" : "not-allowed",
             }}
@@ -1770,36 +1777,97 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef }) {
         </div>
       </section>
 
-      <section ref={howItWorksRef} className="mx-auto max-w-5xl px-6 py-16 sm:px-10">
-        <div className="rounded-3xl p-6 sm:p-10" style={{ backgroundColor: colors.lilacSoft }}>
-          <h2 className="mb-8 text-center" style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>
-            Så fungerar Planifest
-          </h2>
-          <div className="grid gap-6 sm:grid-cols-4">
-            {[
-              { n: 1, title: "Berätta om ditt event", text: "Datum, tid, antal gäster och vad du behöver." },
-              { n: 2, title: "Jämför", text: "Se priser, bilder, recensioner och tillgänglighet." },
-              { n: 3, title: "Bygg din fest", text: "Välj leverantörer, byt när du vill och se totalpriset." },
-              { n: 4, title: "Boka", text: "Boka och betala på ett ställe." },
-            ].map((s) => (
-              <div key={s.n} className="rounded-2xl p-4" style={{ backgroundColor: colors.white }}>
-                <div
-                  className="mb-3 flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold"
-                  style={{ backgroundColor: colors.coralSoft, color: colors.coralDeep }}
-                >
-                  {s.n}
-                </div>
-                <h3 className="mb-1 font-semibold" style={{ color: colors.plum }}>
-                  {s.title}
-                </h3>
-                <p className="text-sm" style={{ color: colors.plumSoft }}>
-                  {s.text}
-                </p>
-              </div>
-            ))}
-          </div>
+      <section className="mx-auto max-w-6xl px-6 pt-16 sm:px-10">
+        <h2 style={{ fontFamily: serif, fontWeight: 700, letterSpacing: "-0.01em", color: colors.plum }} className="text-3xl sm:text-4xl">
+          Allt till festen
+        </h2>
+        <p className="mb-8 mt-2 text-base sm:text-lg" style={{ color: colors.plumSoft }}>
+          Hitta rätt leverantör i varje kategori.
+        </p>
+        <div className="grid grid-cols-2 gap-4 sm:gap-5 lg:grid-cols-4">
+          {CATEGORIES.map((c, i) => {
+            const bg = [colors.coralSoft, colors.peach, colors.lilacSoft, colors.syren][i % 4];
+            const on = party.categories.includes(c.id);
+            const Icon = c.icon;
+            return (
+              <button
+                key={c.id}
+                onClick={() => {
+                  toggleCategory(c.id);
+                  scrollToBuilder();
+                }}
+                aria-pressed={on}
+                className="flex flex-col items-center px-4 pb-6 pt-9 text-center transition-transform hover:-translate-y-1"
+                style={{ backgroundColor: bg, borderRadius: "999px 999px 28px 28px", border: `3px solid ${on ? colors.coral : "transparent"}` }}
+              >
+                <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-full" style={{ backgroundColor: on ? colors.coral : colors.cream }}>
+                  {on ? <Check size={26} color={colors.cream} /> : <Icon size={26} color={colors.coral} />}
+                </span>
+                <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 24, color: colors.plum }}>{c.label}</span>
+                <span className="mt-1 text-sm" style={{ color: colors.plumSoft, lineHeight: 1.4 }}>{c.tagline}</span>
+              </button>
+            );
+          })}
         </div>
       </section>
+
+      <section ref={howItWorksRef} className="mx-auto max-w-6xl px-6 pt-20 sm:px-10">
+        <h2 className="mb-10 text-center text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, letterSpacing: "-0.01em", color: colors.plum }}>
+          Så fungerar det
+        </h2>
+        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { n: 1, title: "Berätta om ditt event", text: "Datum, tid, antal gäster och vad du behöver.", bg: colors.korall, fg: colors.plum },
+            { n: 2, title: "Jämför", text: "Se priser, bilder, recensioner och tillgänglighet.", bg: colors.lilac, fg: colors.white },
+            { n: 3, title: "Bygg din fest", text: "Välj leverantörer, byt när du vill och se totalpriset.", bg: colors.coral, fg: colors.cream },
+            { n: 4, title: "Boka", text: "Boka och betala på ett ställe.", bg: colors.syren, fg: colors.plum },
+          ].map((st) => (
+            <div key={st.n} className="text-center">
+              <div
+                className="mx-auto mb-4 flex h-[72px] w-[72px] items-center justify-center rounded-full"
+                style={{ backgroundColor: st.bg, color: st.fg, fontFamily: serif, fontWeight: 700, fontSize: 32 }}
+              >
+                {st.n}
+              </div>
+              <h3 className="mb-2 text-lg font-bold" style={{ color: colors.plum }}>{st.title}</h3>
+              <p className="mx-auto max-w-[240px] text-base" style={{ color: colors.plumSoft, lineHeight: 1.5 }}>{st.text}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {onVendorIntro && (
+        <section className="mx-auto max-w-6xl px-6 pb-16 pt-20 sm:px-10">
+          <div className="relative flex flex-col items-start justify-between gap-6 overflow-hidden p-8 sm:flex-row sm:items-center sm:p-14" style={{ backgroundColor: colors.coral, color: colors.cream, borderRadius: 44 }}>
+            <span aria-hidden="true" className="absolute" style={{ right: -40, top: -60, width: 220, height: 220, borderRadius: "50%", backgroundColor: colors.korall }} />
+            <span aria-hidden="true" className="absolute" style={{ right: 160, bottom: -50, width: 120, height: 120, borderRadius: "50%", backgroundColor: colors.lilac }} />
+            <div className="relative max-w-lg">
+              <h2 style={{ fontFamily: serif, fontWeight: 700, fontSize: 36 }}>Är du leverantör?</h2>
+              <p className="mt-2 text-lg" style={{ opacity: 0.88 }}>Bli en del av Planifest.</p>
+            </div>
+            <button onClick={onVendorIntro} className="relative rounded-full px-7 py-4 text-base font-bold" style={{ backgroundColor: colors.cream, color: colors.coral }}>
+              Bli leverantör
+            </button>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// A round, glossy "bubble" used in the front-page arch.
+function Bubble({ size, left, top, bg, icon: Icon, iconSize = 40, fg, opacity = 1 }) {
+  return (
+    <div
+      className="absolute flex items-center justify-center"
+      style={{ width: size, height: size, left, top, borderRadius: "50%", backgroundColor: bg, opacity }}
+    >
+      {size > 60 && (
+        <span
+          style={{ position: "absolute", left: size * 0.18, top: size * 0.14, width: size * 0.22, height: size * 0.14, borderRadius: "50%", backgroundColor: "#fff", opacity: 0.45, transform: "rotate(-35deg)" }}
+        />
+      )}
+      {Icon && <Icon size={iconSize} color={fg} strokeWidth={1.6} />}
     </div>
   );
 }
@@ -10148,7 +10216,7 @@ export default function App() {
       </div>
 
       {view === "home" && (
-        <HomeView party={party} setParty={setParty} onSubmit={startBuilder} howItWorksRef={howItWorksRef} />
+        <HomeView party={party} setParty={setParty} onSubmit={startBuilder} howItWorksRef={howItWorksRef} onVendorIntro={vendorMode ? null : goVendorIntro} />
       )}
 
       {view === "results" && (
