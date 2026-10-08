@@ -1313,7 +1313,25 @@ function Logo({ onClick, size = "normal" }) {
   );
 }
 
-function CategoryChip({ active, onClick, icon: Icon, emoji, label, size = "lg" }) {
+function CategoryChip({ active, onClick, icon: Icon, emoji, label, size = "lg", tone }) {
+  if (tone === "dark") {
+    return (
+      <button
+        onClick={onClick}
+        aria-pressed={!!active}
+        className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm transition-colors"
+        style={{
+          border: `1.5px solid ${active ? colors.korall : "rgba(251,243,232,0.4)"}`,
+          backgroundColor: active ? colors.korall : "transparent",
+          color: active ? colors.plum : colors.cream,
+          fontWeight: active ? 700 : 600,
+        }}
+      >
+        {Icon ? <Icon size={16} /> : <span style={{ fontSize: 15, lineHeight: 1 }}>{emoji}</span>}
+        {label}
+      </button>
+    );
+  }
   if (size === "sm") {
     return (
       <button
@@ -1651,18 +1669,12 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
             </div>
           </div>
 
-          {/* Arch with bubbles */}
-          <div className="relative w-full max-w-[420px] flex-shrink-0" style={{ height: 440 }} aria-hidden="true">
-            <div className="absolute inset-x-6 bottom-0 top-6 overflow-hidden" style={{ backgroundColor: colors.coralSoft, borderRadius: "999px 999px 32px 32px" }}>
-              <Bubble size={200} left="22%" top="14%" bg={colors.korall} icon={Cake} iconSize={70} fg={colors.plum} />
-              <Bubble size={120} left="58%" top="2%" bg={colors.syren} icon={Music2} iconSize={42} fg={colors.plum} />
-              <Bubble size={104} left="52%" top="56%" bg={colors.coral} icon={Camera} iconSize={38} fg={colors.cream} />
-              <Bubble size={92} left="6%" top="62%" bg={colors.peach} icon={Flower2} iconSize={34} fg={colors.plum} />
-              <Bubble size={28} left="40%" top="82%" bg={colors.korall} opacity={0.7} />
-            </div>
+          {/* Arch with candles and champagne */}
+          <div className="relative w-full max-w-[420px] flex-shrink-0" aria-hidden="true">
+            <HeroArch />
             <div
-              className="absolute left-0 top-2 text-sm font-bold"
-              style={{ backgroundColor: colors.coral, color: colors.cream, padding: "10px 18px", borderRadius: 999, transform: "rotate(-7deg)" }}
+              className="absolute left-0 top-3 text-sm font-bold"
+              style={{ backgroundColor: colors.coral, color: colors.cream, padding: "10px 18px", borderRadius: 999, transform: "rotate(-7deg)", boxShadow: "0 8px 20px rgba(74,21,56,0.25)" }}
             >
               Boka och betala på ett ställe
             </div>
@@ -1671,13 +1683,19 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
       </section>
 
       <section ref={builderRef} className="px-6 pb-10 sm:px-10">
-        <div className="relative mx-auto max-w-2xl p-6 sm:p-9" style={{ backgroundColor: colors.white, borderRadius: 40, boxShadow: "0 24px 70px rgba(74,21,56,0.14)" }}>
-          <h2 style={{ fontFamily: serif, fontWeight: 700, fontSize: 30, color: colors.plum }} className="mb-5">
+        <div
+          className="relative mx-auto max-w-2xl overflow-hidden p-6 sm:p-10"
+          style={{ background: "linear-gradient(160deg, #8A2653, #5A1636)", color: colors.cream, borderRadius: 44, boxShadow: "0 24px 70px rgba(74,21,56,0.3)" }}
+        >
+          <span aria-hidden="true" className="absolute -right-8 -top-10 h-[96px] w-[96px] rounded-full sm:-top-[46px] sm:h-[150px] sm:w-[150px]" style={{ backgroundColor: colors.korall, opacity: 0.9 }} />
+          <span aria-hidden="true" className="absolute hidden rounded-full sm:block" style={{ right: 92, top: 62, width: 46, height: 46, backgroundColor: colors.syren }} />
+          <span aria-hidden="true" className="absolute hidden rounded-full sm:block" style={{ right: 30, top: 112, width: 22, height: 22, backgroundColor: colors.cream, opacity: 0.7 }} />
+          <h2 style={{ fontFamily: serif, fontWeight: 700, fontSize: 34, color: colors.cream }} className="relative mb-6">
             Bygg din fest
           </h2>
 
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <label className="col-span-2 flex flex-col gap-1 text-sm sm:col-span-1" style={{ color: colors.plumSoft }}>
+            <label className="col-span-2 flex flex-col gap-1 text-sm sm:col-span-1" style={{ color: colors.cream, fontWeight: 700 }}>
               <span className="flex items-center gap-1">
                 <Calendar size={14} /> Datum
               </span>
@@ -1685,11 +1703,11 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
                 type="date"
                 value={party.date}
                 onChange={(e) => setParty((p) => ({ ...p, date: e.target.value }))}
-                className="rounded-2xl px-4 py-3 text-sm"
-                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum }}
+                className="rounded-full px-4 py-3 text-sm"
+                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum, fontWeight: 600 }}
               />
             </label>
-            <label className="flex flex-col gap-1 text-sm" style={{ color: colors.plumSoft }}>
+            <label className="flex flex-col gap-1 text-sm" style={{ color: colors.cream, fontWeight: 700 }}>
               <span className="flex items-center gap-1">
                 <Clock size={14} /> Start
               </span>
@@ -1697,11 +1715,11 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
                 type="time"
                 value={party.startTime}
                 onChange={(e) => setParty((p) => ({ ...p, startTime: e.target.value }))}
-                className="rounded-2xl px-4 py-3 text-sm"
-                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum }}
+                className="rounded-full px-4 py-3 text-sm"
+                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum, fontWeight: 600 }}
               />
             </label>
-            <label className="flex flex-col gap-1 text-sm" style={{ color: colors.plumSoft }}>
+            <label className="flex flex-col gap-1 text-sm" style={{ color: colors.cream, fontWeight: 700 }}>
               <span className="flex items-center gap-1">
                 <Clock size={14} /> Slut
               </span>
@@ -1709,11 +1727,11 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
                 type="time"
                 value={party.endTime}
                 onChange={(e) => setParty((p) => ({ ...p, endTime: e.target.value }))}
-                className="rounded-2xl px-4 py-3 text-sm"
-                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum }}
+                className="rounded-full px-4 py-3 text-sm"
+                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum, fontWeight: 600 }}
               />
             </label>
-            <label className="col-span-2 flex flex-col gap-1 text-sm sm:col-span-1" style={{ color: colors.plumSoft }}>
+            <label className="col-span-2 flex flex-col gap-1 text-sm sm:col-span-1" style={{ color: colors.cream, fontWeight: 700 }}>
               <span className="flex items-center gap-1">
                 <Users size={14} /> Gäster
               </span>
@@ -1731,38 +1749,38 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
                   if (!Number.isNaN(n)) setParty((p) => ({ ...p, guests: n }));
                 }}
                 onBlur={() => setParty((p) => ({ ...p, guests: p.guests === "" || p.guests < 1 ? 1 : p.guests }))}
-                className="rounded-2xl px-4 py-3 text-sm"
-                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum }}
+                className="rounded-full px-4 py-3 text-sm"
+                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum, fontWeight: 600 }}
               />
             </label>
           </div>
 
-          <p className="mb-2 mt-5 text-sm font-medium" style={{ color: colors.plum }}>
-            Vad ska du fira? <span style={{ color: colors.plumSoft, fontWeight: 400 }}>(valfritt)</span>
+          <p className="mb-3 mt-7 text-sm font-bold" style={{ color: colors.cream }}>
+            Vad ska du fira? <span style={{ opacity: 0.7, fontWeight: 500 }}>(valfritt)</span>
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2.5">
             {OCCASIONS.map((o) => (
-              <CategoryChip key={o.id} active={party.occasion === o.id} onClick={() => toggleOccasion(o.id)} emoji={o.emoji} label={o.label} />
+              <CategoryChip key={o.id} active={party.occasion === o.id} onClick={() => toggleOccasion(o.id)} emoji={o.emoji} label={o.label} tone="dark" />
             ))}
           </div>
 
-          <p className="mb-2 mt-5 text-sm font-medium" style={{ color: colors.plum }}>
+          <p className="mb-3 mt-6 text-sm font-bold" style={{ color: colors.cream }}>
             Vad behöver du?
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2.5">
             {CATEGORIES.map((c) => (
-              <CategoryChip key={c.id} active={party.categories.includes(c.id)} onClick={() => toggleCategory(c.id)} icon={c.icon} label={c.label} />
+              <CategoryChip key={c.id} active={party.categories.includes(c.id)} onClick={() => toggleCategory(c.id)} icon={c.icon} label={c.label} tone="dark" />
             ))}
           </div>
 
           <button
             disabled={!canSubmit}
             onClick={onSubmit}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-full py-4 text-base font-bold transition-opacity"
+            className="mt-8 flex w-full items-center justify-center gap-2 rounded-full py-4 text-base font-bold transition-opacity"
             style={{
-              backgroundColor: colors.coral,
-              color: colors.cream,
-              boxShadow: `0 5px 0 ${colors.coralDeep}`,
+              backgroundColor: colors.cream,
+              color: colors.coral,
+              boxShadow: "0 5px 0 #2E0A1D",
               opacity: canSubmit ? 1 : 0.45,
               cursor: canSubmit ? "pointer" : "not-allowed",
             }}
@@ -1770,7 +1788,7 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
             Visa leverantörer <ArrowRight size={18} />
           </button>
           {!canSubmit && (
-            <p className="mt-2 text-center text-xs" style={{ color: colors.plumSoft }}>
+            <p className="mt-3 text-center text-xs" style={{ color: colors.cream, opacity: 0.8 }}>
               Välj datum och minst en kategori för att komma igång.
             </p>
           )}
@@ -1855,20 +1873,48 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
   );
 }
 
-// A round, glossy "bubble" used in the front-page arch.
-function Bubble({ size, left, top, bg, icon: Icon, iconSize = 40, fg, opacity = 1 }) {
+// The front-page illustration: an arch with candlelight and a coupe of champagne.
+function HeroArch() {
+  const pearls = Array.from({ length: 23 }, (_, i) => {
+    const t = i / 22;
+    return { x: 38 + t * 344, y: 128 + Math.sin(t * Math.PI) * 62, r: 10 - Math.abs(t - 0.5) * 2 * 3.5 };
+  });
+  const Star = ({ x, y, k }) => <path d="M0-1 .22-.22 1 0 .22.22 0 1-.22.22-1 0-.22-.22Z" transform={`translate(${x} ${y}) scale(${k})`} fill="#fff" />;
   return (
-    <div
-      className="absolute flex items-center justify-center"
-      style={{ width: size, height: size, left, top, borderRadius: "50%", backgroundColor: bg, opacity }}
-    >
-      {size > 60 && (
-        <span
-          style={{ position: "absolute", left: size * 0.18, top: size * 0.14, width: size * 0.22, height: size * 0.14, borderRadius: "50%", backgroundColor: "#fff", opacity: 0.45, transform: "rotate(-35deg)" }}
-        />
-      )}
-      {Icon && <Icon size={iconSize} color={fg} strokeWidth={1.6} />}
-    </div>
+    <svg viewBox="0 0 420 520" width="100%" style={{ display: "block", height: "auto" }}>
+      <defs>
+        <linearGradient id="hb-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#F9D8D3" /><stop offset="1" stopColor="#F2B8C6" /></linearGradient>
+        <radialGradient id="hb-pearl" cx=".35" cy=".3"><stop offset="0" stopColor="#fff" /><stop offset=".6" stopColor="#FBEFE6" /><stop offset="1" stopColor="#E8CFC4" /></radialGradient>
+        <radialGradient id="hb-flame" cx=".5" cy=".7"><stop offset="0" stopColor="#FFF3DD" /><stop offset=".6" stopColor="#FFB59A" /><stop offset="1" stopColor="#FF7F6B" /></radialGradient>
+        <radialGradient id="hb-glow"><stop offset="0" stopColor="#FFE9DA" stopOpacity=".9" /><stop offset="1" stopColor="#FFE9DA" stopOpacity="0" /></radialGradient>
+        <clipPath id="hb-clip"><path d="M0 520V210A210 210 0 0 1 420 210V520Z" /></clipPath>
+      </defs>
+      <path d="M0 520V210A210 210 0 0 1 420 210V520Z" fill="url(#hb-bg)" />
+      <g clipPath="url(#hb-clip)">
+        <rect x="0" y="400" width="420" height="120" fill="#7D2248" />
+        <rect x="0" y="400" width="420" height="5" fill="#521333" opacity=".5" />
+        <circle cx="210" cy="330" r="170" fill="url(#hb-glow)" />
+        {pearls.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={p.r} fill="url(#hb-pearl)" stroke="#E8CFC4" strokeWidth=".6" />
+        ))}
+        <rect x="86" y="300" width="22" height="104" rx="4" fill="#FBF3E8" /><rect x="86" y="300" width="7" height="104" rx="3" fill="#fff" opacity=".6" />
+        <path d="M97 270c10 12 9 26 0 30-9-4-10-18 0-30z" fill="url(#hb-flame)" />
+        <rect x="312" y="270" width="22" height="134" rx="4" fill="#FBF3E8" /><rect x="312" y="270" width="7" height="134" rx="3" fill="#fff" opacity=".6" />
+        <path d="M323 240c10 12 9 26 0 30-9-4-10-18 0-30z" fill="url(#hb-flame)" />
+        <rect x="56" y="350" width="18" height="54" rx="4" fill="#F6D3D0" /><path d="M65 324c8 10 7 22 0 25-7-3-8-15 0-25z" fill="url(#hb-flame)" />
+        <rect x="352" y="340" width="18" height="64" rx="4" fill="#F6D3D0" /><path d="M361 314c8 10 7 22 0 25-7-3-8-15 0-25z" fill="url(#hb-flame)" />
+        <g transform="translate(210 404)">
+          <ellipse cx="0" cy="-2" rx="52" ry="8" fill="#FBF3E8" /><rect x="-3" y="-84" width="6" height="82" fill="#FBF3E8" />
+          <path d="M-72 -150C-72 -108 -38 -84 0 -84S72 -108 72 -150Z" fill="#FFF8EE" fillOpacity=".92" />
+          <path d="M-64 -128C-60 -104 -32 -88 0 -88S60 -104 64 -128Z" fill="#F3D2A6" opacity=".6" />
+          <ellipse cx="0" cy="-150" rx="72" ry="9" fill="#fff" fillOpacity=".85" />
+          <path d="M-52 -140C-50 -118 -40 -106 -26 -98" stroke="#fff" strokeWidth="3" strokeLinecap="round" fill="none" strokeOpacity=".8" />
+          <g fill="#fff"><circle cx="-14" cy="-120" r="3" /><circle cx="12" cy="-132" r="2.4" /><circle cx="24" cy="-112" r="2" /></g>
+        </g>
+        <Star x={262} y={236} k={22} /><Star x={160} y={214} k={12} /><Star x={300} y={180} k={9} /><Star x={120} y={250} k={8} />
+      </g>
+      <path d="M14 520V210A196 196 0 0 1 406 210V520" fill="none" stroke="#7D2248" strokeOpacity=".35" strokeWidth="1.5" />
+    </svg>
   );
 }
 
