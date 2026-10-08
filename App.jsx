@@ -471,15 +471,16 @@ async function supabaseRestRequest(path, accessToken, options = {}) {
 // data comes from and goes to.
 // ---------------------------------------------------------------------------
 function mapDbVendorToLocal(dbVendor) {
+  const priv = (Array.isArray(dbVendor.vendor_private) ? dbVendor.vendor_private[0] : dbVendor.vendor_private) || {};
   return {
     id: dbVendor.id,
     createdAt: dbVendor.created_at,
     requestForms: sanitizeRequestForms(dbVendor.request_forms),
     companyName: dbVendor.company_name,
-    organizationNumber: dbVendor.organization_number,
-    contactPerson: dbVendor.contact_person,
-    email: dbVendor.email,
-    phone: dbVendor.phone,
+    organizationNumber: priv.organization_number ?? dbVendor.organization_number,
+    contactPerson: priv.contact_person ?? dbVendor.contact_person,
+    email: priv.email ?? dbVendor.email,
+    phone: priv.phone ?? dbVendor.phone,
     baseLocation: dbVendor.base_location,
     serviceArea: dbVendor.service_area_type ? { type: dbVendor.service_area_type, value: dbVendor.service_area_value } : null,
     categories: (dbVendor.vendor_categories || []).map((vc) => vc.category_id),
@@ -509,7 +510,8 @@ function mapDbVendorToLocal(dbVendor) {
   };
 }
 
-const VENDOR_SELECT = "select=*,vendor_categories(category_id),services(*),addons(*),blocked_times(*)";
+// vendor_private (email, phone, org number, contact person) comes back only for the vendor herself and for admins
+const VENDOR_SELECT = "select=*,vendor_categories(category_id),services(*),addons(*),blocked_times(*),vendor_private(*)";
 
 async function fetchVendorByProfileId(profileId, accessToken) {
   return supabaseRestRequest(`/vendors?profile_id=eq.${profileId}&${VENDOR_SELECT}`, accessToken);
@@ -553,10 +555,6 @@ async function createVendorApplication(session, form) {
     body: JSON.stringify({
       profile_id: session.user.id,
       company_name: form.companyName,
-      organization_number: form.organizationNumber,
-      contact_person: form.contactPerson,
-      email: form.email,
-      phone: form.phone,
       base_location: form.baseLocation,
       service_area_type: areaOption?.type || null,
       service_area_value: areaOption?.label || null,
@@ -565,6 +563,16 @@ async function createVendorApplication(session, form) {
   });
   if (error || !data?.[0]) return { error: error || { message: "Kunde inte skapa leverantörsprofilen." } };
   const vendorRow = data[0];
+  // Email, phone, organisation number and contact person go in their own locked table (only she and admins can read it).
+  const privateDetails = { email: form.email, phone: form.phone, organization_number: form.organizationNumber, contact_person: form.contactPerson };
+  const { error: privateError } = await supabaseRestRequest("/vendor_private", session.access_token, {
+    method: "POST",
+    body: JSON.stringify({ vendor_id: vendorRow.id, ...privateDetails }),
+  });
+  if (privateError) {
+    // the database moves details sent the old way into the locked table by itself
+    await supabaseRestRequest(`/vendors?id=eq.${vendorRow.id}`, session.access_token, { method: "PATCH", body: JSON.stringify(privateDetails) });
+  }
   if (form.categories.length > 0) {
     await supabaseRestRequest("/vendor_categories", session.access_token, {
       method: "POST",
@@ -574,6 +582,7 @@ async function createVendorApplication(session, form) {
   return {
     data: mapDbVendorToLocal({
       ...vendorRow,
+      vendor_private: privateDetails,
       vendor_categories: form.categories.map((c) => ({ category_id: c })),
       services: [],
       addons: [],
@@ -590,9 +599,6 @@ async function saveVendorProfile(vendor, accessToken) {
     method: "PATCH",
     body: JSON.stringify({
       company_name: vendor.companyName,
-      contact_person: vendor.contactPerson,
-      email: vendor.email,
-      phone: vendor.phone,
       base_location: vendor.baseLocation,
       service_area_type: vendor.serviceArea?.type || null,
       service_area_value: vendor.serviceArea?.value || null,
@@ -600,6 +606,19 @@ async function saveVendorProfile(vendor, accessToken) {
       description: vendor.profile.description,
       images: vendor.profile.images,
       request_forms: sanitizeRequestForms(vendor.requestForms),
+    }),
+  });
+
+  await supabaseRestRequest("/vendor_private?on_conflict=vendor_id", accessToken, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify({
+      vendor_id: vendor.id,
+      email: vendor.email || null,
+      phone: vendor.phone || null,
+      organization_number: vendor.organizationNumber || null,
+      contact_person: vendor.contactPerson || null,
+      updated_at: new Date().toISOString(),
     }),
   });
 
