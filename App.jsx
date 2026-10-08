@@ -6607,7 +6607,7 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
           </div>
           {totalCount > 0 && (
             <div className="mt-1 h-2 overflow-hidden rounded-full" style={{ backgroundColor: colors.beige }}>
-              <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: colors.green, transition: "width 0.4s ease" }} />
+              <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: colors.korall, transition: "width 0.4s ease" }} />
             </div>
           )}
           <div className="mt-4 flex flex-wrap gap-2">
@@ -10071,6 +10071,7 @@ export default function App() {
     <div style={{ fontFamily: sans, backgroundColor: colors.cream, minHeight: "100%", color: colors.plum }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Figtree:wght@400;500;600;700;800&display=swap');
+        input[type="checkbox"], input[type="radio"] { accent-color: #7D2248; }
         input[type="date"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator { cursor: pointer; }
         @keyframes planifest-wiggle { 0%,100% { transform: rotate(0); } 15% { transform: rotate(-14deg); } 30% { transform: rotate(12deg); } 45% { transform: rotate(-8deg); } 60% { transform: rotate(6deg); } 75% { transform: rotate(-3deg); } }
         @keyframes planifest-ring { 0% { box-shadow: 0 0 0 0 rgba(125,34,72,0.55), 0 8px 20px rgba(0,0,0,0.15); } 70%, 100% { box-shadow: 0 0 0 16px rgba(125,34,72,0), 0 8px 20px rgba(0,0,0,0.15); } }
