@@ -1638,46 +1638,37 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
 
   return (
     <div>
-      <section className="relative overflow-hidden px-6 pb-10 pt-10 sm:px-10 sm:pt-16">
-        <div className="mx-auto flex max-w-6xl flex-col items-center gap-10 lg:flex-row lg:gap-14">
-          <div className="min-w-0 flex-1 text-center lg:text-left">
-            <p className="mb-4 text-xs font-bold sm:text-sm" style={{ letterSpacing: "0.22em", color: colors.plumSoft }}>
+      <section className="px-6 pb-12 pt-14 sm:px-10 sm:pb-16 sm:pt-20">
+        <div className="mx-auto max-w-3xl text-center">
+          <div className="mb-6 flex items-center justify-center gap-4">
+            <span className="w-5 sm:w-9" style={{ height: 2, borderRadius: 2, backgroundColor: colors.korall }} />
+            <p className="text-xs font-bold sm:text-[13px]" style={{ letterSpacing: "0.24em", paddingLeft: "0.24em", color: colors.plumSoft }}>
               PLAN · CREATE · CELEBRATE
             </p>
-            <h1 style={{ fontFamily: serif, fontWeight: 700, lineHeight: 1.04, letterSpacing: "-0.02em", color: colors.plum }} className="text-5xl sm:text-6xl lg:text-7xl">
-              För stunder värda att{" "}
-              <span style={{ boxShadow: `inset 0 -0.34em 0 ${colors.syren}` }}>planera.</span>
-            </h1>
-            <p className="mx-auto mt-6 max-w-md text-lg lg:mx-0 lg:text-xl" style={{ color: colors.plumSoft, lineHeight: 1.5 }}>
-              Berätta om ditt event, jämför leverantörer och boka allt på ett ställe.
-            </p>
-            <div className="mt-8 flex flex-wrap justify-center gap-3 lg:justify-start">
-              <button
-                onClick={scrollToBuilder}
-                className="inline-flex items-center gap-2 rounded-full px-7 py-4 text-base font-bold"
-                style={{ backgroundColor: colors.coral, color: colors.cream, boxShadow: `0 5px 0 ${colors.coralDeep}` }}
-              >
-                Börja planera <ArrowRight size={18} />
-              </button>
-              <button
-                onClick={() => howItWorksRef?.current?.scrollIntoView({ behavior: "smooth" })}
-                className="inline-flex items-center rounded-full px-7 py-3.5 text-base font-bold"
-                style={{ border: `2px solid ${colors.coral}`, color: colors.coral }}
-              >
-                Så fungerar det
-              </button>
-            </div>
+            <span className="w-5 sm:w-9" style={{ height: 2, borderRadius: 2, backgroundColor: colors.korall }} />
           </div>
-
-          {/* Arch with candles and champagne */}
-          <div className="relative w-full max-w-[420px] flex-shrink-0" aria-hidden="true">
-            <HeroArch />
-            <div
-              className="absolute left-0 top-3 text-sm font-bold"
-              style={{ backgroundColor: colors.coral, color: colors.cream, padding: "10px 18px", borderRadius: 999, transform: "rotate(-7deg)", boxShadow: "0 8px 20px rgba(74,21,56,0.25)" }}
+          <h1 style={{ fontFamily: serif, fontWeight: 700, lineHeight: 1.08, letterSpacing: "-0.02em", color: colors.plum, textWrap: "balance" }} className="text-4xl sm:text-5xl lg:text-6xl">
+            För stunder värda att{" "}
+            <span style={{ boxShadow: `inset 0 -0.3em 0 ${colors.syren}` }}>planera.</span>
+          </h1>
+          <p className="mx-auto mt-5 max-w-md text-base sm:text-lg" style={{ color: colors.plumSoft, lineHeight: 1.55 }}>
+            Berätta om ditt event, jämför leverantörer och boka allt på ett ställe.
+          </p>
+          <div className="mt-8 flex flex-wrap justify-center gap-3">
+            <button
+              onClick={scrollToBuilder}
+              className="inline-flex items-center gap-2 rounded-full px-7 py-3.5 text-base font-bold"
+              style={{ backgroundColor: colors.coral, color: colors.cream, boxShadow: `0 5px 0 ${colors.coralDeep}` }}
             >
-              Boka och betala på ett ställe
-            </div>
+              Börja planera <ArrowRight size={18} />
+            </button>
+            <button
+              onClick={() => howItWorksRef?.current?.scrollIntoView({ behavior: "smooth" })}
+              className="inline-flex items-center rounded-full px-7 py-3 text-base font-bold"
+              style={{ border: `2px solid ${colors.coral}`, color: colors.coral }}
+            >
+              Så fungerar det
+            </button>
           </div>
         </div>
       </section>
@@ -1870,51 +1861,6 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
         </section>
       )}
     </div>
-  );
-}
-
-// The front-page illustration: an arch with candlelight and a coupe of champagne.
-function HeroArch() {
-  const pearls = Array.from({ length: 23 }, (_, i) => {
-    const t = i / 22;
-    return { x: 38 + t * 344, y: 128 + Math.sin(t * Math.PI) * 62, r: 10 - Math.abs(t - 0.5) * 2 * 3.5 };
-  });
-  const Star = ({ x, y, k }) => <path d="M0-1 .22-.22 1 0 .22.22 0 1-.22.22-1 0-.22-.22Z" transform={`translate(${x} ${y}) scale(${k})`} fill="#fff" />;
-  return (
-    <svg viewBox="0 0 420 520" width="100%" style={{ display: "block", height: "auto" }}>
-      <defs>
-        <linearGradient id="hb-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#F9D8D3" /><stop offset="1" stopColor="#F2B8C6" /></linearGradient>
-        <radialGradient id="hb-pearl" cx=".35" cy=".3"><stop offset="0" stopColor="#fff" /><stop offset=".6" stopColor="#FBEFE6" /><stop offset="1" stopColor="#E8CFC4" /></radialGradient>
-        <radialGradient id="hb-flame" cx=".5" cy=".7"><stop offset="0" stopColor="#FFF3DD" /><stop offset=".6" stopColor="#FFB59A" /><stop offset="1" stopColor="#FF7F6B" /></radialGradient>
-        <radialGradient id="hb-glow"><stop offset="0" stopColor="#FFE9DA" stopOpacity=".9" /><stop offset="1" stopColor="#FFE9DA" stopOpacity="0" /></radialGradient>
-        <clipPath id="hb-clip"><path d="M0 520V210A210 210 0 0 1 420 210V520Z" /></clipPath>
-      </defs>
-      <path d="M0 520V210A210 210 0 0 1 420 210V520Z" fill="url(#hb-bg)" />
-      <g clipPath="url(#hb-clip)">
-        <rect x="0" y="400" width="420" height="120" fill="#7D2248" />
-        <rect x="0" y="400" width="420" height="5" fill="#521333" opacity=".5" />
-        <circle cx="210" cy="330" r="170" fill="url(#hb-glow)" />
-        {pearls.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r={p.r} fill="url(#hb-pearl)" stroke="#E8CFC4" strokeWidth=".6" />
-        ))}
-        <rect x="86" y="300" width="22" height="104" rx="4" fill="#FBF3E8" /><rect x="86" y="300" width="7" height="104" rx="3" fill="#fff" opacity=".6" />
-        <path d="M97 270c10 12 9 26 0 30-9-4-10-18 0-30z" fill="url(#hb-flame)" />
-        <rect x="312" y="270" width="22" height="134" rx="4" fill="#FBF3E8" /><rect x="312" y="270" width="7" height="134" rx="3" fill="#fff" opacity=".6" />
-        <path d="M323 240c10 12 9 26 0 30-9-4-10-18 0-30z" fill="url(#hb-flame)" />
-        <rect x="56" y="350" width="18" height="54" rx="4" fill="#F6D3D0" /><path d="M65 324c8 10 7 22 0 25-7-3-8-15 0-25z" fill="url(#hb-flame)" />
-        <rect x="352" y="340" width="18" height="64" rx="4" fill="#F6D3D0" /><path d="M361 314c8 10 7 22 0 25-7-3-8-15 0-25z" fill="url(#hb-flame)" />
-        <g transform="translate(210 404)">
-          <ellipse cx="0" cy="-2" rx="52" ry="8" fill="#FBF3E8" /><rect x="-3" y="-84" width="6" height="82" fill="#FBF3E8" />
-          <path d="M-72 -150C-72 -108 -38 -84 0 -84S72 -108 72 -150Z" fill="#FFF8EE" fillOpacity=".92" />
-          <path d="M-64 -128C-60 -104 -32 -88 0 -88S60 -104 64 -128Z" fill="#F3D2A6" opacity=".6" />
-          <ellipse cx="0" cy="-150" rx="72" ry="9" fill="#fff" fillOpacity=".85" />
-          <path d="M-52 -140C-50 -118 -40 -106 -26 -98" stroke="#fff" strokeWidth="3" strokeLinecap="round" fill="none" strokeOpacity=".8" />
-          <g fill="#fff"><circle cx="-14" cy="-120" r="3" /><circle cx="12" cy="-132" r="2.4" /><circle cx="24" cy="-112" r="2" /></g>
-        </g>
-        <Star x={262} y={236} k={22} /><Star x={160} y={214} k={12} /><Star x={300} y={180} k={9} /><Star x={120} y={250} k={8} />
-      </g>
-      <path d="M14 520V210A196 196 0 0 1 406 210V520" fill="none" stroke="#7D2248" strokeOpacity=".35" strokeWidth="1.5" />
-    </svg>
   );
 }
 
