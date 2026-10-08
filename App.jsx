@@ -1569,51 +1569,61 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
     else onAdd(provider.id);
   };
 
+  const cat = catMap[provider.category];
+  const added = inCart && !swapMode;
   return (
     <div
       onClick={() => onView(provider.id)}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === "Enter" && onView(provider.id)}
-      className="flex cursor-pointer flex-col overflow-hidden rounded-2xl"
-      style={{ backgroundColor: colors.lilac }}
+      className="flex cursor-pointer flex-col p-2.5 transition-transform hover:-translate-y-0.5"
+      style={{ backgroundColor: colors.white, borderRadius: 28, boxShadow: "0 10px 30px rgba(74,21,56,0.09)" }}
     >
-      <div className="relative">
+      <div className="relative overflow-hidden" style={{ borderRadius: 20, backgroundColor: colors.coralSoft }}>
         <img
-          src={provider.image || `https://picsum.photos/seed/${provider.seed}/200/200`}
+          src={provider.image || `https://picsum.photos/seed/${provider.seed}/400/300`}
           alt={provider.name}
-          className="h-12 w-full object-cover sm:h-14"
+          className="h-32 w-full object-cover sm:h-36"
         />
-        <HeartButton vendorId={provider.vendorDbId} small className="absolute left-1 top-1 shadow-sm" />
-        <button
-          onClick={handleAction}
-          className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full shadow-sm"
-          style={{
-            backgroundColor: inCart && !swapMode ? colors.white : colors.coral,
-            color: inCart && !swapMode ? colors.lilacDeep : colors.white,
-          }}
-          aria-label={provider.requestOnly ? "Skicka förfrågan" : swapMode ? "Välj denna" : inCart ? "Ta bort från Min fest" : "Lägg till i Min fest"}
-        >
-          {swapMode || inCart ? <Check size={9} /> : <Plus size={9} />}
-        </button>
+        <HeartButton vendorId={provider.vendorDbId} className="absolute right-2 top-2 shadow-sm" />
       </div>
-      <div className="p-1.5">
-        <h3 className="truncate leading-tight" style={{ fontFamily: serif, fontSize: 11, color: colors.plum }}>
+      <div className="flex flex-1 flex-col px-2 pb-1.5 pt-3">
+        {cat && (
+          <span className="mb-2 inline-block self-start rounded-full px-2.5 py-0.5 text-[11px] font-bold" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+            {cat.label}
+          </span>
+        )}
+        <h3 className="truncate leading-tight" style={{ fontFamily: serif, fontWeight: 700, fontSize: 18, color: colors.plum }}>
           {provider.name}
         </h3>
-        <div className="mt-0.5 flex min-w-0 items-center gap-1 leading-tight" style={{ fontSize: 9, color: colors.plum, opacity: 0.75 }}>
+        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs" style={{ color: colors.plumSoft }}>
           {provider.reviews > 0 ? (
-            <span className="flex flex-shrink-0 items-center gap-0.5">
-              <Star size={8} fill={colors.coral} color={colors.coral} /> {provider.rating}
+            <span className="flex flex-shrink-0 items-center gap-1 font-semibold">
+              <Star size={13} fill={colors.korall} color={colors.korall} /> {provider.rating}
             </span>
           ) : (
-            <span className="flex-shrink-0">Ny</span>
+            <span className="flex-shrink-0 font-semibold">Ny</span>
           )}
-          <span className="truncate">{provider.distanceKm != null ? formatDistance(provider.distanceKm) : provider.location}</span>
+          <span className="truncate">· {provider.distanceKm != null ? formatDistance(provider.distanceKm) : provider.location}</span>
         </div>
-        <p className="mt-0.5 truncate leading-tight" style={{ fontFamily: serif, fontSize: 11, color: colors.plum }}>
-          {priceLabel}
-        </p>
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <p className="text-sm font-bold leading-tight" style={{ color: colors.plum }}>
+            {priceLabel}
+          </p>
+          <button
+            onClick={handleAction}
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full"
+            style={{
+              backgroundColor: added ? colors.greenSoft : colors.coral,
+              color: added ? colors.green : colors.cream,
+              boxShadow: added ? "none" : `0 3px 0 ${colors.coralDeep}`,
+            }}
+            aria-label={provider.requestOnly ? "Skicka förfrågan" : swapMode ? "Välj denna" : inCart ? "Ta bort från Min fest" : "Lägg till i Min fest"}
+          >
+            {swapMode || inCart ? <Check size={16} /> : <Plus size={16} />}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1907,7 +1917,7 @@ function ResultsView({
         </div>
       ) : (
         <>
-          <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Bygg ditt event 🎉</h1>
+          <h1 style={{ fontFamily: serif, fontWeight: 700, fontSize: 36, letterSpacing: "-0.01em", color: colors.plum }}>Bygg ditt event 🎉</h1>
           <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
             Här är leverantörer som passar dina val.
           </p>
@@ -2069,7 +2079,7 @@ function ResultsView({
       )}
 
       {swapContext ? (
-        <div className="mt-6 grid grid-cols-4 gap-2 sm:grid-cols-5 lg:grid-cols-7">
+        <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
           {swapProviders.map((p) => (
             <VendorCard
               key={p.id}
@@ -2093,17 +2103,17 @@ function ResultsView({
           {groups.map((g) => {
             const Icon = g.category.icon;
             return (
-              <section key={g.category.id} className="rounded-3xl p-5 sm:p-7" style={{ backgroundColor: colors[g.category.tint] }}>
+              <section key={g.category.id} className="p-5 sm:p-7" style={{ backgroundColor: colors[g.category.tint], borderRadius: 40 }}>
                 <div className="mb-5 flex items-center gap-3">
                   <div
                     className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full shadow-sm"
                     style={{ backgroundColor: colors.white }}
                   >
-                    <Icon size={18} color={colors.lilacDeep} />
+                    <Icon size={20} color={colors.coral} />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h2 style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>{g.category.label}</h2>
+                      <h2 style={{ fontFamily: serif, fontWeight: 700, fontSize: 24, color: colors.plum }}>{g.category.label}</h2>
                       <span className="text-sm" style={{ color: colors.plumSoft }}>
                         ({g.providers.length})
                       </span>
@@ -2113,7 +2123,7 @@ function ResultsView({
                     </p>
                   </div>
                 </div>
-                <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 lg:grid-cols-7">
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
                   {g.providers.map((p) => (
                     <VendorCard
                       key={p.id}
@@ -3311,11 +3321,11 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
               </div>
             ) : m.message_type === "quote" ? (
               <div key={m.id} className="flex" style={{ justifyContent: "flex-start" }}>
-                <div className="max-w-[85%] rounded-2xl p-3.5 text-sm" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+                <div className="max-w-[85%] p-4 text-sm" style={{ backgroundColor: colors.white, border: `2px solid ${colors.korall}`, borderRadius: 24, boxShadow: "0 8px 24px rgba(74,21,56,0.08)" }}>
                   <p className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: colors.lilacDeep }}>
                     <Sparkles size={13} /> Offert
                   </p>
-                  <p className="mt-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
+                  <p className="mt-1" style={{ fontFamily: serif, fontWeight: 700, fontSize: 26, color: colors.plum }}>
                     {formatKr(m.quote_amount)}
                   </p>
                   {m.quote_description && (
@@ -3334,8 +3344,8 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
                       </button>
                       <button
                         onClick={() => onAcceptQuote(m)}
-                        className="flex-1 rounded-full px-3 py-2 text-xs font-semibold"
-                        style={{ backgroundColor: colors.coral, color: colors.white }}
+                        className="flex-1 rounded-full px-3 py-2 text-xs font-bold"
+                        style={{ backgroundColor: colors.coral, color: colors.cream, boxShadow: `0 3px 0 ${colors.coralDeep}` }}
                       >
                         Acceptera
                       </button>
@@ -3364,11 +3374,13 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
             ) : (
               <div key={m.id} className="flex" style={{ justifyContent: m.sender === "customer" ? "flex-end" : "flex-start" }}>
                 <div
-                  className="max-w-[75%] rounded-2xl px-3.5 py-2 text-sm"
+                  className="max-w-[75%] px-4 py-2.5 text-sm"
                   style={{
                     backgroundColor: m.sender === "customer" ? colors.coral : colors.white,
-                    color: m.sender === "customer" ? colors.white : colors.plum,
+                    color: m.sender === "customer" ? colors.cream : colors.plum,
                     border: m.sender === "customer" ? "none" : `1px solid ${colors.beige}`,
+                    borderRadius: m.sender === "customer" ? "22px 22px 6px 22px" : "22px 22px 22px 6px",
+                    lineHeight: 1.45,
                   }}
                 >
                   {m.text}
