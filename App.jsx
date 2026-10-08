@@ -4007,7 +4007,7 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
   );
 }
 
-function MyAccountView({ profile, email, onSaveProfile, onChangePassword, onBack }) {
+function MyAccountView({ profile, email, onSaveProfile, onChangePassword, onBack, isVendor, customerMode, onSwitchMode }) {
   const [fullName, setFullName] = useState(profile?.full_name || "");
   const [phone, setPhone] = useState(profile?.phone || "");
   const [profileSaving, setProfileSaving] = useState(false);
@@ -4115,7 +4115,58 @@ function MyAccountView({ profile, email, onSaveProfile, onChangePassword, onBack
           {passwordSaving ? "Sparar..." : "Byt lösenord"}
         </button>
       </div>
+
+      {isVendor && (
+        <div className="mt-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+          <h2 style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>Läge</h2>
+          {customerMode ? (
+            <>
+              <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
+                Du använder just nu Planifest som kund, till exempel för att planera en egen fest. Din leverantörsprofil finns kvar och fungerar som vanligt.
+              </p>
+              <button onClick={() => onSwitchMode(false)} className="mt-4 rounded-full px-5 py-2.5 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+                Tillbaka till leverantörsportalen
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
+                Du använder Planifest som leverantör. Vill du också planera en egen fest kan du byta till kundläge. Du kommer tillbaka till portalen via "Min portal" i menyn.
+              </p>
+              <button onClick={() => onSwitchMode(true)} className="mt-4 rounded-full px-5 py-2.5 text-sm font-semibold" style={{ border: `1.5px solid ${colors.coral}`, color: colors.coral, backgroundColor: colors.white }}>
+                Byt till kundläge
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+// A slim footer for vendors: the legal pages and a way to reach us, nothing aimed at customers.
+function VendorFooter({ onOpenTerms, onOpenPrivacy, onOpenCookies, onSupport }) {
+  return (
+    <footer className="mt-16 border-t px-6 pb-8 pt-6 text-center text-xs" style={{ borderColor: colors.beige, color: colors.plumSoft }}>
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+        <button onClick={onOpenTerms} className="underline">
+          Villkor
+        </button>
+        <button onClick={onOpenPrivacy} className="underline">
+          Integritetspolicy
+        </button>
+        <button onClick={onOpenCookies} className="underline">
+          Cookiepolicy
+        </button>
+        <button onClick={onSupport} className="underline">
+          Support
+        </button>
+        <a href="mailto:info@planifest.se" className="underline">
+          Kontakt
+        </a>
+      </div>
+      <p className="mt-2">Planifest, enskild firma · info@planifest.se</p>
+    </footer>
   );
 }
 
@@ -7824,6 +7875,14 @@ const emptyVendorForm = () => ({
 export default function App() {
   const [view, setView] = useState("home");
   const [recoverySession, setRecoverySession] = useState(null);
+  // A vendor account lives in the vendor portal. Only someone who also wants to plan their own party switches to customer mode (on "Mitt konto").
+  const [customerMode, setCustomerMode] = useState(() => {
+    try {
+      return localStorage.getItem("planifest-mode") === "customer";
+    } catch (e) {
+      return false;
+    }
+  });
   const [events, setEvents] = useState([]);
   const [activeEventId, setActiveEventId] = useState(null);
   const [favoriteIds, setFavoriteIds] = useState(() => new Set());
@@ -8081,7 +8140,7 @@ export default function App() {
       setSubmittedVendorId(local.id);
       if (landOnPortalRef.current) {
         landOnPortalRef.current = false;
-        setView((v) => (v === "home" ? "vendorDashboard" : v)); // only from the front page, never mid-checkout
+        if (!customerMode) setView((v) => (v === "home" ? "vendorDashboard" : v)); // only from the front page, never mid-checkout
       }
     });
   }, [session]);
@@ -8411,6 +8470,12 @@ export default function App() {
     }
     setSessionPersist(null);
     clearLocalUserState();
+    setCustomerMode(false);
+    try {
+      localStorage.removeItem("planifest-mode");
+    } catch (e) {
+      // fine
+    }
     showToast("Utloggad");
     goHome();
   };
@@ -9302,8 +9367,24 @@ export default function App() {
   };
 
   // --- Vendor signup (Fas 2A) ---
+  const switchMode = (toCustomer) => {
+    setCustomerMode(toCustomer);
+    try {
+      if (toCustomer) localStorage.setItem("planifest-mode", "customer");
+      else localStorage.removeItem("planifest-mode");
+    } catch (e) {
+      // fine
+    }
+    setView(toCustomer ? "home" : "vendorDashboard");
+    setMobileMenuOpen(false);
+  };
+
   const goVendorIntro = () => {
-    setView(submittedVendor ? "vendorDashboard" : "vendorIntro");
+    if (submittedVendor) {
+      switchMode(false); // "Min portal" always means the vendor portal
+      return;
+    }
+    setView("vendorIntro");
     setMobileMenuOpen(false);
   };
 
@@ -9565,10 +9646,15 @@ export default function App() {
 
   const activeProvider = customerProviders.find((p) => p.id === activeProviderId);
   const activeCartEntry = activeProvider ? cartItems.find((ci) => ci.id === activeProvider.id) : null;
-  const isVendorPortalView = ["vendorPending", "vendorDashboard", "vendorProfileEditor", "vendorProfilePreview", "vendorBookings", "vendorInbox"].includes(
-    view
-  );
   const isAdminView = ["adminDashboard", "adminVendorDetail"].includes(view);
+  // Vendor mode: a vendor account sees the vendor portal on every page, never the customer front page, cart or customer menu.
+  const vendorMode = !!submittedVendor && !customerMode && !isAdminView;
+  const isVendorPortalView =
+    vendorMode || ["vendorPending", "vendorDashboard", "vendorProfileEditor", "vendorProfilePreview", "vendorBookings", "vendorInbox"].includes(view);
+  const leavePage = () => (vendorMode ? goVendorDashboard() : goHome());
+  useEffect(() => {
+    if (vendorMode && ["home", "results", "profile", "checkout", "confirmation", "planning", "minaBokningar", "vendorIntro"].includes(view)) setView("vendorDashboard");
+  }, [vendorMode, view]);
 
   const centerNavLinks = (
     <>
@@ -9685,12 +9771,11 @@ export default function App() {
       </button>
       <button
         onClick={() => {
-          goHome();
+          goMyAccount();
           setMobileMenuOpen(false);
         }}
-        style={{ color: colors.plumSoft }}
       >
-        Till kundsidan
+        Mitt konto
       </button>
     </>
   );
@@ -9731,7 +9816,7 @@ export default function App() {
       <div className="sticky top-0 z-30" style={{ backgroundColor: "rgba(251,244,238,0.92)", backdropFilter: "blur(6px)", borderBottom: `1px solid ${colors.beige}` }}>
         <div className="flex items-center justify-between gap-4 px-6 py-4 sm:px-10">
           <div className="flex items-center gap-8">
-            <Logo onClick={goHome} />
+            <Logo onClick={vendorMode ? goVendorDashboard : goHome} />
             <div className="hidden items-center gap-6 text-sm font-medium lg:flex" style={{ color: colors.plum }}>
               {isVendorPortalView ? vendorPortalNavLinks : centerNavLinks}
             </div>
@@ -9998,7 +10083,10 @@ export default function App() {
           email={session.user.email}
           onSaveProfile={saveMyProfile}
           onChangePassword={changeMyPassword}
-          onBack={goHome}
+          onBack={leavePage}
+          isVendor={!!submittedVendor}
+          customerMode={customerMode}
+          onSwitchMode={switchMode}
         />
       )}
 
@@ -10086,9 +10174,11 @@ export default function App() {
         />
       )}
 
-      {view === "privacyPolicy" && <LegalPageView title="Integritetspolicy" sections={PRIVACY_POLICY_SECTIONS} onBack={goHome} />}
-      {view === "terms" && <LegalPageView title="Allmänna villkor" sections={TERMS_SECTIONS} onBack={goHome} />}
-      {view === "cookiePolicy" && <LegalPageView title="Cookiepolicy" sections={COOKIE_POLICY_SECTIONS} onBack={goHome} />}
+      {view === "privacyPolicy" && <LegalPageView title="Integritetspolicy" sections={PRIVACY_POLICY_SECTIONS} onBack={leavePage} />}
+      {view === "terms" && <LegalPageView title="Allmänna villkor" sections={TERMS_SECTIONS} onBack={leavePage} />}
+      {view === "cookiePolicy" && <LegalPageView title="Cookiepolicy" sections={COOKIE_POLICY_SECTIONS} onBack={leavePage} />}
+
+      {vendorMode && <VendorFooter onOpenTerms={goTerms} onOpenPrivacy={goPrivacyPolicy} onOpenCookies={goCookiePolicy} onSupport={() => setSupportOpen(true)} />}
 
       {!isVendorPortalView && !isAdminView && !["checkout", "confirmation", "vendorSignup", "vendorAwaitingConfirmation", "resetPassword", "privacyPolicy", "terms", "cookiePolicy"].includes(view) && (
         <Footer
@@ -10129,6 +10219,7 @@ export default function App() {
         </button>
       )}
 
+      {!isVendorPortalView && !isAdminView && (
       <CartDrawer
         open={cartOpen}
         onClose={() => setCartOpen(false)}
@@ -10147,6 +10238,7 @@ export default function App() {
           if (view !== "results" && view !== "profile") setView("results");
         }}
       />
+      )}
 
       <ReviewModal target={reviewTarget} onSubmit={submitReview} onClose={closeReview} />
       <ChatModal
