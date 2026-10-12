@@ -580,7 +580,7 @@ function mapDbVendorToLocal(dbVendor) {
         id: s.id,
         name: s.name || "",
         description: s.description || "",
-        priceType: s.price_type,
+        priceType: Number(s.price) > 0 ? s.price_type : "quote", // no price = price by agreement (shown to customers as a request)
         price: s.price,
         priceNote: s.price_note || "",
         category: s.category_id || "",
@@ -720,8 +720,8 @@ async function saveVendorProfile(vendor, accessToken) {
           category_id: s.category || null,
           name: s.name,
           description: s.description,
-          price_type: s.priceType,
-          price: Number(s.price) || 0,
+          price_type: s.priceType === "quote" ? "fixed" : s.priceType,
+          price: s.priceType === "quote" ? 0 : Number(s.price) || 0,
           price_note: s.priceNote,
         }))
       ),
@@ -5289,6 +5289,47 @@ function VendorProfileEditorView({
         />
       ))}
 
+      {vendor.categories.length > 0 && (() => {
+        const quoteMode = vendor.categories.every((c) => vendor.requestForms?.[c]?.direct === false || !vendor.profile.services.some((sv) => (!sv.category || sv.category === c) && Number(sv.price) > 0));
+        const choose = (mode) => vendor.categories.forEach((c) => onRequestForm(c, { ...(vendor.requestForms?.[c] || {}), direct: mode === "fixed" }));
+        const options = [
+          { id: "fixed", title: "Fasta priser", text: "Kunder ser ert pris och bokar direkt. Ni bekräftar sedan bokningen." },
+          { id: "quote", title: "Offert efter samtal", text: "Kunder skickar en förfrågan, ni diskuterar och skickar en offert med ert pris. Passar när priset beror på uppdraget." },
+        ];
+        return (
+          <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+            <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
+              Hur vill ni sätta pris?
+            </h2>
+            <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
+              Välj hur kunder bokar er. Ni kan ändra när som helst.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {options.map((o) => {
+                const active = (o.id === "quote") === quoteMode;
+                return (
+                  <button
+                    key={o.id}
+                    onClick={() => choose(o.id)}
+                    className="rounded-2xl p-4 text-left"
+                    style={{ border: `2px solid ${active ? colors.coral : colors.beige}`, backgroundColor: active ? colors.coralSoft : colors.white }}
+                    aria-pressed={active}
+                  >
+                    <p className="font-semibold" style={{ color: colors.plum }}>{o.title}</p>
+                    <p className="mt-1 text-xs" style={{ color: colors.plumSoft }}>{o.text}</p>
+                  </button>
+                );
+              })}
+            </div>
+            {quoteMode && (
+              <p className="mt-3 text-xs" style={{ color: colors.plumSoft }}>
+                Tips: välj <strong>Pris enligt överenskommelse</strong> på era tjänster nedan, eller ange ett riktpris i prisnoteringen.
+              </p>
+            )}
+          </section>
+        );
+      })()}
+
       <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
         <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
           Tjänster & priser
@@ -5348,19 +5389,26 @@ function VendorProfileEditorView({
                   <option value="fixed">Fast pris</option>
                   <option value="per_person">Per person</option>
                   <option value="per_hour">Per timme</option>
+                  <option value="quote">Pris enligt överenskommelse</option>
                 </select>
-                <input
-                  type="number"
-                  value={s.price}
-                  onChange={(e) => onUpdateService(s.id, "price", e.target.value)}
-                  placeholder="Pris (kr)"
-                  className="rounded-lg px-3 py-2 text-sm"
-                  style={fieldInputStyle}
-                />
+                {s.priceType === "quote" ? (
+                  <div className="flex items-center rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: colors.white, color: colors.plumSoft, border: `1.5px dashed ${colors.beige}` }}>
+                    Ni sätter priset i offerten
+                  </div>
+                ) : (
+                  <input
+                    type="number"
+                    value={s.price}
+                    onChange={(e) => onUpdateService(s.id, "price", e.target.value)}
+                    placeholder="Pris (kr)"
+                    className="rounded-lg px-3 py-2 text-sm"
+                    style={fieldInputStyle}
+                  />
+                )}
                 <input
                   value={s.priceNote}
                   onChange={(e) => onUpdateService(s.id, "priceNote", e.target.value)}
-                  placeholder="Prisnotering (valfritt)"
+                  placeholder={s.priceType === "quote" ? "T.ex. \"från 1 500 kr, beroende på omfattning\"" : "Prisnotering (valfritt)"}
                   className="rounded-lg px-3 py-2 text-sm"
                   style={fieldInputStyle}
                 />
@@ -5515,7 +5563,7 @@ function VendorProfilePreviewView({ vendor, onBack }) {
                       {s.name || "Namnlös tjänst"}
                     </p>
                     <p style={{ fontFamily: serif, fontSize: 16, color: colors.plum }}>
-                      {s.price ? formatKr(Number(s.price)) : "—"}
+                      {s.price ? formatKr(Number(s.price)) : "Enligt överenskommelse"}
                       {s.priceType === "per_person" ? "/person" : s.priceType === "per_hour" ? "/timme" : ""}
                     </p>
                   </div>
@@ -8294,7 +8342,7 @@ function AdminVendorDetailView({ vendor, onBack, onApprove, onReject }) {
                 <div key={s.id} className="flex items-center justify-between text-sm">
                   <span style={{ color: colors.plum }}>{s.name || "Namnlös tjänst"}</span>
                   <span style={{ color: colors.plumSoft }}>
-                    {s.price ? formatKr(Number(s.price)) : "—"}
+                    {s.price ? formatKr(Number(s.price)) : "Enligt överenskommelse"}
                     {s.priceType === "per_person" ? "/person" : s.priceType === "per_hour" ? "/timme" : ""}
                   </span>
                 </div>
