@@ -3789,7 +3789,7 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
             </div>
             <TurnstileBox onToken={setCaptchaToken} resetKey={captchaKey} />
             {error && (
-              <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
+              <p role="alert" className="mt-3 rounded-xl px-3 py-2 text-sm font-medium" style={{ color: colors.coralDeep, backgroundColor: colors.pinkSoft }}>
                 {error}
               </p>
             )}
@@ -3849,7 +3849,7 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
               </button>
             )}
             {error && (
-              <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
+              <p role="alert" className="mt-3 rounded-xl px-3 py-2 text-sm font-medium" style={{ color: colors.coralDeep, backgroundColor: colors.pinkSoft }}>
                 {error}
               </p>
             )}
