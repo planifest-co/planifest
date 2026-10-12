@@ -7901,7 +7901,206 @@ function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime,
   );
 }
 
-function AdminDashboardView({ vendorApplications, filter, onFilterChange, onOpenVendor }) {
+const ADMIN_BOOKING_STATUS = { pending: "Väntar på svar", confirmed: "Bekräftad", declined: "Nekad", completed: "Genomförd", cancelled: "Avbokad" };
+
+// Small helper for the admin tabs: loads a list from the database as the signed-in admin.
+function useAdminList(path, token, reloadKey = 0) {
+  const [state, setState] = useState({ loading: true, error: "", rows: [] });
+  useEffect(() => {
+    let cancelled = false;
+    setState((st) => ({ ...st, loading: true, error: "" }));
+    supabaseRestRequest(path, token).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error || !Array.isArray(data)) setState({ loading: false, error: error?.message || "Kunde inte hämta listan.", rows: [] });
+      else setState({ loading: false, error: "", rows: data });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [path, token, reloadKey]);
+  return state;
+}
+
+function AdminListShell({ state, empty, children }) {
+  if (state.loading) return <p className="py-10 text-center text-sm" style={{ color: colors.plumSoft }}>Hämtar…</p>;
+  if (state.error) return <p className="py-10 text-center text-sm" style={{ color: colors.coralDeep }}>{state.error}</p>;
+  if (state.rows.length === 0) return <p className="py-10 text-center text-sm" style={{ color: colors.plumSoft }}>{empty}</p>;
+  return children;
+}
+
+function AdminBookingsTab({ token, vendorApplications }) {
+  const [onlyUpcoming, setOnlyUpcoming] = useState(true);
+  const bookings = useAdminList("/bookings?select=*,booking_items(*)&order=date.desc&limit=300", token);
+  const profiles = useAdminList("/profiles?select=id,full_name", token);
+  const nameOf = (id) => profiles.rows.find((p) => p.id === id)?.full_name;
+  const vendorName = (id) => vendorApplications.find((v) => v.id === id)?.companyName || "Okänd leverantör";
+  const today = todayStr();
+  const rows = bookings.rows.filter((b) => !onlyUpcoming || (b.date >= today && !b.cancelled));
+  return (
+    <div>
+      <div className="mt-5 flex gap-2">
+        {[
+          { v: true, label: "Kommande" },
+          { v: false, label: "Alla" },
+        ].map((o) => (
+          <button
+            key={String(o.v)}
+            onClick={() => setOnlyUpcoming(o.v)}
+            className="rounded-full px-3 py-1.5 text-xs font-medium"
+            style={{
+              border: `1px solid ${onlyUpcoming === o.v ? colors.coral : colors.beige}`,
+              backgroundColor: onlyUpcoming === o.v ? colors.coralSoft : colors.white,
+              color: onlyUpcoming === o.v ? colors.coralDeep : colors.plumSoft,
+            }}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-4 space-y-3">
+        <AdminListShell state={{ ...bookings, rows }} empty="Inga bokningar här än.">
+          {rows.map((b) => {
+            const total = (b.booking_items || []).filter((i) => i.status !== "declined" && i.status !== "cancelled").reduce((sum, i) => sum + (Number(i.price) || 0), 0);
+            return (
+              <div key={b.id} className="rounded-2xl p-4" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="font-semibold" style={{ color: colors.plum }}>
+                    {b.booking_number} · {b.date}
+                    {b.start_time ? `, ${hhmm(b.start_time)}–${hhmm(b.end_time)}` : ""}
+                  </p>
+                  <p className="text-xs" style={{ color: colors.plumSoft }}>
+                    {b.cancelled ? "Avbokad" : b.completed ? "Genomförd" : !b.released_at && !b.customer_id ? "Gäst, väntar på e-postbekräftelse" : "Aktiv"}
+                  </p>
+                </div>
+                <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                  {b.customer_id ? nameOf(b.customer_id) || "Kund" : "Gästbokning"} · {b.guests} gäster{b.occasion ? ` · ${b.occasion}` : ""} · Totalt {formatKr(total)}
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {(b.booking_items || []).map((i) => (
+                    <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 text-sm" style={{ color: colors.plum }}>
+                      <span>
+                        {i.name} <span style={{ color: colors.plumSoft }}>· {i.vendor_id ? vendorName(i.vendor_id) : "Raderad leverantör"}</span>
+                      </span>
+                      <span className="text-xs" style={{ color: colors.plumSoft }}>
+                        {formatKr(Number(i.price) || 0)} · {ADMIN_BOOKING_STATUS[i.status] || i.status}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </AdminListShell>
+      </div>
+    </div>
+  );
+}
+
+function AdminSupportTab({ token }) {
+  const msgs = useAdminList("/support_messages?select=*&order=created_at.desc&limit=200", token);
+  return (
+    <div className="mt-5 space-y-3">
+      <AdminListShell state={msgs} empty="Inga supportmeddelanden.">
+        {msgs.rows.map((m) => (
+          <div key={m.id} className="rounded-2xl p-4" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="font-semibold" style={{ color: colors.plum }}>{m.subject || "(utan ämne)"}</p>
+              <p className="text-xs" style={{ color: colors.plumSoft }}>{formatAppliedAt(m.created_at)}</p>
+            </div>
+            <p className="mt-1 whitespace-pre-wrap text-sm" style={{ color: colors.plum }}>{m.message}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs" style={{ color: colors.plumSoft }}>
+              <span>{m.email || "Ingen e-post angiven"}</span>
+              {m.email && (
+                <a
+                  href={`mailto:${m.email}?subject=${encodeURIComponent("Re: " + (m.subject || "Ditt meddelande till Planifest"))}`}
+                  className="font-semibold underline"
+                  style={{ color: colors.lilacDeep }}
+                >
+                  Svara
+                </a>
+              )}
+            </div>
+          </div>
+        ))}
+      </AdminListShell>
+    </div>
+  );
+}
+
+function AdminReviewsTab({ token, vendorApplications, onShowToast }) {
+  const [reload, setReload] = useState(0);
+  const reviews = useAdminList("/reviews?select=*&order=created_at.desc&limit=200", token, reload);
+  const vendorName = (id) => vendorApplications.find((v) => v.id === id)?.companyName || "Okänd leverantör";
+  const remove = async (id) => {
+    if (!window.confirm("Ta bort den här recensionen? Det går inte att ångra.")) return;
+    const { error } = await supabaseRestRequest(`/reviews?id=eq.${id}`, token, { method: "DELETE" });
+    if (error) onShowToast("Kunde inte ta bort recensionen.");
+    else {
+      onShowToast("Recensionen är borttagen");
+      setReload((n) => n + 1);
+    }
+  };
+  return (
+    <div className="mt-5 space-y-3">
+      <AdminListShell state={reviews} empty="Inga recensioner än.">
+        {reviews.rows.map((r) => (
+          <div key={r.id} className="rounded-2xl p-4" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="font-semibold" style={{ color: colors.plum }}>
+                {vendorName(r.vendor_id)} · {"★".repeat(r.stars || 0)}
+                <span style={{ color: colors.beige }}>{"★".repeat(Math.max(0, 5 - (r.stars || 0)))}</span>
+              </p>
+              <p className="text-xs" style={{ color: colors.plumSoft }}>{formatAppliedAt(r.created_at)}</p>
+            </div>
+            {r.text && <p className="mt-1 whitespace-pre-wrap text-sm" style={{ color: colors.plum }}>{r.text}</p>}
+            <button onClick={() => remove(r.id)} className="mt-2 text-xs font-semibold underline" style={{ color: colors.coralDeep }}>
+              Ta bort recensionen
+            </button>
+          </div>
+        ))}
+      </AdminListShell>
+    </div>
+  );
+}
+
+function AdminDashboardView({ vendorApplications, filter, onFilterChange, onOpenVendor, token, onShowToast }) {
+  const [tab, setTab] = useState("vendors");
+  const tabs = [
+    { id: "vendors", label: "Leverantörer" },
+    { id: "bookings", label: "Bokningar" },
+    { id: "support", label: "Support" },
+    { id: "reviews", label: "Recensioner" },
+  ];
+  return (
+    <div>
+      <div className="mx-auto max-w-4xl px-6 pt-10 sm:px-10">
+        <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Admin</h1>
+        <div className="mt-4 flex flex-wrap gap-2 border-b pb-3" style={{ borderColor: colors.beige }}>
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className="rounded-full px-4 py-2 text-sm font-semibold"
+              style={{ backgroundColor: tab === t.id ? colors.coral : colors.white, color: tab === t.id ? colors.white : colors.plum, border: `1.5px solid ${tab === t.id ? colors.coral : colors.beige}` }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {tab === "vendors" && <AdminVendorsList vendorApplications={vendorApplications} filter={filter} onFilterChange={onFilterChange} onOpenVendor={onOpenVendor} />}
+      {tab !== "vendors" && (
+        <div className="mx-auto max-w-4xl px-6 pb-24 sm:px-10">
+          {tab === "bookings" && <AdminBookingsTab token={token} vendorApplications={vendorApplications} />}
+          {tab === "support" && <AdminSupportTab token={token} />}
+          {tab === "reviews" && <AdminReviewsTab token={token} vendorApplications={vendorApplications} onShowToast={onShowToast} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminVendorsList({ vendorApplications, filter, onFilterChange, onOpenVendor }) {
   const filters = [
     { id: "all", label: "Alla" },
     { id: "pending", label: "Väntar på granskning" },
@@ -7912,12 +8111,7 @@ function AdminDashboardView({ vendorApplications, filter, onFilterChange, onOpen
 
   return (
     <div className="mx-auto max-w-4xl px-6 pb-24 pt-10 sm:px-10">
-      <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Admin</h1>
-      <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
-        Leverantörsansökningar
-      </p>
-
-      <div className="mt-5 flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2">
         {filters.map((f) => (
           <button
             key={f.id}
@@ -8126,16 +8320,23 @@ function AdminVendorDetailView({ vendor, onBack, onApprove, onReject }) {
       </div>
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-        <button
-          onClick={() => onReject(vendor.id)}
-          className="flex-1 rounded-full px-5 py-3 text-sm font-semibold"
-          style={{ border: `1.5px solid ${colors.coral}`, color: colors.coralDeep, backgroundColor: colors.white }}
-        >
-          Avslå ansökan
-        </button>
-        <button onClick={() => onApprove(vendor.id)} className="flex-1 rounded-full px-5 py-3 text-sm font-semibold" style={{ backgroundColor: colors.green, color: colors.white }}>
-          Godkänn leverantör
-        </button>
+        {vendor.status !== "rejected" && (
+          <button
+            onClick={() => {
+              if (vendor.status === "approved" && !window.confirm(`Stänga av ${vendor.companyName}? Profilen försvinner direkt för kunder. Redan bekräftade bokningar påverkas inte, så kontakta leverantören om något behöver lösas.`)) return;
+              onReject(vendor.id);
+            }}
+            className="flex-1 rounded-full px-5 py-3 text-sm font-semibold"
+            style={{ border: `1.5px solid ${colors.coral}`, color: colors.coralDeep, backgroundColor: colors.white }}
+          >
+            {vendor.status === "approved" ? "Stäng av leverantör" : "Avslå ansökan"}
+          </button>
+        )}
+        {vendor.status !== "approved" && (
+          <button onClick={() => onApprove(vendor.id)} className="flex-1 rounded-full px-5 py-3 text-sm font-semibold" style={{ backgroundColor: colors.green, color: colors.white }}>
+            {vendor.status === "rejected" ? "Godkänn igen" : "Godkänn leverantör"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -10991,7 +11192,7 @@ export default function App() {
       )}
 
       {view === "adminDashboard" && (
-        <AdminDashboardView vendorApplications={vendorApplications} filter={adminFilter} onFilterChange={setAdminFilter} onOpenVendor={goAdminVendorDetail} />
+        <AdminDashboardView vendorApplications={vendorApplications} filter={adminFilter} onFilterChange={setAdminFilter} onOpenVendor={goAdminVendorDetail} token={session?.access_token} onShowToast={showToast} />
       )}
 
       {view === "adminVendorDetail" && (
