@@ -1296,7 +1296,7 @@ function validateVendorAccount(form, hasAccount = false) {
   if (!form.phone.trim()) errors.phone = "Fyll i telefonnummer";
   if (!hasAccount) {
     if (!form.password) errors.password = "Ange ett lösenord";
-    else if (form.password.length < 6) errors.password = "Lösenordet måste vara minst 6 tecken";
+    else if (form.password.length < 8) errors.password = "Lösenordet måste vara minst 8 tecken";
     if (form.confirmPassword !== form.password) errors.confirmPassword = "Lösenorden matchar inte";
   }
   return errors;
@@ -3518,6 +3518,58 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
 // the dedicated vendor signup flow further down still runs on local mock
 // data for now (see the note where it's rendered).
 // ---------------------------------------------------------------------------
+// Cloudflare Turnstile ("I am not a robot" check). Paste the public site key between the quotes to switch it on;
+// while it is empty no check is shown and nothing changes. The secret key goes in Supabase (Authentication -> Attack Protection).
+const TURNSTILE_SITE_KEY = "0x4AAAAAAFUpIRdMJCuFMWoq";
+const captchaBody = (token) => (token ? { gotrue_meta_security: { captcha_token: token } } : {});
+
+function TurnstileBox({ onToken, resetKey = 0 }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY) return undefined;
+    let cancelled = false;
+    let widgetId = null;
+    const mount = () => {
+      if (cancelled || !ref.current || !window.turnstile) return;
+      widgetId = window.turnstile.render(ref.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        language: "sv",
+        theme: "light",
+        callback: (t) => onToken(t),
+        "expired-callback": () => onToken(""),
+        "error-callback": () => onToken(""),
+      });
+    };
+    let script = document.getElementById("cf-turnstile-script");
+    if (window.turnstile) mount();
+    else {
+      if (!script) {
+        script = document.createElement("script");
+        script.id = "cf-turnstile-script";
+        script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+      }
+      script.addEventListener("load", mount);
+    }
+    return () => {
+      cancelled = true;
+      if (script) script.removeEventListener("load", mount);
+      if (widgetId !== null && window.turnstile) {
+        try {
+          window.turnstile.remove(widgetId);
+        } catch (e) {
+          // already gone
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey]);
+  if (!TURNSTILE_SITE_KEY) return null;
+  return <div ref={ref} className="mt-3 flex min-h-[65px] justify-center" />;
+}
+
 function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onForgotPassword }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -3527,8 +3579,29 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
   const [loading, setLoading] = useState(false);
   const [signedUp, setSignedUp] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [website, setWebsite] = useState(""); // honeypot: a real person never sees or fills this
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaKey, setCaptchaKey] = useState(0);
+
+  useEffect(() => {
+    // a new form needs a new check: tokens are single-use and belong to the widget that issued them
+    setCaptchaToken("");
+    setCaptchaKey((k) => k + 1);
+  }, [mode, open]);
 
   if (!open) return null;
+
+  const needCaptcha = () => {
+    if (TURNSTILE_SITE_KEY && !captchaToken) {
+      setError("Bekräfta att du inte är en robot.");
+      return true;
+    }
+    return false;
+  };
+  const freshCaptcha = () => {
+    setCaptchaToken("");
+    setCaptchaKey((k) => k + 1);
+  };
 
   const reset = () => {
     setEmail("");
@@ -3551,9 +3624,11 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
         setError("Fyll i din e-postadress.");
         return;
       }
+      if (needCaptcha()) return;
       setLoading(true);
-      await onForgotPassword(email.trim());
+      await onForgotPassword(email.trim(), captchaToken);
       setLoading(false);
+      freshCaptcha();
       setResetSent(true);
       return;
     }
@@ -3566,19 +3641,27 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
         setError("Fyll i ditt namn.");
         return;
       }
-      if (password.length < 6) {
-        setError("Lösenordet måste vara minst 6 tecken.");
+      if (password.length < 8) {
+        setError("Lösenordet måste vara minst 8 tecken.");
         return;
       }
       if (password !== confirmPassword) {
         setError("Lösenorden matchar inte.");
         return;
       }
+      if (website) {
+        setSignedUp(true); // looks like a bot: pretend it worked, create nothing
+        return;
+      }
     }
+    if (needCaptcha()) return;
     setLoading(true);
     const err =
-      mode === "signin" ? await onSignIn(email.trim(), password) : await onSignUp(email.trim(), password, fullName.trim());
+      mode === "signin"
+        ? await onSignIn(email.trim(), password, captchaToken)
+        : await onSignUp(email.trim(), password, fullName.trim(), captchaToken);
     setLoading(false);
+    freshCaptcha();
     if (err) {
       setError(err.message || "Något gick fel, försök igen.");
       return;
@@ -3637,6 +3720,7 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
             <div className="mt-4 space-y-3">
               <VendorTextField label="E-post" type="email" value={email} onChange={setEmail} />
             </div>
+            <TurnstileBox onToken={setCaptchaToken} resetKey={captchaKey} />
             {error && (
               <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
                 {error}
@@ -3666,7 +3750,18 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
               <VendorTextField label="E-post" type="email" value={email} onChange={setEmail} />
               <VendorTextField label="Lösenord" type="password" value={password} onChange={setPassword} />
               {mode === "signup" && <VendorTextField label="Bekräfta lösenord" type="password" value={confirmPassword} onChange={setConfirmPassword} />}
+              {mode === "signup" && (
+                <input
+                  tabIndex={-1}
+                  autoComplete="off"
+                  aria-hidden="true"
+                  value={website}
+                  onChange={(e) => setWebsite(e.target.value)}
+                  style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, width: 0 }}
+                />
+              )}
             </div>
+            <TurnstileBox onToken={setCaptchaToken} resetKey={captchaKey} />
             {mode === "signin" && (
               <button
                 onClick={() => {
@@ -4021,7 +4116,7 @@ function GeographyPicker({ baseLocation, serviceAreaType, onBaseLocation, onServ
   );
 }
 
-function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNext, onBack, onSubmit, onShowToast, submitError, submitting, onOpenTerms, hasAccount, accountEmail }) {
+function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNext, onBack, onSubmit, onShowToast, submitError, submitting, onOpenTerms, hasAccount, accountEmail, onCaptchaToken, captchaKey }) {
   const stepTitles = { 1: hasAccount ? "Om ditt företag" : "Skapa konto", 2: "Geografi", 3: "Vad erbjuder du?" };
 
   return (
@@ -4126,6 +4221,8 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
             )}
           </div>
         )}
+
+        {step === 3 && !hasAccount && <TurnstileBox onToken={onCaptchaToken} resetKey={captchaKey} />}
 
         {step === 3 && submitError && (
           <p className="mt-3 text-xs" style={{ color: colors.coralDeep }}>
@@ -4288,8 +4385,8 @@ function MyAccountView({ profile, email, onSaveProfile, onChangePassword, onBack
   const savePassword = async () => {
     setPasswordError("");
     setPasswordSaved(false);
-    if (newPassword.length < 6) {
-      setPasswordError("Lösenordet måste vara minst 6 tecken.");
+    if (newPassword.length < 8) {
+      setPasswordError("Lösenordet måste vara minst 8 tecken.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -4452,8 +4549,8 @@ function ResetPasswordView({ onSubmit, onShowToast }) {
 
   const submit = async () => {
     setError("");
-    if (password.length < 6) {
-      setError("Lösenordet måste vara minst 6 tecken.");
+    if (password.length < 8) {
+      setError("Lösenordet måste vara minst 8 tecken.");
       return;
     }
     if (password !== confirmPassword) {
@@ -8437,6 +8534,8 @@ export default function App() {
   const [vendorSubmitting, setVendorSubmitting] = useState(false);
   const [vendorApplications, setVendorApplications] = useState(SHOW_DEMO_DATA ? SEED_VENDOR_APPLICATIONS : []);
   const [submittedVendorId, setSubmittedVendorId] = useState(null);
+  const [vendorCaptchaToken, setVendorCaptchaToken] = useState("");
+  const [vendorCaptchaKey, setVendorCaptchaKey] = useState(0);
   // Declared early (not just where it's conceptually used) because several
   // useEffect hooks below reference it in their dependency array, which is
   // evaluated synchronously during render — unlike an effect's callback body,
@@ -8814,8 +8913,8 @@ export default function App() {
     setMobileMenuOpen(false);
   };
 
-  const requestPasswordReset = async (email) => {
-    await supabaseAuthRequest("/recover", { method: "POST", body: JSON.stringify({ email }) });
+  const requestPasswordReset = async (email, captchaToken) => {
+    await supabaseAuthRequest("/recover", { method: "POST", body: JSON.stringify({ email, ...captchaBody(captchaToken) }) });
     // Always resolve quietly either way — never reveal whether an email is registered.
   };
 
@@ -8884,13 +8983,13 @@ export default function App() {
     setBookingEventId(undefined);
   };
 
-  const signIn = async (email, password) => {
+  const signIn = async (email, password, captchaToken) => {
     // A visitor who is simply logging in keeps their cart and search choices (checkout asks them to log in
     // at the last step). Local data is only wiped when an account that was already signed in is replaced.
     if (session?.user) clearLocalUserState();
     const { data, error } = await supabaseAuthRequest("/token?grant_type=password", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, ...captchaBody(captchaToken) }),
     });
     if (error) return error;
     landOnPortalRef.current = true;
@@ -8899,11 +8998,11 @@ export default function App() {
     return null;
   };
 
-  const signUpCustomer = async (email, password, fullName) => {
+  const signUpCustomer = async (email, password, fullName, captchaToken) => {
     if (session?.user) clearLocalUserState();
     const { data, error } = await supabaseAuthRequest("/signup", {
       method: "POST",
-      body: JSON.stringify({ email, password, data: { full_name: fullName } }),
+      body: JSON.stringify({ email, password, data: { full_name: fullName }, ...captchaBody(captchaToken) }),
     });
     if (error) return error;
     if (data.access_token) {
@@ -9923,6 +10022,10 @@ export default function App() {
     setVendorErrors(errors);
     if (Object.keys(errors).length > 0) return;
 
+    if (!session?.access_token && TURNSTILE_SITE_KEY && !vendorCaptchaToken) {
+      setVendorSubmitError("Bekräfta att du inte är en robot.");
+      return;
+    }
     setVendorSubmitError("");
     setVendorSubmitting(true);
 
@@ -9963,9 +10066,12 @@ export default function App() {
             categories: vendorForm.categories,
           },
         },
+        ...captchaBody(vendorCaptchaToken),
       }),
     });
     setVendorSubmitting(false);
+    setVendorCaptchaToken("");
+    setVendorCaptchaKey((k) => k + 1);
 
     if (signUpError) {
       setVendorSubmitError(signUpError.message);
@@ -10575,6 +10681,8 @@ export default function App() {
           onOpenTerms={goTerms}
           hasAccount={!!session}
           accountEmail={session?.user?.email}
+          onCaptchaToken={setVendorCaptchaToken}
+          captchaKey={vendorCaptchaKey}
         />
       )}
 
