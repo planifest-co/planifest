@@ -4291,7 +4291,7 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
                 <button type="button" onClick={onOpenTerms} className="font-semibold underline" style={{ color: colors.lilacDeep }}>
                   Planifests villkor för leverantörer
                 </button>
-                , inklusive reglerna om avbokning och att inte kringgå plattformen.
+                , inklusive reglerna om avbokning.
               </span>
             </label>
             {errors.acceptedTerms && (
@@ -8528,30 +8528,23 @@ const TERMS_SECTIONS = [
     ],
   },
   {
-    heading: "9. Kringgående av plattformen",
-    paragraphs: [
-      "Kund och Leverantör som kommit i kontakt via Planifest förbinder sig att inte, under pågående bokningsprocess eller inom 12 månader efter första kontakt via plattformen, ingå avtal om samma eller liknande tjänst direkt med varandra i syfte att kringgå Planifests förmedlingsavgift.",
-      "Vid brott mot denna bestämmelse har Planifest rätt att fakturera den ansvariga parten ett belopp motsvarande den förmedlingsavgift som skulle ha utgått vid bokning via plattformen, samt att stänga av kontot.",
-    ],
-  },
-  {
-    heading: "10. Immateriella rättigheter",
+    heading: "9. Immateriella rättigheter",
     paragraphs: ["Allt innehåll på Planifest (varumärke, design och texter som tillhör Planifest) ägs av Planifest eller våra licensgivare. Leverantörer behåller rättigheterna till sina egna bilder och texter men ger Planifest rätt att visa dem på plattformen."],
   },
   {
-    heading: "11. Ansvarsbegränsning",
+    heading: "10. Ansvarsbegränsning",
     paragraphs: ["Planifest ansvarar inte för Leverantörens utförande av bokade tjänster eller för skador i samband med ett event. Planifests ansvar är i alla händelser begränsat till den förmedlingsavgift som betalats för den aktuella bokningen."],
   },
   {
-    heading: "12. Reklamation och tvist",
+    heading: "11. Reklamation och tvist",
     paragraphs: ["Klagomål på en utförd tjänst riktas i första hand till Leverantören. Kan tvisten inte lösas kan Kund vända sig till Allmänna reklamationsnämnden (ARN) eller allmän domstol. Svensk lag tillämpas."],
   },
   {
-    heading: "13. Ändringar av villkoren",
+    heading: "12. Ändringar av villkoren",
     paragraphs: ["Vi kan komma att ändra dessa villkor. Väsentliga ändringar meddelas via webbplatsen eller e-post i god tid innan de träder i kraft."],
   },
   {
-    heading: "14. Kontakt",
+    heading: "13. Kontakt",
     paragraphs: ["Frågor om dessa villkor? Kontakta oss på info@planifest.se.", `Senast uppdaterad: ${LEGAL_LAST_UPDATED}`],
   },
 ];
