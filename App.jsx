@@ -448,6 +448,82 @@ async function supabaseAuthRequest(path, options = {}) {
   }
 }
 
+// --- Vendor images: shrunk in the browser, stored in Supabase Storage, only the link goes in the database ---
+const IMAGE_BUCKET = "vendor-images";
+const IMAGE_PUBLIC_PREFIX = `${SUPABASE_URL}/storage/v1/object/public/${IMAGE_BUCKET}/`;
+
+async function shrinkImage(file, maxSide = 1600) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch (e) {
+    bitmap = await new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("decode"));
+      };
+      img.src = url;
+    });
+  }
+  const w = bitmap.width || bitmap.naturalWidth;
+  const h = bitmap.height || bitmap.naturalHeight;
+  const scale = Math.min(1, maxSide / Math.max(w, h));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(w * scale));
+  canvas.height = Math.max(1, Math.round(h * scale));
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff"; // transparent PNGs become white instead of black in a JPEG
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  if (bitmap.close) bitmap.close();
+  const toBlob = (q) => new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", q));
+  let blob = await toBlob(0.82);
+  if (blob && blob.size > 1400 * 1024) blob = await toBlob(0.65);
+  if (!blob || blob.size > 1500 * 1024) throw new Error("size");
+  return blob;
+}
+
+// Returns { url } or { error }. Needs a signed-in vendor: the storage rules only allow writes to the user's own folder.
+async function uploadVendorImage(file, session) {
+  if (!session?.access_token || !session?.user?.id) return { error: "Du måste vara inloggad för att ladda upp bilder." };
+  if (!file.type.startsWith("image/")) return { error: `${file.name} är inte en bild.` };
+  let blob;
+  try {
+    blob = await shrinkImage(file);
+  } catch (e) {
+    return { error: `Kunde inte läsa ${file.name}. Prova en JPG- eller PNG-bild.` };
+  }
+  const path = `${session.user.id}/${newId()}.jpg`;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${IMAGE_BUCKET}/${path}`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}`, "Content-Type": "image/jpeg", "Cache-Control": "31536000" },
+      body: blob,
+    });
+    if (!res.ok) return { error: `Uppladdningen av ${file.name} misslyckades. Försök igen.` };
+    return { url: IMAGE_PUBLIC_PREFIX + path };
+  } catch (e) {
+    return { error: "Nådde inte servern. Kontrollera din uppkoppling och försök igen." };
+  }
+}
+
+// Best effort: when a vendor removes one of their own uploaded images, free the space too.
+function deleteVendorImageFile(url, session) {
+  if (!session?.access_token || typeof url !== "string" || !url.startsWith(IMAGE_PUBLIC_PREFIX)) return;
+  const path = url.slice(IMAGE_PUBLIC_PREFIX.length);
+  if (!path.startsWith(`${session.user?.id}/`)) return;
+  fetch(`${SUPABASE_URL}/storage/v1/object/${IMAGE_BUCKET}/${path}`, {
+    method: "DELETE",
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` },
+  }).catch(() => {});
+}
+
 async function supabaseRestRequest(path, accessToken, options = {}) {
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
@@ -4697,6 +4773,7 @@ function VendorProfileEditorView({
   onProfileField,
   onAddImage,
   onRemoveImage,
+  onUploadImage,
   onAddService,
   onUpdateService,
   onRemoveService,
@@ -4709,6 +4786,7 @@ function VendorProfileEditorView({
   onRequestForm,
 }) {
   const [imageUrl, setImageUrl] = useState("");
+  const [uploading, setUploading] = useState(0);
   if (!vendor) return null;
   const { percent } = getVendorCompleteness(vendor);
 
@@ -4719,19 +4797,24 @@ function VendorProfileEditorView({
   };
   const addSampleImage = () => onAddImage(`https://picsum.photos/seed/vendor-${Date.now()}/600/420`);
 
-  const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8 MB — generous but avoids choking the browser tab on huge phone photos
-  const handleFileSelect = (e) => {
+  const MAX_FILE_SIZE = 25 * 1024 * 1024; // photos are shrunk before upload, so big phone originals are fine
+  const MAX_IMAGES = 12;
+  const handleFileSelect = async (e) => {
     const files = Array.from(e.target.files || []);
-    files.forEach((file) => {
-      if (file.size > MAX_FILE_SIZE) {
-        onShowToast(`${file.name} är för stor (max 8 MB)`);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => onAddImage(reader.result);
-      reader.readAsDataURL(file);
-    });
     e.target.value = ""; // allow re-selecting the same file later
+    const room = MAX_IMAGES - vendor.profile.images.length;
+    if (files.length > room) onShowToast(room > 0 ? `Max ${MAX_IMAGES} bilder – bara de första ${room} laddas upp.` : `Max ${MAX_IMAGES} bilder. Ta bort en bild först.`);
+    for (const file of files.slice(0, Math.max(0, room))) {
+      if (file.size > MAX_FILE_SIZE) {
+        onShowToast(`${file.name} är för stor (max 25 MB)`);
+        continue;
+      }
+      setUploading((n) => n + 1);
+      const result = await onUploadImage(file);
+      setUploading((n) => n - 1);
+      if (result.error) onShowToast(result.error);
+      else onAddImage(result.url);
+    }
   };
 
   const fieldInputStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
@@ -4859,8 +4942,8 @@ function VendorProfileEditorView({
           style={{ backgroundColor: colors.coral, color: colors.white }}
         >
           <Camera size={16} />
-          Ladda upp bilder från mobil eller dator
-          <input type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
+          {uploading > 0 ? "Laddar upp…" : "Ladda upp bilder från mobil eller dator"}
+          <input type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} disabled={uploading > 0} />
         </label>
 
         <p className="mb-1 mt-4 text-xs font-medium" style={{ color: colors.plum }}>
@@ -9851,8 +9934,11 @@ export default function App() {
   const updateVendorProfileField = (field, value) => patchVendor((v) => ({ ...v, profile: { ...v.profile, [field]: value } }));
 
   const addVendorImage = (url) => patchVendor((v) => ({ ...v, profile: { ...v.profile, images: [...v.profile.images, url] } }));
-  const removeVendorImage = (index) =>
+  const removeVendorImage = (index) => {
+    deleteVendorImageFile(submittedVendor?.profile?.images?.[index], session);
     patchVendor((v) => ({ ...v, profile: { ...v.profile, images: v.profile.images.filter((_, i) => i !== index) } }));
+  };
+  const uploadVendorImageFile = (file) => uploadVendorImage(file, session);
 
   const addVendorService = () =>
     patchVendor((v) => ({
@@ -10400,6 +10486,7 @@ export default function App() {
           onProfileField={updateVendorProfileField}
           onAddImage={addVendorImage}
           onRemoveImage={removeVendorImage}
+          onUploadImage={uploadVendorImageFile}
           onAddService={addVendorService}
           onUpdateService={updateVendorService}
           onRemoveService={removeVendorService}
