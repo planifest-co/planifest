@@ -3753,6 +3753,9 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
             <p className="mt-2 text-sm" style={{ color: colors.plumSoft }}>
               Vi har skickat en bekräftelselänk till <strong>{email}</strong>. Klicka på den för att aktivera kontot, logga sedan in här.
             </p>
+            <p className="mt-3 text-xs" style={{ color: colors.plumSoft }}>
+              Hittar du inget mejl inom en minut? Titta i skräpposten och markera det som "Inte skräppost".
+            </p>
             <button
               onClick={closeAndReset}
               className="mt-5 w-full rounded-full py-3 text-sm font-semibold"
@@ -3769,6 +3772,9 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
             <h2 style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>Kolla din mejl!</h2>
             <p className="mt-2 text-sm" style={{ color: colors.plumSoft }}>
               Om <strong>{email}</strong> har ett konto hos oss har vi skickat en länk dit för att återställa lösenordet.
+            </p>
+            <p className="mt-3 text-xs" style={{ color: colors.plumSoft }}>
+              Hittar du inget mejl inom en minut? Titta i skräpposten och markera det som "Inte skräppost".
             </p>
             <button
               onClick={closeAndReset}
@@ -4673,6 +4679,9 @@ function VendorAwaitingConfirmationView({ email, onHome }) {
       <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Kolla din mejl!</h1>
       <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
         Vi har skickat en bekräftelselänk till <strong>{email}</strong>. Klicka på den, på vilken enhet du vill — då skickas din leverantörsansökan in automatiskt. Logga sedan in för att följa den.
+      </p>
+      <p className="mx-auto mt-3 max-w-sm text-xs" style={{ color: colors.plumSoft }}>
+        Hittar du inget mejl inom en minut? Titta i skräpposten och markera det som "Inte skräppost".
       </p>
       <button onClick={onHome} className="mt-6 w-full rounded-full py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
         Till startsidan
