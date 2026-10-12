@@ -1199,6 +1199,7 @@ function mapVendorToProviders(vendor, bookings, busyByVendor = {}) {
       id: `${vendor.id}-${categoryId}`,
       vendorDbId: vendor.id.startsWith("VND-") ? null : vendor.id, // only real (Supabase) vendors get a real FK id
       category: categoryId,
+      alsoOffers: vendor.categories.filter((c) => c !== categoryId),
       name: vendor.companyName,
       tagline: vendor.profile.tagline || "Ny leverantör på Planifest",
       rating: null,
@@ -1700,9 +1701,16 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
       </div>
       <div className="flex flex-1 flex-col px-2 pb-1.5 pt-3">
         {cat && (
-          <span className="mb-2 inline-block self-start rounded-full px-2.5 py-0.5 text-[11px] font-bold" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
-            {cat.label}
-          </span>
+          <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1">
+            <span className="inline-block self-start rounded-full px-2.5 py-0.5 text-[11px] font-bold" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+              {cat.label}
+            </span>
+            {(provider.alsoOffers || []).length > 0 && (
+              <span className="min-w-0 truncate text-[11px] font-semibold" style={{ color: colors.plumSoft }}>
+                + {provider.alsoOffers.map((id) => catMap[id]?.label).filter(Boolean).join(", ")}
+              </span>
+            )}
+          </div>
         )}
         <h3 className="truncate leading-tight" style={{ fontFamily: serif, fontWeight: 700, fontSize: 18, color: colors.plum }}>
           {provider.name}
@@ -2339,6 +2347,11 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
           <p className="mt-1 flex items-center gap-1 text-sm" style={{ color: colors.plumSoft }}>
             <MapPin size={14} /> {provider.location}
           </p>
+          {(provider.alsoOffers || []).length > 0 && (
+            <p className="mt-1 text-sm font-semibold" style={{ color: colors.lilacDeep }}>
+              Erbjuder även: {provider.alsoOffers.map((id) => catMap[id]?.label).filter(Boolean).join(", ")}
+            </p>
+          )}
         </div>
         {provider.reviews > 0 ? (
           <StarRating rating={provider.rating} reviews={provider.reviews} size={16} />
@@ -4273,6 +4286,9 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
             <p className="text-sm" style={{ color: colors.plumSoft }}>
               Välj de kategorier som stämmer in på er verksamhet. Ni kan lägga till fler senare.
             </p>
+            <p className="rounded-2xl px-3 py-2 text-xs" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+              Erbjuder ni mer än en sak, till exempel en lokal som också har egen catering? Välj båda. Ni visas då i båda kategorierna och lägger in egna tjänster och priser för varje, så att kunder ser att ni kan ordna båda.
+            </p>
             <div className="flex flex-wrap gap-2">
               {CATEGORIES.map((c) => (
                 <CategoryChip key={c.id} active={form.categories.includes(c.id)} onClick={() => onToggleCategory(c.id)} icon={c.icon} label={c.label} />
@@ -5188,6 +5204,9 @@ function VendorProfileEditorView({
         <h2 className="mb-4" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
           Kategorier
         </h2>
+        <p className="mb-3 text-sm" style={{ color: colors.plumSoft }}>
+          Erbjuder ni mer än en sak, till exempel en lokal som också caterar? Välj båda. Ni visas då i båda kategorierna, och kunder ser vad ni även kan ordna. Lägg sedan in tjänster och priser för varje kategori längre ner.
+        </p>
         <div className="flex flex-wrap gap-2">
           {CATEGORIES.map((c) => (
             <CategoryChip key={c.id} active={vendor.categories.includes(c.id)} onClick={() => onToggleCategory(c.id)} icon={c.icon} label={c.label} />
