@@ -2270,7 +2270,7 @@ function ResultsView({
   );
 }
 
-function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty, onSendRequest }) {
+function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty, onSendRequest, siblings = [], cartIds = [], onViewOther }) {
   const cat = catMap[provider.category];
   const [requestOpen, setRequestOpen] = useState(false);
   const [pendingAddons, setPendingAddons] = useState([]);
@@ -2402,6 +2402,66 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
               {provider.service}
             </p>
           </section>
+          {siblings.length > 0 && (
+            <section>
+              <h2 className="mb-1 font-semibold" style={{ color: colors.plum }}>
+                Boka även hos {provider.name}
+              </h2>
+              <p className="mb-3 text-sm" style={{ color: colors.plumSoft }}>
+                Samma leverantör erbjuder mer. Lägg till det i din fest direkt.
+              </p>
+              <div className="space-y-2">
+                {siblings.map((sib) => {
+                  const sibCat = catMap[sib.category];
+                  const sibLabel = sib.requestOnly
+                    ? sib.fromPrice > 0
+                      ? `från ${formatKr(sib.fromPrice)}`
+                      : "Pris på förfrågan"
+                    : `${formatKr(sib.pricing.amount)}${getUnitLabel(sib.pricing)}`;
+                  const sibBusy = !!party?.date && (isBusyAt(sib, party) || !!sib.closedDates?.includes(party.date));
+                  const sibIn = cartIds.includes(sib.id);
+                  return (
+                    <div key={sib.id} className="flex items-center justify-between gap-3 rounded-2xl p-3" style={{ backgroundColor: colors.cream, border: `1px solid ${colors.beige}` }}>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold" style={{ color: colors.plum }}>
+                          {sibCat?.label || "Tjänst"}
+                        </p>
+                        <p className="truncate text-xs" style={{ color: colors.plumSoft }}>
+                          {sib.service || sib.tagline}
+                        </p>
+                        <p className="mt-0.5 text-sm font-bold" style={{ color: colors.plum }}>
+                          {sibLabel}
+                        </p>
+                      </div>
+                      {sibBusy ? (
+                        <span className="flex-shrink-0 text-xs font-semibold" style={{ color: colors.coralDeep }}>
+                          Upptagen din tid
+                        </span>
+                      ) : sib.requestOnly ? (
+                        <button
+                          type="button"
+                          onClick={() => onViewOther && onViewOther(sib.id)}
+                          className="flex-shrink-0 rounded-full px-4 py-2 text-xs font-semibold"
+                          style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}
+                        >
+                          Visa
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => (sibIn ? onRemove(sib.id) : onAdd(sib.id))}
+                          className="flex-shrink-0 rounded-full px-4 py-2 text-xs font-semibold"
+                          style={sibIn ? { backgroundColor: colors.greenSoft, color: colors.green } : { backgroundColor: colors.coral, color: colors.white }}
+                        >
+                          {sibIn ? "Tillagd ✓" : "Lägg till"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
           <section>
             <h2 className="mb-3 font-semibold" style={{ color: colors.plum }}>
               Recensioner
@@ -2611,10 +2671,9 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
 
 function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddon, onGoCheckout, onAddForCategory, onKeepBrowsing }) {
   const total = cart.reduce((sum, p) => sum + getLineTotal(p, p.chosenAddons, party), 0);
-  const boardCategoryIds =
-    party.categories.length > 0
-      ? CATEGORIES.filter((c) => party.categories.includes(c.id)).map((c) => c.id)
-      : [...new Set(cart.map((p) => p.category))];
+  // Everything in the cart always shows, even if its category wasn't picked for the party
+  const boardWanted = new Set([...party.categories, ...cart.map((p) => p.category)]);
+  const boardCategoryIds = CATEGORIES.filter((c) => boardWanted.has(c.id)).map((c) => c.id);
   const isEmpty = boardCategoryIds.length === 0;
   const occasionInfo = party.occasion ? occasionMap[party.occasion] : null;
 
@@ -9289,7 +9348,13 @@ export default function App() {
       ]);
       if (stop || q.error || !q.data) return;
       const used = new Set((b.data || []).flatMap((x) => (x.booking_items || []).map((i) => i.quote_message_id)).filter(Boolean));
-      const open = q.data.filter((m) => !used.has(m.id) && m.conversations);
+      let dismissed = [];
+      try {
+        dismissed = JSON.parse(localStorage.getItem("planifest-dismissed-quotes") || "[]");
+      } catch (e) {
+        dismissed = [];
+      }
+      const open = q.data.filter((m) => !used.has(m.id) && m.conversations && !dismissed.includes(`quote-${m.id}`));
       if (open.length === 0) return;
       const synth = open.map((m) => ({
         id: `quote-${m.id}`,
@@ -9632,7 +9697,19 @@ export default function App() {
     }
     setCartItems((c) => (c.some((x) => x.id === id) ? c : [...c, { id, addons: addonIds }]));
   };
-  const removeFromCart = (id) => setCartItems((c) => c.filter((x) => x.id !== id));
+  const removeFromCart = (id) => {
+    // A removed accepted quote must not come back into the cart at the next login
+    if (String(id).startsWith("quote-")) {
+      try {
+        const key = "planifest-dismissed-quotes";
+        const list = JSON.parse(localStorage.getItem(key) || "[]");
+        localStorage.setItem(key, JSON.stringify([...new Set([...list, id])]));
+      } catch (e) {
+        /* storage unavailable: the quote simply returns next time */
+      }
+    }
+    setCartItems((c) => c.filter((x) => x.id !== id));
+  };
   const toggleAddon = (providerId, addonId) => {
     setCartItems((c) =>
       c.map((ci) =>
@@ -11084,6 +11161,13 @@ export default function App() {
           onSelectDate={(date) => setParty((p) => ({ ...p, date }))}
           onUpdateParty={(patch) => setParty((p) => ({ ...p, ...patch }))}
           onSendRequest={sendRequest}
+          siblings={
+            activeProvider.vendorDbId
+              ? customerProviders.filter((p) => p.vendorDbId === activeProvider.vendorDbId && p.id !== activeProvider.id && !p.quoteMessageId)
+              : []
+          }
+          cartIds={cartProviderIds}
+          onViewOther={viewProfile}
         />
       )}
 
