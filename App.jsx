@@ -5035,6 +5035,7 @@ function VendorProfileEditorView({
   onProfileField,
   onAddImage,
   onRemoveImage,
+  onMakeMainImage,
   onUploadImage,
   onAddService,
   onUpdateService,
@@ -5168,7 +5169,7 @@ function VendorProfileEditorView({
           Bilder
         </h2>
         <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
-          Första bilden används som huvudbild.
+          Huvudbilden visas på ditt kort och överst på din profil. Tryck "Gör till huvudbild" på den bild du vill ha först.
         </p>
         {vendor.profile.images.length === 0 && (
           <p className="mb-3 text-xs" style={{ color: colors.coralDeep }}>
@@ -5188,8 +5189,18 @@ function VendorProfileEditorView({
                     Huvudbild
                   </span>
                 )}
+                {i > 0 && (
+                  <button
+                    onClick={() => onMakeMainImage(i)}
+                    className="absolute inset-x-1 bottom-1 rounded-full px-2 py-1 text-[11px] font-semibold"
+                    style={{ backgroundColor: "rgba(255,255,255,0.92)", color: colors.coralDeep }}
+                  >
+                    Gör till huvudbild
+                  </button>
+                )}
                 <button
                   onClick={() => onRemoveImage(i)}
+                  aria-label="Ta bort bilden"
                   className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full"
                   style={{ backgroundColor: "rgba(74,21,56,0.7)" }}
                 >
@@ -8755,6 +8766,31 @@ export default function App() {
     });
   }, [session]);
 
+  // A vendor whose application is still under review gets the answer without logging out and in again:
+  // her own row is re-read every 15 s (and when she comes back to the tab) until the status changes.
+  const ownVendorStatus = vendorApplications.find((v) => v.id === submittedVendorId)?.status;
+  useEffect(() => {
+    if (!session?.user || ownVendorStatus !== "pending") return;
+    let stopped = false;
+    const check = () => {
+      if (document.hidden || stopped) return;
+      fetchVendorByProfileId(session.user.id, session.access_token).then(({ data, error }) => {
+        if (stopped || error || !data || !data[0] || data[0].status === "pending") return;
+        const local = mapDbVendorToLocal(data[0]);
+        setVendorApplications((apps) => apps.map((v) => (v.id === local.id ? local : v)));
+        showToast(local.status === "approved" ? "Din ansökan är godkänd! 🎉" : "Din ansökan har fått ett svar");
+      });
+    };
+    const id = setInterval(check, 15000);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", check);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, ownVendorStatus]);
+
   // Approved vendors are publicly readable — load them for anyone browsing,
   // logged in or not, and merge them in alongside the seed/demo listings.
   useEffect(() => {
@@ -10300,6 +10336,13 @@ export default function App() {
     deleteVendorImageFile(submittedVendor?.profile?.images?.[index], session);
     patchVendor((v) => ({ ...v, profile: { ...v.profile, images: v.profile.images.filter((_, i) => i !== index) } }));
   };
+  // Moves the chosen picture to the front: the first picture is the one shown on cards and as the profile's main picture.
+  const makeVendorImageMain = (index) =>
+    patchVendor((v) => {
+      const imgs = v.profile.images;
+      if (index <= 0 || index >= imgs.length) return v;
+      return { ...v, profile: { ...v.profile, images: [imgs[index], ...imgs.filter((_, i) => i !== index)] } };
+    });
   const uploadVendorImageFile = (file) => uploadVendorImage(file, session);
 
   const addVendorService = () =>
@@ -10851,6 +10894,7 @@ export default function App() {
           onProfileField={updateVendorProfileField}
           onAddImage={addVendorImage}
           onRemoveImage={removeVendorImage}
+          onMakeMainImage={makeVendorImageMain}
           onUploadImage={uploadVendorImageFile}
           onAddService={addVendorService}
           onUpdateService={updateVendorService}
