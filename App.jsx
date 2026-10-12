@@ -8533,6 +8533,39 @@ export default function App() {
     return () => clearInterval(id);
   }, [view]);
 
+  // Browser history: every page change is a history entry, so the phone's back swipe and the back button
+  // step back through the pages instead of leaving the site.
+  const viewFromPopRef = useRef(false);
+  const viewNowRef = useRef(view);
+  const historyReadyRef = useRef(false);
+  useEffect(() => {
+    viewNowRef.current = view;
+    try {
+      if (!historyReadyRef.current) {
+        historyReadyRef.current = true; // first load (or a reload): this entry becomes the starting page
+        window.history.replaceState({ pv: view }, "", window.location.pathname + window.location.search);
+        return;
+      }
+      if (viewFromPopRef.current) {
+        viewFromPopRef.current = false;
+        return;
+      }
+      if (!window.history.state || window.history.state.pv !== view) window.history.pushState({ pv: view }, "", window.location.pathname);
+    } catch (e) {
+      // history unavailable (rare embedded browsers) — navigation still works, just without the back button
+    }
+  }, [view]);
+  useEffect(() => {
+    const onPop = (e) => {
+      const target = (e.state && e.state.pv) || "home";
+      if (target === viewNowRef.current) return;
+      viewFromPopRef.current = true;
+      setView(target);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   // Detect the redirect Supabase sends the browser to after a link in one of
   // our auth emails is clicked. Both arrive with tokens in the URL hash;
   // recovery links use them to auto-authenticate for a "set new password"
@@ -10623,8 +10656,8 @@ export default function App() {
                 </button>
                 {session && profile ? (
                   <div className="flex items-center gap-3">
-                    <button onClick={goMyAccount} className="text-sm font-medium underline" style={{ color: colors.plum }}>
-                      {profile.full_name || session.user.email}
+                    <button onClick={goMyAccount} title={profile.full_name || session.user.email} className="text-sm font-medium underline" style={{ color: colors.plum }}>
+                      Mitt konto
                     </button>
                     <button onClick={signOut} className="text-sm font-medium" style={{ color: colors.plumSoft }}>
                       Logga ut
