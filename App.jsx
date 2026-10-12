@@ -8108,14 +8108,16 @@ function Footer({ onGoHome, onBrowse, onHowItWorks, onBecomeVendor, onOpenTerms,
               hela ditt event i din egen takt. Vi startade i Göteborg med en övertygelse om att bra fester
               börjar med bra idéer, och att rätt verktyg gör hela skillnaden.
             </p>
-            <button
-              onClick={() => onShowToast("Instagram-länk läggs till snart.")}
+            <a
+              href="https://www.instagram.com/planifest/"
+              target="_blank"
+              rel="noopener noreferrer"
               className="mt-4 flex h-8 w-8 items-center justify-center rounded-full"
               style={{ backgroundColor: colors.coralSoft, color: colors.coralDeep }}
               aria-label="Planifest på Instagram"
             >
               <Instagram size={15} />
-            </button>
+            </a>
           </div>
 
           <div>
