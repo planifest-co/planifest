@@ -4163,7 +4163,107 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
   );
 }
 
-function MyAccountView({ profile, email, onSaveProfile, onChangePassword, onBack, isVendor, customerMode, onSwitchMode }) {
+// Confirmation step for deleting an account: says plainly what goes and what stays, and needs the word RADERA typed.
+function DeleteAccountDialog({ isVendor, onCancel, onConfirm }) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const ready = typed.trim().toUpperCase() === "RADERA";
+
+  const submit = async () => {
+    if (!ready || busy) return;
+    setError("");
+    setBusy(true);
+    const err = await onConfirm();
+    if (err) {
+      setBusy(false);
+      setError(err);
+    }
+  };
+
+  const goes = isVendor
+    ? ["Din leverantörsprofil, dina bilder, tjänster och priser", "Dina konversationer och offerter", "Omdömen om dig och omdömen du har skrivit", "Dina egna festplaner och gästlistor, om du har några", "Din inloggning och dina kontaktuppgifter"]
+    : ["Dina festplaner, gästlistor och sparade leverantörer", "Dina bokningar och konversationer", "Omdömen du har skrivit", "Din inloggning och dina kontaktuppgifter"];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+      style={{ backgroundColor: "rgba(74,21,56,0.45)" }}
+      onClick={busy ? undefined : onCancel}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-account-title"
+    >
+      <div
+        className="max-h-[92vh] w-full overflow-y-auto rounded-t-3xl p-6 sm:max-w-md sm:rounded-3xl"
+        style={{ backgroundColor: colors.cream }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="delete-account-title" style={{ fontFamily: serif, fontSize: 24, color: colors.plum }}>
+          Radera ditt konto?
+        </h2>
+        <p className="mt-2 text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
+          Det här går inte att ångra. Det här försvinner för alltid:
+        </p>
+        <ul className="mt-3 space-y-1.5 text-sm" style={{ color: colors.plum }}>
+          {goes.map((g) => (
+            <li key={g} className="flex gap-2">
+              <span aria-hidden="true" style={{ color: colors.coral }}>•</span>
+              <span>{g}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-4 rounded-2xl p-4 text-sm leading-relaxed" style={{ backgroundColor: colors.pinkSoft, color: colors.plum }}>
+          <p className="font-semibold">Om du har kommande bokningar</p>
+          <p className="mt-1" style={{ color: colors.plumSoft }}>
+            {isVendor
+              ? "Du behöver svara på eller avboka dem först, så att kunderna inte blir utan besked. Kunder behåller sin bokningshistorik, utan länk till din profil."
+              : "Du behöver avboka dem först, så att leverantörerna inte blir utan besked."}
+          </p>
+        </div>
+        <label className="mt-5 flex flex-col gap-1 text-sm">
+          <span className="font-medium" style={{ color: colors.plum }}>
+            Skriv RADERA för att bekräfta
+          </span>
+          <input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            autoComplete="off"
+            autoCapitalize="characters"
+            className="rounded-xl px-3 py-2 text-sm"
+            style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}
+          />
+        </label>
+        {error && (
+          <p className="mt-3 text-sm" style={{ color: colors.coralDeep }} role="alert">
+            {error}
+          </p>
+        )}
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row-reverse">
+          <button
+            onClick={submit}
+            disabled={!ready || busy}
+            className="rounded-full px-5 py-3 text-sm font-semibold"
+            style={{ backgroundColor: colors.coralDeep, color: colors.white, opacity: !ready || busy ? 0.45 : 1 }}
+          >
+            {busy ? "Raderar..." : "Radera mitt konto"}
+          </button>
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="rounded-full px-5 py-3 text-sm font-semibold"
+            style={{ border: `1.5px solid ${colors.coral}`, color: colors.coral, backgroundColor: "transparent" }}
+          >
+            Avbryt
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MyAccountView({ profile, email, onSaveProfile, onChangePassword, onBack, isVendor, customerMode, onSwitchMode, onDeleteAccount }) {
+  const [deleting, setDeleting] = useState(false);
   const [fullName, setFullName] = useState(profile?.full_name || "");
   const [phone, setPhone] = useState(profile?.phone || "");
   const [profileSaving, setProfileSaving] = useState(false);
@@ -4296,6 +4396,24 @@ function MyAccountView({ profile, email, onSaveProfile, onChangePassword, onBack
           )}
         </div>
       )}
+
+      <div className="mt-10 border-t pt-6" style={{ borderColor: colors.beige }}>
+        <h2 className="font-semibold" style={{ color: colors.plum }}>
+          Radera konto
+        </h2>
+        <p className="mt-1 text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
+          Vill du inte längre ha ett konto hos Planifest kan du radera det och all information som hör till det.
+        </p>
+        <button
+          onClick={() => setDeleting(true)}
+          className="mt-3 rounded-full px-5 py-2.5 text-sm font-semibold"
+          style={{ border: `1.5px solid ${colors.coralDeep}`, color: colors.coralDeep, backgroundColor: "transparent" }}
+        >
+          Radera mitt konto
+        </button>
+      </div>
+
+      {deleting && <DeleteAccountDialog isVendor={isVendor} onCancel={() => setDeleting(false)} onConfirm={onDeleteAccount} />}
     </div>
   );
 }
@@ -8799,6 +8917,35 @@ export default function App() {
     return null;
   };
 
+  // Deleting the account runs on the server (delete-account function): it refuses while bookings are live, then removes everything.
+  const deleteMyAccount = async () => {
+    if (!session?.access_token) return "Du är inte inloggad.";
+    let res;
+    try {
+      res = await fetch(`${SUPABASE_URL}/functions/v1/delete-account`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ confirm: true }),
+      });
+    } catch (e) {
+      return "Nådde inte servern. Kontrollera din uppkoppling och försök igen.";
+    }
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 404) return "Radering av konto är inte tillgängligt just nu. Skriv till info@planifest.se så hjälper vi dig.";
+    if (!res.ok || !data.ok) return data.error || "Kontot kunde inte raderas. Försök igen eller skriv till info@planifest.se.";
+    setSessionPersist(null);
+    clearLocalUserState();
+    setCustomerMode(false);
+    try {
+      localStorage.removeItem("planifest-mode");
+    } catch (e) {
+      // fine
+    }
+    showToast("Ditt konto är raderat. Tack för den tid du var med oss.");
+    goHome();
+    return null;
+  };
+
   const signOut = async () => {
     if (session?.access_token) {
       await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
@@ -10445,6 +10592,7 @@ export default function App() {
           isVendor={!!submittedVendor}
           customerMode={customerMode}
           onSwitchMode={switchMode}
+          onDeleteAccount={deleteMyAccount}
         />
       )}
 
