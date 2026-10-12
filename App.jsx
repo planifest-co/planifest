@@ -3617,6 +3617,17 @@ function TurnstileBox({ onToken, resetKey = 0 }) {
   return <div ref={ref} className="mt-3 flex min-h-[65px] justify-center" />;
 }
 
+// Supabase's own messages are in English; the visitor should get something she can act on.
+function friendlyAuthError(message) {
+  const m = String(message || "").toLowerCase();
+  if (m.includes("invalid login")) return "Fel e-post eller lösenord. Kontrollera och försök igen, eller välj \"Glömt lösenord?\".";
+  if (m.includes("not confirmed")) return "Din e-post är inte bekräftad än. Klicka på länken i mejlet vi skickade, och logga sedan in.";
+  if (m.includes("captcha")) return "Spamskyddet kunde inte bekräfta dig. Vänta tills rutan ovan visar en bock och försök igen.";
+  if (m.includes("rate limit") || m.includes("too many") || m.includes("over_request")) return "För många försök. Vänta några minuter och försök igen.";
+  if (m.includes("already registered") || m.includes("already been registered")) return "Det finns redan ett konto med den e-postadressen. Logga in istället.";
+  return message || "Något gick fel, försök igen.";
+}
+
 function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onForgotPassword }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -3629,6 +3640,15 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
   const [website, setWebsite] = useState(""); // honeypot: a real person never sees or fills this
   const [captchaToken, setCaptchaToken] = useState("");
   const [captchaKey, setCaptchaKey] = useState(0);
+  const [captchaSlow, setCaptchaSlow] = useState(false);
+
+  // If the spam check hasn't finished after a while (slow phone, blocked script), say so instead of leaving her guessing.
+  useEffect(() => {
+    setCaptchaSlow(false);
+    if (!open || captchaToken || !TURNSTILE_SITE_KEY) return undefined;
+    const id = setTimeout(() => setCaptchaSlow(true), 10000);
+    return () => clearTimeout(id);
+  }, [open, captchaToken, captchaKey]);
 
   useEffect(() => {
     // a new form needs a new check: tokens are single-use and belong to the widget that issued them
@@ -3710,7 +3730,7 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
     setLoading(false);
     freshCaptcha();
     if (err) {
-      setError(err.message || "Något gick fel, försök igen.");
+      setError(friendlyAuthError(err.message));
       return;
     }
     if (mode === "signup") setSignedUp(true);
@@ -3809,6 +3829,13 @@ function AuthModal({ open, mode, onModeChange, onClose, onSignIn, onSignUp, onFo
               )}
             </div>
             <TurnstileBox onToken={setCaptchaToken} resetKey={captchaKey} />
+            {TURNSTILE_SITE_KEY && !captchaToken && (
+              <p className="mt-1 text-center text-xs" style={{ color: colors.plumSoft }}>
+                {captchaSlow
+                  ? "Spamskyddet tar lång tid. Ladda om sidan, eller prova en annan webbläsare om rutan inte dyker upp."
+                  : "Vänta tills spamskyddet ovan är klart innan du trycker på knappen."}
+              </p>
+            )}
             {mode === "signin" && (
               <button
                 onClick={() => {
@@ -8343,7 +8370,7 @@ function LegalPageView({ title, sections, onBack }) {
 // ---------------------------------------------------------------------------
 function CookieConsentBanner({ onAcceptAll, onNecessaryOnly, onOpenPolicy }) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 p-4 sm:p-6">
+    <div className="fixed inset-x-0 bottom-0 z-40 p-4 sm:p-6">
       <div className="mx-auto max-w-2xl rounded-3xl p-5 shadow-2xl sm:p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
         <p className="text-sm leading-relaxed" style={{ color: colors.plum }}>
           Vi använder cookies för att webbplatsen ska fungera och, om du tillåter det, för att förstå hur den används. Läs mer i vår{" "}
