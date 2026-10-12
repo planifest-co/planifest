@@ -1115,6 +1115,29 @@ const PROVIDERS = [
 ];
 
 const formatKr = (n) => Math.round(n).toLocaleString("sv-SE") + " kr";
+
+// --- Time slots: a vendor is only busy during the hours already booked, not the whole day -----------------------------
+// Missing times count as the whole day; an end at or before the start means the event runs past midnight.
+const toMinutes = (t) => {
+  const [h, m] = String(t || "").split(":");
+  return (Number(h) || 0) * 60 + (Number(m) || 0);
+};
+function slotBounds(start, end) {
+  if (!start || !end) return [0, 1440];
+  const s = toMinutes(start);
+  let e = toMinutes(end);
+  if (e <= s) e += 1440;
+  return [s, e];
+}
+function slotsOverlap(a, b) {
+  const [as, ae] = slotBounds(a.start, a.end);
+  const [bs, be] = slotBounds(b.start, b.end);
+  return as < be && bs < ae;
+}
+const busyOnDate = (provider, date) => (provider.busySlots || []).filter((sl) => sl.date === date);
+const isBusyAt = (provider, party) =>
+  !!party?.date && busyOnDate(provider, party.date).some((sl) => slotsOverlap(sl, { start: party.startTime, end: party.endTime }));
+const hhmm = (t) => String(t || "").slice(0, 5);
 const formatAppliedAt = (iso) => {
   if (!iso) return "";
   const d = new Date(iso);
@@ -1128,7 +1151,7 @@ function formatDistance(km) {
 // Customer visibility (Fas 3) — the single gate that decides what a customer
 // can ever see. Pending/rejected applications never reach this list.
 // ---------------------------------------------------------------------------
-function mapVendorToProviders(vendor, bookings) {
+function mapVendorToProviders(vendor, bookings, busyByVendor = {}) {
   const services = vendor.profile.services || [];
   const images = vendor.profile.images.length > 0 ? vendor.profile.images : [`https://picsum.photos/seed/${vendor.id}/600/420`];
   const myListingIds = vendor.categories.map((c) => `${vendor.id}-${c}`);
@@ -1193,6 +1216,7 @@ function mapVendorToProviders(vendor, bookings) {
       available: true,
       closedDates,
       bookedDates,
+      busySlots: busyByVendor[vendor.id] || [],
       blurb: vendor.profile.description || "",
       service: serviceText,
       reviewsList: [],
@@ -1216,7 +1240,7 @@ function applyCustomerReviews(provider, customerReviews) {
   return { ...provider, reviewsList, reviews: mine.length, rating: avg };
 }
 
-function getCustomerVisibleProviders(vendorApplications, customerReviews, bookings) {
+function getCustomerVisibleProviders(vendorApplications, customerReviews, bookings, busyByVendor = {}) {
   const mockListings = (SHOW_DEMO_DATA ? PROVIDERS : []).map((p) => {
     const { closedDates, bookedDates } = getMockAvailability(p.seed);
     return {
@@ -1228,7 +1252,7 @@ function getCustomerVisibleProviders(vendorApplications, customerReviews, bookin
       distanceKm: getMockDistance(p.seed, "goteborg"),
     };
   });
-  const approvedListings = vendorApplications.filter((v) => v.status === "approved").flatMap((v) => mapVendorToProviders(v, bookings));
+  const approvedListings = vendorApplications.filter((v) => v.status === "approved").flatMap((v) => mapVendorToProviders(v, bookings, busyByVendor));
   return [...mockListings, ...approvedListings].map((p) => applyCustomerReviews(p, customerReviews));
 }
 
@@ -1634,8 +1658,13 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
       ? `från ${formatKr(provider.fromPrice)}`
       : "Pris på förfrågan"
     : `${formatKr(provider.pricing.amount)}${getUnitLabel(provider.pricing)}`;
+  const busy = !!party?.date && (isBusyAt(provider, party) || !!provider.closedDates?.includes(party.date));
   const handleAction = (e) => {
     e.stopPropagation();
+    if (busy) {
+      onView(provider.id); // can't be added for a taken time; the profile explains why
+      return;
+    }
     if (provider.requestOnly) {
       onView(provider.id); // booked through a request and a quote, never added straight to the cart
       return;
@@ -1663,6 +1692,11 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
           className="h-32 w-full object-cover sm:h-36"
         />
         <HeartButton vendorId={provider.vendorDbId} className="absolute right-2 top-2 shadow-sm" />
+        {busy && (
+          <span className="absolute bottom-2 left-2 rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ backgroundColor: colors.white, color: colors.coralDeep }}>
+            Upptagen din tid
+          </span>
+        )}
       </div>
       <div className="flex flex-1 flex-col px-2 pb-1.5 pt-3">
         {cat && (
@@ -1691,11 +1725,12 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
             onClick={handleAction}
             className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full"
             style={{
-              backgroundColor: added ? colors.greenSoft : colors.coral,
-              color: added ? colors.green : colors.cream,
-              boxShadow: added ? "none" : `0 3px 0 ${colors.coralDeep}`,
+              backgroundColor: busy ? colors.beige : added ? colors.greenSoft : colors.coral,
+              color: busy ? colors.plumSoft : added ? colors.green : colors.cream,
+              boxShadow: added || busy ? "none" : `0 3px 0 ${colors.coralDeep}`,
+              opacity: busy ? 0.7 : 1,
             }}
-            aria-label={provider.requestOnly ? "Skicka förfrågan" : swapMode ? "Välj denna" : inCart ? "Ta bort från Min fest" : "Lägg till i Min fest"}
+            aria-label={busy ? "Upptagen din tid, visa profilen" : provider.requestOnly ? "Skicka förfrågan" : swapMode ? "Välj denna" : inCart ? "Ta bort från Min fest" : "Lägg till i Min fest"}
           >
             {swapMode || inCart ? <Check size={16} /> : <Plus size={16} />}
           </button>
@@ -2262,6 +2297,10 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
     if (provider.bookedDates?.includes(ds)) return "booked";
     return "open";
   };
+  const closedNow = !!party.date && !!provider.closedDates?.includes(party.date);
+  const busyNow = !closedNow && isBusyAt(provider, party);
+  const unavailableNow = closedNow || busyNow;
+  const daySlots = party.date ? busyOnDate(provider, party.date) : [];
   return (
     <div className="mx-auto max-w-3xl px-6 pb-40 pt-8 sm:px-10">
       <div className="mb-5 flex items-center justify-between">
@@ -2437,8 +2476,8 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
             <div
               className="mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
               style={{
-                backgroundColor: party.date && provider.closedDates?.includes(party.date) ? "#F3E8DB" : colors.greenSoft,
-                color: party.date && provider.closedDates?.includes(party.date) ? colors.plumSoft : colors.green,
+                backgroundColor: unavailableNow ? "#F3E8DB" : colors.greenSoft,
+                color: unavailableNow ? colors.plumSoft : colors.green,
               }}
             >
               <span
@@ -2446,15 +2485,22 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                 style={{
                   width: 6,
                   height: 6,
-                  backgroundColor: party.date && provider.closedDates?.includes(party.date) ? colors.plumSoft : colors.green,
+                  backgroundColor: unavailableNow ? colors.plumSoft : colors.green,
                 }}
               />
               {party.date
-                ? provider.closedDates?.includes(party.date)
+                ? closedNow
                   ? `Stängd ${party.date}`
+                  : busyNow
+                  ? `Upptagen ${party.date}, ${party.startTime}–${party.endTime}`
                   : `Tillgänglig ${party.date}, ${party.startTime}–${party.endTime}`
                 : "Se hela kalendern ovan för tillgänglighet"}
             </div>
+            {daySlots.length > 0 && (
+              <p className="mt-1.5 text-xs" style={{ color: colors.plumSoft }}>
+                Redan bokad den dagen: {daySlots.map((sl) => `${hhmm(sl.start)}–${hhmm(sl.end)}`).join(", ")}.{busyNow ? " Välj en annan tid eller ett annat datum." : ""}
+              </p>
+            )}
 
             {party.date && (
               <div className="mt-3 space-y-2 rounded-xl p-3" style={{ backgroundColor: colors.cream }}>
@@ -2515,11 +2561,12 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
               </button>
             ) : (
               <button
-                onClick={() => onAdd(provider.id, pendingAddons)}
+                onClick={() => !unavailableNow && onAdd(provider.id, pendingAddons)}
+                disabled={unavailableNow}
                 className="mt-4 flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold"
-                style={{ backgroundColor: colors.coral, color: colors.white }}
+                style={{ backgroundColor: unavailableNow ? colors.beige : colors.coral, color: unavailableNow ? colors.plumSoft : colors.white, cursor: unavailableNow ? "not-allowed" : "pointer" }}
               >
-                <Plus size={16} /> Lägg till i min fest
+                {unavailableNow ? "Inte tillgänglig din tid" : (<><Plus size={16} /> Lägg till i min fest</>)}
               </button>
             )}
             {provider.request && provider.vendorDbId && (
@@ -7132,11 +7179,12 @@ function RequestFormModal({ provider, party, onUpdateParty, onSend, onClose }) {
   const [error, setError] = useState("");
   const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
   const closed = !!party.date && provider.closedDates?.includes(party.date);
+  const busy = !closed && isBusyAt(provider, party);
   const setAnswer = (id, v) => setAnswers((a) => ({ ...a, [id]: v }));
   const toggleMulti = (id, label) => setAnswers((a) => ({ ...a, [id]: (a[id] || []).includes(label) ? a[id].filter((x) => x !== label) : [...(a[id] || []), label] }));
   const isEmpty = (v) => v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0);
   const missing = fields.some((f) => f.required && isEmpty(answers[f.id]));
-  const canSend = !!party.date && !closed && !missing && !sending;
+  const canSend = !!party.date && !closed && !busy && !missing && !sending;
 
   const base = provider.pricing.amount > 0 ? getBaseAmount(provider, party) : 0;
   const estimate = base + priceFromAnswers(fields, (f) => answers[f.id]);
@@ -7216,6 +7264,11 @@ function RequestFormModal({ provider, party, onUpdateParty, onSend, onClose }) {
           {closed && (
             <p className="mt-1 text-xs" style={{ color: colors.coralDeep }}>
               Leverantören har stängt det här datumet. Välj ett annat.
+            </p>
+          )}
+          {busy && (
+            <p className="mt-1 text-xs" style={{ color: colors.coralDeep }}>
+              Leverantören är redan bokad {busyOnDate(provider, party.date).map((sl) => `${hhmm(sl.start)}–${hhmm(sl.end)}`).join(", ")} det datumet. Välj en annan tid eller ett annat datum.
             </p>
           )}
 
@@ -8431,6 +8484,8 @@ export default function App() {
   const [guestSubmitting, setGuestSubmitting] = useState(false);
   const [guestPendingEmail, setGuestPendingEmail] = useState("");
   const [guestBooking, setGuestBooking] = useState({ loading: false, error: "", data: null, justVerified: false, token: "" });
+  const [busyByVendor, setBusyByVendor] = useState({});
+  const [busyRefresh, setBusyRefresh] = useState(0);
   const [pollTick, setPollTick] = useState(0); // bumps every 20 s while a vendor view is open, to refresh requests and conversations
   useEffect(() => {
     if (!["vendorDashboard", "vendorBookings", "vendorInbox"].includes(view)) return;
@@ -9096,8 +9151,37 @@ export default function App() {
     setMobileMenuOpen(false);
   };
 
+  // Which hours each vendor is already booked (confirmed bookings only; no names or details), so customers
+  // can't pick a taken time. If the database function is missing the list stays empty and nothing breaks.
+  const approvedVendorIdsKey = vendorApplications
+    .filter((v) => v.status === "approved" && v.id && !String(v.id).startsWith("VND-"))
+    .map((v) => v.id)
+    .sort()
+    .join(",");
+  useEffect(() => {
+    if (!approvedVendorIdsKey) {
+      setBusyByVendor({});
+      return;
+    }
+    let cancelled = false;
+    supabaseRestRequest("/rpc/vendor_busy_slots", session?.access_token, {
+      method: "POST",
+      body: JSON.stringify({ p_vendor_ids: approvedVendorIdsKey.split(",") }),
+    }).then(({ data, error }) => {
+      if (cancelled || error || !Array.isArray(data)) return;
+      const map = {};
+      data.forEach((r) => {
+        (map[r.vendor_id] = map[r.vendor_id] || []).push({ date: r.date, start: r.start_time, end: r.end_time });
+      });
+      setBusyByVendor(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [approvedVendorIdsKey, session?.access_token, busyRefresh]);
+
   const customerProviders = useMemo(() => {
-    const base = getCustomerVisibleProviders(vendorApplications, customerReviews, bookings);
+    const base = getCustomerVisibleProviders(vendorApplications, customerReviews, bookings, busyByVendor);
     const quoteListings = acceptedQuotes.map((q) => ({
       id: q.id,
       category: q.category,
@@ -9122,7 +9206,7 @@ export default function App() {
       addons: [],
     }));
     return [...base, ...quoteListings];
-  }, [vendorApplications, customerReviews, bookings, acceptedQuotes]);
+  }, [vendorApplications, customerReviews, bookings, acceptedQuotes, busyByVendor]);
   const vendorBookingItems = useMemo(() => getVendorBookingItems(submittedVendor, bookings), [submittedVendor, bookings]);
 
   const cart = cartItems
@@ -9137,6 +9221,9 @@ export default function App() {
   const sortWithinCategory = (list) => {
     const sorted = [...list];
     sorted.sort((a, b) => {
+      const busyA = isBusyAt(a, party) || !!(party.date && a.closedDates?.includes(party.date));
+      const busyB = isBusyAt(b, party) || !!(party.date && b.closedDates?.includes(party.date));
+      if (busyA !== busyB) return Number(busyA) - Number(busyB); // vendors taken at the chosen time go last
       const availDiff = Number(b.available) - Number(a.available); // available always first
       if (availDiff !== 0) return availDiff;
       if (sortBy === "rating") return b.rating - a.rating;
@@ -9261,7 +9348,12 @@ export default function App() {
     if (itemsError || !itemRows) {
       // Don't pretend it worked: take the empty booking back and say so.
       await supabaseRestRequest(`/bookings?id=eq.${bookingRow.id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ cancelled: true }) });
-      showToast("Bokningen kunde inte slutföras" + (itemsError?.message ? `: ${itemsError.message}` : "") + ". Försök igen.");
+      showToast(
+        String(itemsError?.message || "").includes("vendor_busy")
+          ? "En av leverantörerna hann bli bokad den tiden. Välj en annan tid eller en annan leverantör."
+          : "Bokningen kunde inte slutföras" + (itemsError?.message ? `: ${itemsError.message}` : "") + ". Försök igen."
+      );
+      setBusyRefresh((n) => n + 1);
       return;
     }
     const sourceItems = itemRows;
@@ -9289,6 +9381,7 @@ export default function App() {
     setBookings((b) => [newBooking, ...b]);
     setLastBooking(newBooking);
     setCartItems([]);
+    setBusyRefresh((n) => n + 1);
     setView("confirmation");
   };
 
@@ -10129,7 +10222,21 @@ export default function App() {
     );
     showToast(status === "confirmed" ? "Bokning bekräftad ✓" : "Bokning nekad");
     if (session?.access_token) {
-      await supabaseRestRequest(`/booking_items?id=eq.${itemId}`, session.access_token, { method: "PATCH", body: JSON.stringify({ status } ) });
+      const { error } = await supabaseRestRequest(`/booking_items?id=eq.${itemId}`, session.access_token, { method: "PATCH", body: JSON.stringify({ status } ) });
+      if (error) {
+        // The database refused (for example two requests for the same time): put the request back as it was.
+        setBookings((bs) =>
+          bs.map((b) =>
+            b.bookingNumber === bookingNumber ? { ...b, items: b.items.map((i) => (i.id === itemId ? { ...i, status: "pending" } : i)) } : b
+          )
+        );
+        showToast(
+          String(error.message || "").includes("vendor_busy")
+            ? "Du har redan en bekräftad bokning den tiden. Neka den här förfrågan eller avboka den andra först."
+            : "Det gick inte att spara svaret. Försök igen."
+        );
+        setPollTick((t) => t + 1);
+      }
     }
   };
 
