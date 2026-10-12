@@ -8109,7 +8109,7 @@ function Footer({ onGoHome, onBrowse, onHowItWorks, onBecomeVendor, onOpenTerms,
               börjar med bra idéer, och att rätt verktyg gör hela skillnaden.
             </p>
             <a
-              href="https://www.instagram.com/planifest/"
+              href="https://www.instagram.com/planifest.se/"
               target="_blank"
               rel="noopener noreferrer"
               className="mt-4 flex h-8 w-8 items-center justify-center rounded-full"
