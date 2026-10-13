@@ -5161,6 +5161,7 @@ function VendorProfileEditorView({
 }) {
   const [imageUrl, setImageUrl] = useState("");
   const [uploading, setUploading] = useState(0);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   if (!vendor) return null;
   const { percent } = getVendorCompleteness(vendor);
 
@@ -5202,29 +5203,34 @@ function VendorProfileEditorView({
         </span>
       </div>
 
+      <div className="mb-6 rounded-2xl px-4 py-3 text-sm" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+        <p className="font-semibold">Det här behöver ni fylla i:</p>
+        <p className="mt-1">1. Om er. 2. Bilder. 3. Vad ni erbjuder och vad det kostar. Allt annat längst ner är valfritt, och ni kan ändra senare.</p>
+      </div>
+
       <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
         <h2 className="mb-4" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
-          Grunduppgifter
+          Om er
         </h2>
         <div className="space-y-4">
           <VendorTextField label="Företagsnamn" value={vendor.companyName} onChange={(v) => onField("companyName", v)} />
           <div>
             <VendorTextField
-              label="Tagline"
+              label="En mening om er"
               value={vendor.profile.tagline}
               onChange={(v) => onProfileField("tagline", v)}
-              placeholder="En kort mening som beskriver er"
+              placeholder="T.ex. Mysig lokal i centrala Göteborg"
             />
             {!vendor.profile.tagline?.trim() && (
               <p className="mt-1 text-xs" style={{ color: colors.plumSoft }}>
-                Rekommenderas – visas högst upp på er profil.
+                Visas högst upp på er profil.
               </p>
             )}
           </div>
           <div>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium" style={{ color: colors.plum }}>
-                Om företaget
+                Berätta mer om er
               </span>
               <textarea
                 value={vendor.profile.description}
@@ -5333,39 +5339,7 @@ function VendorProfileEditorView({
           <input type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} disabled={uploading > 0} />
         </label>
 
-        <p className="mb-1 mt-4 text-xs font-medium" style={{ color: colors.plum }}>
-          Eller klistra in en bild-URL
-        </p>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
-            placeholder="https://..."
-            className="flex-1 rounded-xl px-3 py-2 text-sm"
-            style={fieldInputStyle}
-          />
-          <button
-            onClick={addImage}
-            className="rounded-full px-4 py-2 text-sm font-semibold"
-            style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}
-          >
-            Lägg till
-          </button>
-        </div>
-        <button onClick={addSampleImage} className="mt-2 text-xs font-medium underline" style={{ color: colors.lilacDeep }}>
-          + Lägg till exempelbild
-        </button>
       </section>
-
-      {vendor.categories.map((cat) => (
-        <RequestFormEditor
-          key={cat}
-          categoryId={cat}
-          form={vendor.requestForms?.[cat]}
-          hasPrice={vendor.profile.services.some((sv) => (!sv.category || sv.category === cat) && Number(sv.price) > 0)}
-          onChange={(cfg) => onRequestForm(cat, cfg)}
-        />
-      ))}
 
       {vendor.categories.length > 0 && (() => {
         const quoteMode = vendor.categories.every((c) => vendor.requestForms?.[c]?.direct === false || !vendor.profile.services.some((sv) => (!sv.category || sv.category === c) && Number(sv.price) > 0));
@@ -5413,7 +5387,7 @@ function VendorProfileEditorView({
           Tjänster & priser
         </h2>
         <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
-          Lägg till en post för varje tjänst eller paket ni erbjuder, och märk den med vilken kategori den hör till.
+          Lägg till det ni säljer, ett paket eller en tjänst i taget. Skriv namn, vad som ingår och priset.
         </p>
         {vendor.profile.services.length === 0 && (
           <p className="mb-3 text-xs" style={{ color: colors.coralDeep }}>
@@ -5444,20 +5418,22 @@ function VendorProfileEditorView({
                 style={fieldInputStyle}
               />
               <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {vendor.categories.length > 1 && (
                 <select
                   value={s.category || ""}
                   onChange={(e) => onUpdateService(s.id, "category", e.target.value)}
                   className="col-span-2 rounded-lg px-2 py-2 text-sm sm:col-span-1"
                   style={fieldInputStyle}
-                  disabled={vendor.categories.length === 0}
+                  aria-label="Vilken kategori hör tjänsten till?"
                 >
-                  <option value="">{vendor.categories.length === 0 ? "Välj kategori ovan först" : "Välj kategori"}</option>
+                  <option value="">Välj kategori</option>
                   {vendor.categories.map((catId) => (
                     <option key={catId} value={catId}>
                       {catMap[catId]?.label}
                     </option>
                   ))}
                 </select>
+                )}
                 <select
                   value={s.priceType}
                   onChange={(e) => onUpdateService(s.id, "priceType", e.target.value)}
@@ -5486,14 +5462,14 @@ function VendorProfileEditorView({
                 <input
                   value={s.priceNote}
                   onChange={(e) => onUpdateService(s.id, "priceNote", e.target.value)}
-                  placeholder={s.priceType === "quote" ? "T.ex. \"från 1 500 kr, beroende på omfattning\"" : "Prisnotering (valfritt)"}
+                  placeholder={s.priceType === "quote" ? "T.ex. \"från 1 500 kr, beroende på omfattning\"" : "Extra info om priset (valfritt)"}
                   className="rounded-lg px-3 py-2 text-sm"
                   style={fieldInputStyle}
                 />
               </div>
-              {!s.category && vendor.categories.length > 0 && (
+              {!s.category && vendor.categories.length > 1 && (
                 <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
-                  Välj vilken kategori denna tjänst hör till, annars kan den hamna fel bland era listningar.
+                  Välj vilken kategori tjänsten hör till.
                 </p>
               )}
             </div>
@@ -5509,9 +5485,12 @@ function VendorProfileEditorView({
       </section>
 
       <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
-        <h2 className="mb-4" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
-          Tillägg
+        <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
+          Tillägg (valfritt)
         </h2>
+        <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
+          Extra saker kunden kan lägga till mot en kostnad, till exempel rökmaskin eller extra timme. Hoppa över om det inte passar.
+        </p>
         <div className="space-y-3">
           {vendor.profile.addons.map((a) => (
             <div key={a.id} className="flex items-center gap-2">
@@ -5544,6 +5523,39 @@ function VendorProfileEditorView({
           <Plus size={14} /> Lägg till tillägg
         </button>
       </section>
+
+      {vendor.categories.length > 0 && (
+        <div className="mb-6">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-expanded={showAdvanced}
+            className="flex w-full items-center justify-between rounded-2xl px-5 py-4 text-left text-sm font-semibold"
+            style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}`, color: colors.plum }}
+          >
+            <span>
+              Egna frågor till kunden (valfritt)
+              <span className="mt-0.5 block text-xs font-normal" style={{ color: colors.plumSoft }}>
+                Ni behöver inte göra något här. Kunder får annars frågan "Berätta vad du behöver".
+              </span>
+            </span>
+            <span aria-hidden="true">{showAdvanced ? "−" : "+"}</span>
+          </button>
+          {showAdvanced && (
+            <div className="mt-4">
+              {vendor.categories.map((cat) => (
+                  <RequestFormEditor
+                    key={cat}
+                    categoryId={cat}
+                    form={vendor.requestForms?.[cat]}
+                    hasPrice={vendor.profile.services.some((sv) => (!sv.category || sv.category === cat) && Number(sv.price) > 0)}
+                    onChange={(cfg) => onRequestForm(cat, cfg)}
+                  />
+                ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <button
@@ -7541,32 +7553,19 @@ function RequestFormEditor({ categoryId, form, hasPrice, onChange }) {
   return (
     <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
       <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
-        Förfrågningsformulär: {catMap[categoryId]?.label}
+        Frågor till kunden: {catMap[categoryId]?.label}
       </h2>
       <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
-        Det här är frågorna kunder svarar på när de skickar en förfrågan till er. Lägg gärna till tillägg med pris, så får kunden ett riktpris och er offert fylls i automatiskt.
+        Det här är frågorna kunden svarar på när de skickar en förfrågan till er. Ni kan lägga till egna frågor och ändra dem, eller använda våra färdiga.
       </p>
-
-      <div className="mb-4 rounded-2xl p-4 text-sm" style={{ backgroundColor: colors.cream, color: colors.plum }}>
-        {hasPrice ? (
-          <label className="flex items-start gap-3">
-            <input type="checkbox" checked={direct} onChange={(e) => emit({ direct: e.target.checked })} className="mt-1" />
-            <span>
-              Kunder får också <strong>boka direkt</strong> till era fasta priser, utan att skicka förfrågan först. Avmarkera om varje uppdrag kräver att ni pratar först.
-            </span>
-          </label>
-        ) : (
-          <span>Ni har inga fasta priser inlagda för den här kategorin, så kunder skickar alltid en förfrågan först.</span>
-        )}
-      </div>
 
       {fields.length === 0 && (
         <div className="mb-4 rounded-2xl p-4 text-sm" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
           <p>
-            Just nu ser kunder bara en fråga: <strong>"Berätta vad du behöver"</strong>. Starta från en mall för att få frågor som passar er bransch.
+            Just nu får kunden en enda fråga: <strong>"Berätta vad du behöver"</strong>. Det räcker bra. Vill ni ha färdiga frågor som passar er bransch kan ni använda dem.
           </p>
           <button onClick={useTemplate} className="mt-3 rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
-            Starta från mall
+            Använd färdiga frågor
           </button>
         </div>
       )}
@@ -7578,7 +7577,7 @@ function RequestFormEditor({ categoryId, form, hasPrice, onChange }) {
               <input
                 value={f.label}
                 onChange={(e) => setField(i, { label: e.target.value })}
-                placeholder="Fråga, till exempel: Storlek"
+                placeholder="Fråga till kunden, t.ex. Hur många gäster?"
                 maxLength={80}
                 aria-label="Fråga"
                 className="min-w-[140px] flex-1 rounded-xl px-3 py-2 text-sm"
@@ -7604,7 +7603,7 @@ function RequestFormEditor({ categoryId, form, hasPrice, onChange }) {
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-3 text-xs" style={{ color: colors.plumSoft }}>
               <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={!!f.required} onChange={(e) => setField(i, { required: e.target.checked })} /> Obligatorisk
+                <input type="checkbox" checked={!!f.required} onChange={(e) => setField(i, { required: e.target.checked })} /> Måste besvaras
               </label>
               <button onClick={() => move(i, -1)} disabled={i === 0} aria-label="Flytta upp" className="underline disabled:opacity-30">
                 ↑ Flytta upp
@@ -7634,7 +7633,7 @@ function RequestFormEditor({ categoryId, form, hasPrice, onChange }) {
                       min={0}
                       value={o.price ?? ""}
                       onChange={(e) => setOption(i, k, { price: e.target.value === "" ? undefined : e.target.value })}
-                      placeholder="+ kr"
+                      placeholder="Extra kr"
                       aria-label="Pris i kronor"
                       className="w-24 rounded-xl px-3 py-1.5 text-sm"
                       style={fieldStyle}
@@ -7662,11 +7661,11 @@ function RequestFormEditor({ categoryId, form, hasPrice, onChange }) {
           ))}
         </select>
         <button onClick={addField} className="rounded-full px-4 py-2 text-sm font-semibold" style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}>
-          Lägg till fråga
+          Lägg till egen fråga
         </button>
         {fields.length > 0 && (
           <button onClick={useTemplate} className="text-xs font-medium underline" style={{ color: colors.plumSoft }}>
-            Börja om från mall
+            Återställ till färdiga frågor
           </button>
         )}
       </div>
