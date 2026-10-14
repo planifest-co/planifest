@@ -1374,41 +1374,10 @@ function LogoBalloons({ size = 40 }) {
   );
 }
 
-// New Planifest wordmark: lowercase "planifest" where the dot of the i is a
-// hallon balloon. Sizes are ratios of fontSize so it scales everywhere.
-function Wordmark({ fontSize = 20, color = colors.plum }) {
+function Wordmark({ fontSize = 20 }) {
   return (
-    <span
-      role="img"
-      aria-label="Planifest"
-      style={{
-        fontFamily: serif,
-        fontWeight: 600,
-        fontSize,
-        lineHeight: 1,
-        letterSpacing: "-0.02em",
-        color,
-        display: "inline-flex",
-        alignItems: "baseline",
-        fontVariationSettings: "'WONK' 0, 'SOFT' 0",
-      }}
-    >
-      <span aria-hidden="true">plan</span>
-      <span aria-hidden="true" style={{ position: "relative", display: "inline-block", marginRight: fontSize * 0.027 }}>
-        {"\u0131"}
-        <svg
-          viewBox="0 0 60 74"
-          width={fontSize * 0.27}
-          height={fontSize * 0.333}
-          aria-hidden="true"
-          style={{ position: "absolute", left: "50%", bottom: fontSize * 0.6, transform: "translateX(-62%) rotate(-6deg)" }}
-        >
-          <path d="M30 2 C46 2 57 15 57 32 C57 50 43 64 30 66 C17 64 3 50 3 32 C3 15 14 2 30 2 Z" fill={colors.coral} />
-          <path d="M26 65 L34 65 L30 71 Z" fill={colors.coral} />
-          <ellipse cx="19" cy="21" rx="5" ry="10" fill="#FFFFFF" opacity="0.35" transform="rotate(-20 19 21)" />
-        </svg>
-      </span>
-      <span aria-hidden="true">fest</span>
+    <span style={{ fontFamily: serif, fontWeight: 700, fontSize, letterSpacing: "-0.01em", color: colors.plum }}>
+      Planifest
     </span>
   );
 }
@@ -1438,8 +1407,9 @@ function EdgeBalloons() {
 function Logo({ onClick, size = "normal" }) {
   const large = size === "large";
   return (
-    <button onClick={onClick} aria-label="Planifest – till startsidan" className="flex items-center" style={{ background: "none", border: "none", cursor: "pointer", paddingTop: 6 }}>
-      <Wordmark fontSize={large ? 46 : 32} />
+    <button onClick={onClick} className="flex items-center gap-2" style={{ background: "none", border: "none", cursor: "pointer" }}>
+      <LogoBalloons size={large ? 46 : 30} />
+      <Wordmark fontSize={large ? 40 : 28} />
     </button>
   );
 }
@@ -1802,7 +1772,7 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
           <div className="mb-6 flex items-center justify-center gap-4">
             <span className="w-5 sm:w-9" style={{ height: 2, borderRadius: 2, backgroundColor: colors.korall }} />
             <p className="text-xs font-bold sm:text-[13px]" style={{ letterSpacing: "0.24em", paddingLeft: "0.24em", color: colors.plumSoft }}>
-              PLANERA · BOKA · FIRA
+              PLAN · CREATE · CELEBRATE
             </p>
             <span className="w-5 sm:w-9" style={{ height: 2, borderRadius: 2, backgroundColor: colors.korall }} />
           </div>
@@ -2438,7 +2408,7 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                 Boka även hos {provider.name}
               </h2>
               <p className="mb-3 text-sm" style={{ color: colors.plumSoft }}>
-                Samma leverantör erbjuder mer. Lägg till det i din fest direkt.
+                Samma leverantör erbjuder mer. Öppna för att se allt, eller lägg till direkt.
               </p>
               <div className="space-y-2">
                 {siblings.map((sib) => {
@@ -2451,12 +2421,20 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                   const sibBusy = !!party?.date && (isBusyAt(sib, party) || !!sib.closedDates?.includes(party.date));
                   const sibIn = cartIds.includes(sib.id);
                   return (
-                    <div key={sib.id} className="flex items-center justify-between gap-3 rounded-2xl p-3" style={{ backgroundColor: colors.cream, border: `1px solid ${colors.beige}` }}>
-                      <div className="min-w-0">
+                    <div
+                      key={sib.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onViewOther && onViewOther(sib.id)}
+                      onKeyDown={(e) => e.key === "Enter" && onViewOther && onViewOther(sib.id)}
+                      className="flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-2xl p-3"
+                      style={{ backgroundColor: colors.cream, border: `1px solid ${colors.beige}` }}
+                    >
+                      <div className="min-w-0 flex-1" style={{ flexBasis: 200 }}>
                         <p className="text-sm font-semibold" style={{ color: colors.plum }}>
                           {sibCat?.label || "Tjänst"}
                         </p>
-                        <p className="truncate text-xs" style={{ color: colors.plumSoft }}>
+                        <p className="line-clamp-3 text-xs" style={{ color: colors.plumSoft }}>
                           {sib.service || sib.tagline}
                         </p>
                         <p className="mt-0.5 text-sm font-bold" style={{ color: colors.plum }}>
@@ -2467,24 +2445,33 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                         <span className="flex-shrink-0 text-xs font-semibold" style={{ color: colors.coralDeep }}>
                           Upptagen din tid
                         </span>
-                      ) : sib.requestOnly ? (
-                        <button
-                          type="button"
-                          onClick={() => onViewOther && onViewOther(sib.id)}
-                          className="flex-shrink-0 rounded-full px-4 py-2 text-xs font-semibold"
-                          style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}
-                        >
-                          Visa
-                        </button>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => (sibIn ? onRemove(sib.id) : onAdd(sib.id))}
-                          className="flex-shrink-0 rounded-full px-4 py-2 text-xs font-semibold"
-                          style={sibIn ? { backgroundColor: colors.greenSoft, color: colors.green } : { backgroundColor: colors.coral, color: colors.white }}
-                        >
-                          {sibIn ? "Tillagd ✓" : "Lägg till"}
-                        </button>
+                        <div className="flex flex-shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onViewOther && onViewOther(sib.id);
+                            }}
+                            className="rounded-full px-4 py-2 text-xs font-semibold"
+                            style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}
+                          >
+                            Visa allt
+                          </button>
+                          {!sib.requestOnly && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                sibIn ? onRemove(sib.id) : onAdd(sib.id);
+                              }}
+                              className="rounded-full px-4 py-2 text-xs font-semibold"
+                              style={sibIn ? { backgroundColor: colors.greenSoft, color: colors.green } : { backgroundColor: colors.coral, color: colors.white }}
+                            >
+                              {sibIn ? "Tillagd ✓" : "Lägg till"}
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   );
@@ -2895,9 +2882,14 @@ function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConf
           Bokningsvillkor & avbokningsregler
         </p>
         Att boka skickar en förfrågan till respektive leverantör, som bekräftar eller avböjer inom 24
-        timmar. Betalning sker först när samtliga leverantörer bekräftat. Avbokning senare än 14 dagar
-        innan eventet kan medföra kostnad enligt leverantörens villkor. Fullständiga villkor finns i
-        Planifests allmänna villkor.
+        timmar.{" "}
+        {PAYMENTS_LIVE
+          ? "När leverantören bekräftat betalar du en deposition på 15 %, och resten senast 14 dagar före eventet (bokar du senare betalar du allt direkt). "
+          : "Betalning via Planifest är inte aktiverat än, så ingen betalning sker nu. "}
+        Avbokar du själv mer än 14 dagar före eventet får du tillbaka allt. Därefter minskar
+        återbetalningen: 14–7 dagar före behålls depositionen, 6–1 dagar före 50 % och samma dag 100 %.
+        Avbokar leverantören får du alltid tillbaka allt du betalat. Reglerna är lika för alla
+        leverantörer. Fullständiga villkor finns i Planifests allmänna villkor.
       </div>
 
       {isGuest && (
@@ -3001,7 +2993,9 @@ function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConf
         </button>
       )}
       <p className="mt-2 text-center text-xs" style={{ color: colors.plumSoft }}>
-        Detta skickar en bokningsförfrågan till leverantörerna. Ingen betalning sker i denna prototyp.
+        {PAYMENTS_LIVE
+          ? "Detta skickar en bokningsförfrågan till leverantörerna. Du betalar först när leverantören har bekräftat."
+          : "Detta skickar en bokningsförfrågan till leverantörerna. Ingen betalning sker än."}
       </p>
     </div>
   );
@@ -3110,7 +3104,7 @@ function GuestBookingView({ state, onCancel, onHome, onCreateAccount }) {
           {confirming ? (
             <div className="rounded-2xl p-4" style={{ backgroundColor: colors.cream }}>
               <p className="text-sm" style={{ color: colors.plum }}>
-                Vill du avboka hela bokningen? Avbokning senare än 14 dagar innan eventet kan medföra kostnad enligt leverantörens villkor.
+                Vill du avboka hela bokningen? Mer än 14 dagar före eventet får du tillbaka allt. Därefter gäller Planifests avbokningsregler i de allmänna villkoren, och depositionen behålls.
               </p>
               <div className="mt-3 flex gap-2">
                 <button onClick={() => setConfirming(false)} className="flex-1 rounded-full px-4 py-2.5 text-sm font-medium" style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}>
@@ -8507,7 +8501,7 @@ function AdminVendorDetailView({ vendor, onBack, onApprove, onReject }) {
 // ---------------------------------------------------------------------------
 // Shown as "Senast uppdaterad" at the bottom of each legal page — update this
 // one line whenever the texts change. Must stay above the section lists below.
-const LEGAL_LAST_UPDATED = "28 september 2026";
+const LEGAL_LAST_UPDATED = "14 oktober 2026";
 
 const PRIVACY_POLICY_SECTIONS = [
   {
@@ -8581,6 +8575,10 @@ const PRIVACY_POLICY_SECTIONS = [
   },
 ];
 
+// Sätts till true först när Stripe-betalningen är byggd, testad och live.
+// Styr texterna i kassan och i villkoren så att sidan aldrig lovar betalning som inte finns.
+const PAYMENTS_LIVE = false;
+
 const TERMS_SECTIONS = [
   {
     heading: "1. Om Planifest",
@@ -8599,13 +8597,27 @@ const TERMS_SECTIONS = [
   {
     heading: "4. Priser och betalning",
     paragraphs: [
+      ...(PAYMENTS_LIVE ? [] : ["Betalning via Planifest är inte aktiverat än. Tills vidare sker ingen betalning på webbplatsen, och reglerna nedan om betalning och avbokning börjar gälla när betalningen aktiveras."]),
       "Priser anges av Leverantören och visas inklusive eventuella tillägg innan bokning bekräftas.",
-      "När betalfunktionen är på plats: betalning sker via Planifests betalningslösning och hålls tills tjänsten är genomförd, då den betalas ut till Leverantören med avdrag för Planifests förmedlingsavgift.",
+      "Betalning sker via Planifest och vår betalpartner Stripe. När Leverantören har bekräftat bokningen betalar Kunden en deposition på 15 % av totalbeloppet. Resterande belopp betalas senast 14 dagar före eventet. Bokas ett event med mindre än 14 dagar kvar betalar Kunden hela beloppet direkt.",
+      "Planifest tar emot betalningen och betalar ut den till Leverantören 48 timmar efter att eventet ägt rum, med avdrag för Planifests provision. Planifest står själv för betalpartnerns avgifter, så Kunden betalar aldrig extra avgift för betalningen.",
     ],
   },
   {
-    heading: "5. Avbokning",
-    paragraphs: ["Kund kan avboka enligt Leverantörens angivna avbokningsvillkor. Avbokning senare än 14 dagar innan eventet kan medföra kostnad enligt Leverantörens villkor."],
+    heading: "5. Kundens avbokning",
+    paragraphs: [
+      "Samma avbokningsregler gäller för alla Leverantörer. Hur mycket Kunden får tillbaka beror på hur många dagar som återstår till eventet när avbokningen görs:",
+    ],
+    bullets: [
+      "Mer än 14 dagar före eventet: Kunden får tillbaka allt som betalats, inklusive depositionen.",
+      "14 till 7 dagar före eventet: Leverantören behåller depositionen (15 %). Kunden får tillbaka resten.",
+      "6 till 1 dag före eventet: Leverantören får 50 % av totalbeloppet. Kunden får tillbaka resten.",
+      "Samma dag som eventet: Leverantören får 100 % av totalbeloppet.",
+    ],
+    after: [
+      "Kund och Leverantör kan också komma överens om en avbokning via chatten på Planifest. Då bestämmer de tillsammans hur mycket som betalas tillbaka.",
+      "Återbetalningar görs till det betalsätt som användes vid betalningen.",
+    ],
   },
   {
     heading: "6. Leverantörens ansvar",
@@ -8617,7 +8629,8 @@ const TERMS_SECTIONS = [
       "Kunduppgifter som delas via Planifest får endast användas för att genomföra den aktuella bokningen.",
       "Leverantören ska bemöta kunder professionellt, utan diskriminering eller trakasserier.",
       "Leverantören är ensam ansvarig för den bokade tjänstens genomförande. Planifest är enbart förmedlare och part inte i avtalet mellan Leverantör och Kund.",
-      "Leverantören godkänner att betala Planifests förmedlingsavgift (för närvarande cirka 10 %) när betalfunktionen är i drift.",
+      "Leverantören godkänner att Planifest tar en provision på 10 % av den del av beloppet som tillfaller Leverantören. Det gäller även vid avbokning. Provisionen dras vid utbetalning, och Leverantören betalar ingen avgift för betalningen i övrigt.",
+      "För att få utbetalningar behöver Leverantören koppla ett utbetalningskonto via Planifests betalpartner Stripe.",
     ],
   },
   {
@@ -8628,10 +8641,10 @@ const TERMS_SECTIONS = [
     heading: "8. Leverantörens avbokning",
     paragraphs: [
       "Leverantören kan avboka en bekräftad bokning avgiftsfritt fram till 30 dagar innan eventet.",
-      "Avbokning senare än så innebär att Kunden inte behöver betala för tjänsten, oavsett om Planifest lyckas hitta en ersättare. Planifest hjälper aktivt till att hitta en ny leverantör i samma prisklass.",
+      "Avbokar Leverantören eller ställer in en bokning får Kunden alltid tillbaka allt som betalats, oavsett när avbokningen sker. Planifest föreslår lediga Leverantörer i samma kategori som Kunden kan välja bland.",
       "En sen avbokning registreras som en varning på Leverantörens konto. Avbokningar som beror på samma händelse eller orsak, inom en kort tidsperiod, räknas som en varning. Planifest avgör vad som räknas som samma orsak.",
       "Upprepade sena avbokningar kan leda till att kontot stängs av från Planifest.",
-      "När betalfunktionen är på plats kan en avgift motsvarande förmedlingsavgiften komma att dras från Leverantörens nästa utbetalning vid upprepade sena avbokningar.",
+      "Vid upprepade sena avbokningar kan en avgift motsvarande provisionen komma att dras från Leverantörens nästa utbetalning.",
     ],
   },
   {
@@ -8640,7 +8653,7 @@ const TERMS_SECTIONS = [
   },
   {
     heading: "10. Ansvarsbegränsning",
-    paragraphs: ["Planifest ansvarar inte för Leverantörens utförande av bokade tjänster eller för skador i samband med ett event. Planifests ansvar är i alla händelser begränsat till den förmedlingsavgift som betalats för den aktuella bokningen."],
+    paragraphs: ["Planifest ansvarar inte för Leverantörens utförande av bokade tjänster eller för skador i samband med ett event. Planifests ansvar är i alla händelser begränsat till den provision som Planifest erhållit för den aktuella bokningen."],
   },
   {
     heading: "11. Reklamation och tvist",
@@ -8713,6 +8726,11 @@ function LegalPageView({ title, sections, onBack }) {
                 ))}
               </ul>
             )}
+            {s.after?.map((p, i) => (
+              <p key={`after-${i}`} className="mt-2 text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
+                {p}
+              </p>
+            ))}
           </section>
         ))}
       </div>
@@ -8762,7 +8780,8 @@ function Footer({ onGoHome, onBrowse, onHowItWorks, onBecomeVendor, onOpenTerms,
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           <div className="lg:col-span-2">
             <div className="flex items-center gap-2">
-              <Wordmark fontSize={28} />
+              <LogoBalloons size={28} />
+              <Wordmark fontSize={18} letterSpacing="0.08em" />
             </div>
             <p className="mt-4 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
               Planifest föddes ur en enkel idé: att festen förtjänar lika mycket omtanke som planeringen
@@ -10996,7 +11015,6 @@ export default function App() {
     <FavoritesContext.Provider value={{ ids: favoriteIds, toggle: toggleFavorite }}>
     <div style={{ fontFamily: sans, backgroundColor: colors.cream, minHeight: "100%", color: colors.plum }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Figtree:wght@400;500;600;700;800&display=swap');
         input[type="checkbox"], input[type="radio"] { accent-color: #7D2248; }
         input[type="date"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator { cursor: pointer; }
         @keyframes planifest-wiggle { 0%,100% { transform: rotate(0); } 15% { transform: rotate(-14deg); } 30% { transform: rotate(12deg); } 45% { transform: rotate(-8deg); } 60% { transform: rotate(6deg); } 75% { transform: rotate(-3deg); } }
@@ -11195,7 +11213,10 @@ export default function App() {
               : []
           }
           cartIds={cartProviderIds}
-          onViewOther={viewProfile}
+          onViewOther={(id) => {
+            viewProfile(id);
+            window.scrollTo({ top: 0 });
+          }}
         />
       )}
 
