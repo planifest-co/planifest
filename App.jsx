@@ -1093,17 +1093,33 @@ function mapDbVendorToLocal(dbVendor) {
       tagline: dbVendor.tagline || "",
       description: dbVendor.description || "",
       images: dbVendor.images || [],
-      services: (dbVendor.services || []).map((s) => ({
-        id: s.id,
-        name: s.name || "",
-        description: s.description || "",
-        priceType: Number(s.price) > 0 ? s.price_type : "quote", // no price = price by agreement (shown to customers as a request)
-        price: s.price,
-        priceNote: s.price_note || "",
-        fromPrice: Number(s.from_price) > 0 ? Number(s.from_price) : "",
-        category: s.category_id || "",
+      services: [...(dbVendor.services || [])]
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+        .map((s) => ({
+          id: s.id,
+          name: s.name || "",
+          description: s.description || "",
+          priceType: Number(s.price) > 0 ? s.price_type : "quote", // no price = price by agreement (shown to customers as a request)
+          price: s.price,
+          priceNote: s.price_note || "",
+          fromPrice: Number(s.from_price) > 0 ? Number(s.from_price) : "",
+          category: s.category_id || "",
+          unitLabel: s.unit_label || "",
+          minGuests: s.min_guests ?? "",
+          maxGuests: s.max_guests ?? "",
+          timeFrom: s.time_from ? String(s.time_from).slice(0, 5) : "",
+          timeTo: s.time_to ? String(s.time_to).slice(0, 5) : "",
+          minHours: s.min_hours ?? "",
+          includes: Array.isArray(s.includes) ? s.includes : [],
+          choiceGroups: Array.isArray(s.choice_groups) ? s.choice_groups : [],
+        })),
+      addons: (dbVendor.addons || []).map((a) => ({
+        id: a.id,
+        name: a.name || "",
+        price: a.price,
+        priceType: a.price_type === "per_person" ? "per_person" : "fixed",
+        serviceIds: Array.isArray(a.service_ids) ? a.service_ids : [],
       })),
-      addons: (dbVendor.addons || []).map((a) => ({ id: a.id, name: a.name || "", price: a.price })),
     },
   };
 }
@@ -1228,32 +1244,115 @@ async function saveVendorProfile(vendor, accessToken) {
     });
   }
 
-  await supabaseRestRequest(`/services?vendor_id=eq.${vendor.id}`, accessToken, { method: "DELETE" });
-  if (vendor.profile.services.length > 0) {
-    await supabaseRestRequest("/services", accessToken, {
-      method: "POST",
-      body: JSON.stringify(
-        vendor.profile.services.map((s) => ({
-          vendor_id: vendor.id,
-          category_id: s.category || null,
-          name: s.name,
-          description: s.description,
-          price_type: s.priceType === "quote" ? "fixed" : s.priceType,
-          price: s.priceType === "quote" ? 0 : Number(s.price) || 0,
-          from_price: s.priceType === "quote" && Number(s.fromPrice) > 0 ? Math.round(Number(s.fromPrice)) : null,
-          price_note: s.priceNote,
-        }))
-      ),
-    });
-  }
+  // Packages and add-ons keep their ids between saves (updated in place, only removed ones are deleted),
+  // so existing bookings stay linked to the package they were made for.
+  const idMap = {};
+  const stableId = (id) => (isUuid(id) ? id : (idMap[id] = idMap[id] || newId()));
+  const services = vendor.profile.services.map((s, i) => serviceToDb(s, vendor.id, stableId(s.id), i));
+  const { error: serviceError } = services.length
+    ? await supabaseRestRequest("/services?on_conflict=id", accessToken, {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(services),
+      })
+    : { error: null };
+  if (serviceError) return { error: serviceError };
+  const keepServices = services.map((s) => s.id);
+  await supabaseRestRequest(
+    `/services?vendor_id=eq.${vendor.id}${keepServices.length ? `&id=not.in.(${keepServices.join(",")})` : ""}`,
+    accessToken,
+    { method: "DELETE" }
+  );
 
-  await supabaseRestRequest(`/addons?vendor_id=eq.${vendor.id}`, accessToken, { method: "DELETE" });
-  if (vendor.profile.addons.length > 0) {
-    await supabaseRestRequest("/addons", accessToken, {
-      method: "POST",
-      body: JSON.stringify(vendor.profile.addons.map((a) => ({ vendor_id: vendor.id, name: a.name, price: Number(a.price) || 0 }))),
-    });
-  }
+  const addons = vendor.profile.addons
+    .filter((a) => String(a.name || "").trim())
+    .map((a) => ({
+      id: stableId(a.id),
+      vendor_id: vendor.id,
+      name: String(a.name).trim().slice(0, 80),
+      price: Math.max(0, Math.round(Number(a.price) || 0)),
+      price_type: a.priceType === "per_person" ? "per_person" : "fixed",
+      service_ids: (a.serviceIds || []).map(stableId).filter((sid) => keepServices.includes(sid)),
+    }));
+  const { error: addonError } = addons.length
+    ? await supabaseRestRequest("/addons?on_conflict=id", accessToken, {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(addons),
+      })
+    : { error: null };
+  if (addonError) return { error: addonError };
+  const keepAddons = addons.map((a) => a.id);
+  await supabaseRestRequest(
+    `/addons?vendor_id=eq.${vendor.id}${keepAddons.length ? `&id=not.in.(${keepAddons.join(",")})` : ""}`,
+    accessToken,
+    { method: "DELETE" }
+  );
+  return { error: null, idMap };
+}
+
+const slugId = (v, i, prefix) => {
+  const s = String(v || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 16);
+  return s || `${prefix}${i + 1}`;
+};
+const toInt = (v, min, max) => {
+  const n = Math.round(Number(v));
+  return v === "" || v == null || !Number.isFinite(n) ? null : Math.min(max, Math.max(min, n));
+};
+
+// One package card (a "ruta") in the shape the database takes. Also used for quote services (price 0).
+function serviceToDb(s, vendorId, id, order) {
+  const quote = s.priceType === "quote";
+  const groups = quote
+    ? []
+    : (s.choiceGroups || [])
+        .filter((g) => String(g.label || "").trim() && (g.options || []).some((o) => String(o.label || "").trim()))
+        .slice(0, 10)
+        .map((g, gi) => {
+          const options = g.options
+            .filter((o) => String(o.label || "").trim())
+            .slice(0, 30)
+            .map((o, oi) => {
+              const opt = { id: slugId(o.id, oi, "o"), label: String(o.label).trim().slice(0, 60) };
+              const p = Math.round(Number(o.price) || 0);
+              if (p > 0) opt.price = Math.min(100000, p);
+              return opt;
+            });
+          // option ids must be unique within the group
+          options.forEach((o, oi) => {
+            if (options.findIndex((x) => x.id === o.id) !== oi) o.id = `o${oi + 1}x`;
+          });
+          const max = Math.min(options.length, Math.max(1, toInt(g.max, 1, 30) ?? 1));
+          const min = Math.min(max, Math.max(0, toInt(g.min, 0, 30) ?? max));
+          return { id: slugId(g.id, gi, "g"), label: String(g.label).trim().slice(0, 60), min, max, options };
+        });
+  groups.forEach((g, gi) => {
+    if (groups.findIndex((x) => x.id === g.id) !== gi) g.id = `g${gi + 1}x`;
+  });
+  const minG = toInt(s.minGuests, 1, 100000);
+  let maxG = toInt(s.maxGuests, 1, 100000);
+  if (minG && maxG && maxG < minG) maxG = minG;
+  const window = !quote && /^\d{2}:\d{2}$/.test(s.timeFrom || "") && /^\d{2}:\d{2}$/.test(s.timeTo || "");
+  return {
+    id,
+    vendor_id: vendorId,
+    category_id: s.category || null,
+    name: String(s.name || "").slice(0, 120),
+    description: String(s.description || "").slice(0, 2000),
+    price_type: quote ? "fixed" : s.priceType,
+    price: quote ? 0 : Math.max(0, Math.round(Number(s.price) || 0)),
+    from_price: quote && Number(s.fromPrice) > 0 ? Math.round(Number(s.fromPrice)) : null,
+    price_note: s.priceNote || "",
+    unit_label: quote || s.priceType !== "per_unit" ? "" : String(s.unitLabel || "").trim().slice(0, 30),
+    min_guests: quote ? null : minG,
+    max_guests: quote ? null : maxG,
+    time_from: window ? s.timeFrom : null,
+    time_to: window ? s.timeTo : null,
+    min_hours: !quote && s.priceType === "per_hour" && Number(s.minHours) > 0 ? Math.min(48, Number(s.minHours)) : null,
+    includes: quote ? [] : (s.includes || []).map((x) => String(x).trim().slice(0, 120)).filter(Boolean).slice(0, 20),
+    choice_groups: groups,
+    sort_order: order,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1708,10 +1807,19 @@ function mapVendorToProviders(vendor, bookings, busyByVendor = {}) {
       .filter(Boolean)
       .join(" ");
 
-    const hasPrice = pricing.amount > 0;
     const quoteFroms = (categoryServices.length ? categoryServices : services.filter((s) => !s.category)).map((s) => Number(s.fromPrice) || 0).filter((n) => n > 0);
     const quoteFrom = quoteFroms.length ? Math.min(...quoteFroms) : 0;
+    // Package cards: this category's ready-priced packages, shown when the vendor has them turned on
+    const allAddons = vendor.profile.addons || [];
+    const packages = categoryServices.filter(isPackage).map((s) => ({ ...s, addons: packageAddons(s, allAddons) }));
+    // Quote-first categories (cake, decor, flowers) show packages only when the vendor turned them on
+    const directSetting = vendor.requestForms?.[categoryId]?.direct;
+    const packagesOn = packages.length > 0 && (QUOTE_FIRST_CATEGORIES.includes(categoryId) ? directSetting === true : directSetting !== false);
+    const cheapest = packages.length ? packages.reduce((a, b) => (Number(b.price) < Number(a.price) ? b : a)) : null;
+    if (packagesOn) Object.assign(pricing, { type: cheapest.priceType, amount: Number(cheapest.price) || 0, note: cheapest.name || "", suffix: packageSuffix(cheapest) });
+    const hasPrice = pricing.amount > 0;
     const request = getRequestConfig(vendor.requestForms, categoryId, hasPrice);
+    const quoteText = categoryServices.filter((s) => !isPackage(s)).map((s) => s.description).filter(Boolean).join("\n\n");
     // "from" price when there is no fixed price: the cheapest option of each required choice, added up
     const fieldsFrom = request.fields
       .filter((f) => f.required && f.type === "single")
@@ -1734,8 +1842,10 @@ function mapVendorToProviders(vendor, bookings, busyByVendor = {}) {
       pricing,
       serviceId: primaryService?.id || null,
       request,
-      requestOnly: !request.direct,
-      fromPrice: hasPrice ? pricing.amount : quoteFrom || fieldsFrom,
+      requestOnly: !packagesOn,
+      packages: packagesOn ? packages : [],
+      packagesOn,
+      fromPrice: packagesOn ? pricing.amount : quoteFrom || fieldsFrom || (cheapest ? Number(cheapest.price) || 0 : 0),
       seed: vendor.id,
       image: images[0],
       images,
@@ -1744,7 +1854,7 @@ function mapVendorToProviders(vendor, bookings, busyByVendor = {}) {
       bookedDates,
       busySlots: busyByVendor[vendor.id] || [],
       blurb: vendor.profile.description || "",
-      service: serviceText,
+      service: packagesOn ? quoteText : serviceText,
       reviewsList: [],
       addons: vendor.profile.addons || [],
     };
@@ -1803,6 +1913,7 @@ function getDurationHours(party) {
 }
 
 function getUnitLabel(pricing) {
+  if (pricing.suffix != null) return pricing.suffix;
   if (pricing.type === "per_person") return "/person";
   if (pricing.type === "per_hour") return "/timme";
   return "";
@@ -1815,20 +1926,164 @@ function getBaseAmount(provider, party) {
   return pricing.amount;
 }
 
-function getAddonsAmount(provider, addonIds = []) {
+const addonAmount = (a, party) => (Number(a.price) || 0) * (a.priceType === "per_person" ? Math.max(1, Number(party?.guests) || 1) : 1);
+const addonPriceLabel = (a) => `+${formatKr(Number(a.price) || 0)}${a.priceType === "per_person" ? "/person" : ""}`;
+
+function getAddonsAmount(provider, addonIds = [], party) {
   if (!provider.addons || provider.addons.length === 0) return 0;
-  return provider.addons.filter((a) => addonIds.includes(a.id)).reduce((sum, a) => sum + a.price, 0);
+  return provider.addons.filter((a) => addonIds.includes(a.id)).reduce((sum, a) => sum + addonAmount(a, party), 0);
 }
 
 function getLineTotal(provider, addonIds, party) {
-  return getBaseAmount(provider, party) + getAddonsAmount(provider, addonIds);
+  if (provider.package) return packageTotal(provider.package, party, { quantity: provider.quantity, choices: provider.choices, addonIds }, provider.addons);
+  return getBaseAmount(provider, party) + getAddonsAmount(provider, addonIds, party);
 }
 
 function getBreakdownText(provider, party) {
+  if (provider.package) return packageBreakdown(provider.package, party, provider.quantity);
   const { pricing } = provider;
   if (pricing.type === "per_person") return `${formatKr(pricing.amount)}/person × ${party.guests || 0} gäster`;
   if (pricing.type === "per_hour") return `${formatKr(pricing.amount)}/timme × ${getDurationHours(party)} timmar`;
   return pricing.note || "Paketpris";
+}
+
+// ---------------------------------------------------------------------------
+// Package cards ("rutor"): a vendor's ready-priced packages that go straight
+// to checkout. One shape for every category; the unit decides how the price
+// is worked out. The database works the price out the same way
+// (public.package_price), so the browser's sum is only ever a preview.
+// ---------------------------------------------------------------------------
+const PACKAGE_UNITS = [
+  { id: "per_person", label: "Per person", hint: "Gånger kundens antal gäster" },
+  { id: "fixed", label: "Fast pris", hint: "Ett pris per tillfälle" },
+  { id: "per_hour", label: "Per timme", hint: "Gånger eventets längd" },
+  { id: "per_unit", label: "Per styck", hint: "Kunden väljer antal" },
+];
+// Categories where a quote comes first; ready-priced packages are something the vendor turns on.
+const QUOTE_FIRST_CATEGORIES = ["tarta", "dekor", "blommor"];
+
+const emptyOptions = (n) => Array.from({ length: n }, (_, i) => ({ id: `o${i + 1}`, label: "", price: "" }));
+const PACKAGE_TEMPLATES = {
+  catering: { name: "Buffé", priceType: "per_person", minGuests: 10, includes: [""], choiceGroups: [
+    { id: "forratt", label: "Förrätter", min: 2, max: 2, options: emptyOptions(4) },
+    { id: "huvudratt", label: "Huvudrätt", min: 1, max: 1, options: emptyOptions(3) },
+  ] },
+  dj: { name: "DJ-paket", priceType: "per_hour", minHours: 4, includes: ["Ljudanläggning", "Mikrofon för tal"] },
+  lokal: { name: "Kvällsbokning", priceType: "fixed", timeFrom: "18:00", timeTo: "01:00", includes: [""] },
+  fotograf: { name: "Fotopaket", priceType: "fixed", includes: [""] },
+  uthyrning: { name: "", priceType: "per_unit", unitLabel: "st" },
+  av: { name: "Teknikpaket", priceType: "fixed", includes: [""] },
+};
+const PACKAGE_HINTS = {
+  catering: { name: "T.ex. Stora buffén", include: "T.ex. Chark, ostar och kex", group: "T.ex. Förrätter", option: "T.ex. Potatissallad" },
+  dj: { name: "T.ex. DJ helkväll", include: "T.ex. Ljus och rökmaskin", group: "T.ex. Musikstil", option: "T.ex. Hits & pop" },
+  lokal: { name: "T.ex. Stora lokalen, kväll", include: "T.ex. Ljudanläggning och scen", group: "T.ex. Uppställning", option: "T.ex. Sittande middag" },
+  fotograf: { name: "T.ex. Bröllop heldag", include: "T.ex. 150 redigerade bilder", group: "T.ex. Leverans", option: "T.ex. Fotobok" },
+  uthyrning: { name: "T.ex. Runt bord, 8 personer", include: "T.ex. Duk ingår", group: "T.ex. Färg", option: "T.ex. Vit" },
+};
+const packageHint = (cat) => PACKAGE_HINTS[cat] || { name: "T.ex. Standardpaket", include: "T.ex. Vad som ingår", group: "T.ex. Välj variant", option: "T.ex. Alternativ 1" };
+
+function newPackageFromTemplate(cat) {
+  const t = PACKAGE_TEMPLATES[cat] || { name: "", priceType: "fixed", includes: [""] };
+  return JSON.parse(JSON.stringify({ description: "", includes: [], choiceGroups: [], ...t }));
+}
+
+const isPackage = (s) => !!s && s.priceType !== "quote" && Number(s.price) > 0;
+const unitWord = (pkg) => String(pkg.unitLabel || "").trim().replace(/^per\s+/i, "") || "st";
+function packageSuffix(pkg) {
+  if (pkg.priceType === "per_person") return "/person";
+  if (pkg.priceType === "per_hour") return "/timme";
+  if (pkg.priceType === "per_unit") return `/${unitWord(pkg)}`;
+  return "";
+}
+const packagePriceLabel = (pkg) => `${formatKr(Number(pkg.price) || 0)}${packageSuffix(pkg)}`;
+const packageAddons = (pkg, addons = []) => addons.filter((a) => String(a.name || "").trim() && (a.serviceIds || []).includes(pkg.id));
+
+// Minutes of `t` after `from`, on a 24h clock that may pass midnight.
+const minsAfter = (t, from) => (((timeToMinutes(t) - timeToMinutes(from)) % 1440) + 1440) % 1440;
+
+// Why the package doesn't fit the customer's event right now, or "" when it does.
+function packageMisfit(pkg, party, quantity = 1) {
+  const guests = Math.max(1, Number(party?.guests) || 1);
+  const min = Number(pkg.minGuests) || 0;
+  const max = Number(pkg.maxGuests) || 0;
+  if (pkg.priceType === "per_unit") {
+    if (min && quantity < min) return `Minst ${min} ${unitWord(pkg)}`;
+    if (max && quantity > max) return `Högst ${max} ${unitWord(pkg)}`;
+  } else {
+    if (min && guests < min) return `Minst ${min} personer`;
+    if (max && guests > max) return `Max ${max} gäster`;
+  }
+  if (pkg.timeFrom && pkg.timeTo && party?.startTime && party?.endTime) {
+    let w = minsAfter(pkg.timeTo, pkg.timeFrom);
+    if (w === 0) w = 1440;
+    const s = minsAfter(party.startTime, pkg.timeFrom);
+    let d = minsAfter(party.endTime, party.startTime);
+    if (d === 0) d = 1440;
+    if (s + d > w) return `Passar ${pkg.timeFrom}–${pkg.timeTo}`;
+  }
+  return "";
+}
+
+// Facts about the package shown as small badges on the card.
+function packageFacts(pkg) {
+  const facts = [];
+  const min = Number(pkg.minGuests) || 0;
+  const max = Number(pkg.maxGuests) || 0;
+  if (pkg.priceType === "per_unit") {
+    if (min) facts.push(`Minst ${min} ${unitWord(pkg)}`);
+  } else {
+    if (min) facts.push(`Minst ${min} personer`);
+    if (max) facts.push(`Max ${max} gäster`);
+  }
+  if (pkg.timeFrom && pkg.timeTo) facts.push(`${pkg.timeFrom}–${pkg.timeTo}`);
+  if (pkg.priceType === "per_hour" && Number(pkg.minHours) > 0) facts.push(`Minst ${String(pkg.minHours).replace(".", ",")} timmar`);
+  return facts;
+}
+
+function packageMultiplier(pkg, party, quantity = 1) {
+  if (pkg.priceType === "per_person") return Math.max(1, Number(party?.guests) || 1);
+  if (pkg.priceType === "per_hour") return Math.max(getDurationHours(party || {}), Number(pkg.minHours) || 0);
+  if (pkg.priceType === "per_unit") return Math.max(1, Math.round(Number(quantity) || 1));
+  return 1;
+}
+
+function packageTotal(pkg, party, { quantity = 1, choices = {}, addonIds = [] } = {}, addons = []) {
+  const mult = packageMultiplier(pkg, party, quantity);
+  let total = (Number(pkg.price) || 0) * mult;
+  (pkg.choiceGroups || []).forEach((g) => {
+    const picked = choices?.[g.id] || [];
+    (g.options || []).forEach((o) => {
+      if (picked.includes(o.id)) total += (Number(o.price) || 0) * mult;
+    });
+  });
+  addons.filter((a) => addonIds.includes(a.id)).forEach((a) => (total += addonAmount(a, party)));
+  return Math.round(total);
+}
+
+function packageBreakdown(pkg, party, quantity = 1) {
+  const price = formatKr(Number(pkg.price) || 0);
+  const name = pkg.name ? `${pkg.name} · ` : "";
+  if (pkg.priceType === "per_person") return `${name}${price}/person × ${Math.max(1, Number(party.guests) || 1)} gäster`;
+  if (pkg.priceType === "per_hour") {
+    const h = getDurationHours(party);
+    const billed = packageMultiplier(pkg, party);
+    return `${name}${price}/timme × ${String(billed).replace(".", ",")} timmar${billed > h ? " (minsta tid)" : ""}`;
+  }
+  if (pkg.priceType === "per_unit") return `${name}${Math.max(1, Number(quantity) || 1)} ${unitWord(pkg)} × ${price}`;
+  return `${name}${price}`;
+}
+
+// What still has to be picked before the package can be added ("" when everything is chosen).
+function packageChoiceProblem(pkg, choices = {}) {
+  for (const g of pkg.choiceGroups || []) {
+    const n = (choices?.[g.id] || []).length;
+    if (n < g.min || n > g.max) {
+      if (g.min === g.max) return `Välj ${g.min} ${String(g.label).toLowerCase()}`;
+      return `Välj ${g.min}–${g.max} ${String(g.label).toLowerCase()}`;
+    }
+  }
+  return "";
 }
 
 // --- Vendor signup validation (Fas 2A) -------------------------------------
@@ -2213,7 +2468,7 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
     ? provider.fromPrice > 0
       ? `från ${formatKr(provider.fromPrice)}`
       : "Pris på förfrågan"
-    : `${formatKr(provider.pricing.amount)}${getUnitLabel(provider.pricing)}`;
+    : `${provider.packages?.length > 1 ? "från " : ""}${formatKr(provider.pricing.amount)}${getUnitLabel(provider.pricing)}`;
   const busy = !!party?.date && (isBusyAt(provider, party) || !!provider.closedDates?.includes(party.date));
   const handleAction = (e) => {
     e.stopPropagation();
@@ -2221,8 +2476,8 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
       onView(provider.id); // can't be added for a taken time; the profile explains why
       return;
     }
-    if (provider.requestOnly) {
-      onView(provider.id); // booked through a request and a quote, never added straight to the cart
+    if (provider.requestOnly || provider.packagesOn) {
+      onView(provider.id); // a package is picked on the vendor's page; otherwise booked through a request and a quote
       return;
     }
     if (swapMode) onAdd(provider.id);
@@ -3189,7 +3444,9 @@ function ResultsView({
   );
 }
 
-function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty, onSendRequest, siblings = [], cartIds = [], onViewOther, storyIndex = -1, storyUnseen = false, onOpenStory, highlightGroups = [], onOpenHighlight }) {
+function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty, onSendRequest, siblings = [], cartIds = [], onViewOther, storyIndex = -1, storyUnseen = false, onOpenStory, highlightGroups = [], onOpenHighlight, cartPackages = [], onAddPackage, onOpenCart }) {
+  const [openPackageId, setOpenPackageId] = useState(null);
+  const packagesRef = useRef(null);
   const cat = catMap[provider.category];
   const [requestOpen, setRequestOpen] = useState(false);
   const [pendingAddons, setPendingAddons] = useState([]);
@@ -3248,10 +3505,18 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
 
   // Everything is booked through a quote first, so nobody can claim a price the vendor never agreed to.
   const askForQuote = () => (provider.request && provider.vendorDbId ? setRequestOpen(true) : onOpenChat(provider));
+  const showPackages = () => {
+    setTab("info");
+    setTimeout(() => packagesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
   const primaryButton = inCart ? (
     <span className={`${btnBase} flex-1`} style={{ backgroundColor: colors.greenSoft, color: colors.green }}>
       <Check size={16} /> Offert godkänd
     </span>
+  ) : provider.packagesOn ? (
+    <button onClick={showPackages} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.coral, color: colors.white }}>
+      {cartPackages.length > 0 ? <><Check size={16} /> {cartPackages.length} {cartPackages.length === 1 ? "paket valt" : "paket valda"}</> : "Se paket & priser"}
+    </button>
   ) : (
     <button onClick={askForQuote} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.coral, color: colors.white }}>
       Skicka förfrågan
@@ -3473,14 +3738,52 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
 
       {tab === "info" && (
         <div className="flex flex-col gap-6 px-5 pt-5 sm:px-8">
+          {provider.packagesOn && (
+            <section ref={packagesRef} className="flex flex-col gap-3" style={{ scrollMarginTop: 80 }}>
+              <div>
+                <h2 className="text-[15px] font-bold" style={{ color: colors.plum }}>Paket & priser</h2>
+                <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                  Välj ett eller flera paket. Priset räknas på din tid och ditt antal gäster.
+                </p>
+              </div>
+              {provider.packages.map((pkg) => {
+                const entry = cartPackages.find((ci) => ci.pkg.serviceId === pkg.id);
+                return (
+                  <PackageCard
+                    key={pkg.id}
+                    pkg={pkg}
+                    party={party}
+                    entry={entry}
+                    blockedReason={closedNow ? `Stängd ${dateLabel}` : busyNow ? "Upptagen den tiden" : ""}
+                    onChoose={() => setOpenPackageId(pkg.id)}
+                    onContact={() => onOpenChat(provider)}
+                  />
+                );
+              })}
+              {cartPackages.length > 0 && onOpenCart && (
+                <button onClick={onOpenCart} className={`${btnBase} w-full`} style={{ backgroundColor: colors.plum, color: colors.white }}>
+                  Gå vidare till bokningen <ArrowRight size={16} />
+                </button>
+              )}
+              <div className="flex items-center justify-between gap-3 p-4" style={{ backgroundColor: colors.lilacSoft, borderRadius: 20 }}>
+                <p className="text-sm" style={{ color: colors.plum }}>
+                  <span className="font-semibold">Vill du ha något annat?</span> Skicka en förfrågan så får du en offert.
+                </p>
+                <button onClick={askForQuote} className="flex-shrink-0 rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: colors.white, color: colors.plum }}>
+                  Förfrågan
+                </button>
+              </div>
+            </section>
+          )}
+
           {provider.service && (
             <section>
-              <h2 className="mb-1.5 text-[15px] font-bold" style={{ color: colors.plum }}>Tjänst</h2>
+              <h2 className="mb-1.5 text-[15px] font-bold" style={{ color: colors.plum }}>{provider.packagesOn ? "Om offert" : "Tjänst"}</h2>
               <p className="whitespace-pre-line text-sm leading-relaxed" style={{ color: colors.plumSoft }}>{provider.service}</p>
             </section>
           )}
 
-          {!provider.requestOnly && (
+          {!provider.requestOnly && !provider.packagesOn && (
             <section className="p-4" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 20 }}>
               <p style={{ fontFamily: serif, fontWeight: 700, fontSize: 21, color: colors.plum }}>{priceLabel}</p>
               <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>{getBreakdownText(provider, party)}</p>
@@ -3586,9 +3889,315 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
         </div>
       )}
 
+      {openPackageId && provider.packages?.some((x) => x.id === openPackageId) && (() => {
+        const pkg = provider.packages.find((x) => x.id === openPackageId);
+        const entry = cartPackages.find((ci) => ci.pkg.serviceId === pkg.id);
+        return (
+          <PackageSheet
+            provider={provider}
+            pkg={pkg}
+            party={party}
+            entry={entry}
+            onUpdateParty={onUpdateParty}
+            onAdd={(cfg) => onAddPackage(provider, pkg, cfg)}
+            onRemove={() => entry && onRemove(entry.id)}
+            onClose={() => setOpenPackageId(null)}
+          />
+        );
+      })()}
+
       {requestOpen && (
         <RequestFormModal provider={provider} party={party} onUpdateParty={onUpdateParty} onSend={(brief) => onSendRequest(provider, brief)} onClose={() => setRequestOpen(false)} />
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Package cards on a vendor's page. Each white card is one ready-priced
+// package; the customer opens it, makes the choices it asks for and adds it.
+// ---------------------------------------------------------------------------
+function PackageCard({ pkg, party, entry, blockedReason, onChoose, onContact }) {
+  const misfit = blockedReason || packageMisfit(pkg, party, entry?.pkg?.quantity || Math.max(1, Number(pkg.minGuests) || 1));
+  const greyed = !!misfit && pkg.priceType !== "per_unit";
+  const added = !!entry;
+  const estimate = entry
+    ? packageTotal(pkg, party, { quantity: entry.pkg.quantity, choices: entry.pkg.choices, addonIds: entry.addons }, pkg.addons)
+    : packageTotal(pkg, party, { quantity: Math.max(1, Number(pkg.minGuests) || 1) });
+  const facts = packageFacts(pkg);
+  const includes = (pkg.includes || []).filter((x) => String(x).trim());
+  const groups = pkg.choiceGroups || [];
+  const estimateNote =
+    pkg.priceType === "per_person"
+      ? `för ${Math.max(1, Number(party.guests) || 1)} gäster`
+      : pkg.priceType === "per_hour"
+      ? `för ${String(packageMultiplier(pkg, party)).replace(".", ",")} timmar`
+      : pkg.priceType === "per_unit"
+      ? `för ${entry?.pkg?.quantity || Math.max(1, Number(pkg.minGuests) || 1)} ${unitWord(pkg)}`
+      : "";
+
+  return (
+    <article
+      className="flex flex-col p-5"
+      style={{ backgroundColor: colors.white, border: `1.5px solid ${added ? colors.coral : colors.beige}`, borderRadius: 20 }}
+    >
+      <div style={{ opacity: greyed ? 0.5 : 1 }}>
+        <div className="flex items-start justify-between gap-3">
+          <h3 style={{ fontFamily: serif, fontWeight: 700, fontSize: 19, color: colors.plum, lineHeight: 1.2 }}>{pkg.name || "Paket"}</h3>
+          <span className="flex-shrink-0 text-right" style={{ fontFamily: serif, fontWeight: 700, fontSize: 18, color: colors.plum }}>
+            {packagePriceLabel(pkg)}
+          </span>
+        </div>
+        {pkg.description && <p className="mt-1.5 whitespace-pre-line text-sm leading-relaxed" style={{ color: colors.plumSoft }}>{pkg.description}</p>}
+        {(includes.length > 0 || groups.length > 0) && (
+          <ul className="mt-3 space-y-1.5">
+            {includes.map((x, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm" style={{ color: colors.plum }}>
+                <Check size={15} color={colors.coral} className="mt-0.5 flex-shrink-0" /> {x}
+              </li>
+            ))}
+            {groups.map((g) => (
+              <li key={g.id} className="flex items-start gap-2 text-sm" style={{ color: colors.plum }}>
+                <Check size={15} color={colors.coral} className="mt-0.5 flex-shrink-0" />
+                <span>
+                  {g.min === g.max ? g.min : `${g.min}–${g.max}`} {String(g.label).toLowerCase()} som du väljer
+                  <span style={{ color: colors.plumSoft }}> ({g.options.map((o) => o.label).join(", ")})</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {facts.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {facts.map((f) => (
+              <span key={f} className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+                {f}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-3 border-t pt-4" style={{ borderColor: colors.beige }}>
+        {greyed ? (
+          <>
+            <span className="text-sm font-semibold" style={{ color: colors.coralDeep }}>
+              {misfit}
+            </span>
+            <button onClick={onContact} className="flex-shrink-0 rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+              Fråga leverantören
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="text-sm" style={{ color: colors.plumSoft }}>
+              <span className="font-semibold" style={{ color: colors.plum }}>{formatKr(estimate)}</span> {estimateNote}
+            </span>
+            <button
+              onClick={onChoose}
+              className="flex flex-shrink-0 items-center gap-1.5 rounded-full px-5 py-2 text-sm font-semibold"
+              style={{ backgroundColor: added ? colors.greenSoft : colors.coral, color: added ? colors.green : colors.white }}
+            >
+              {added ? (
+                <>
+                  <Check size={15} /> Tillagd · ändra
+                </>
+              ) : (
+                "Välj"
+              )}
+            </button>
+          </>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function PackageSheet({ provider, pkg, party, entry, onUpdateParty, onAdd, onRemove, onClose }) {
+  const [quantity, setQuantity] = useState(entry?.pkg?.quantity || Math.max(1, Number(pkg.minGuests) || 1));
+  const [choices, setChoices] = useState(entry?.pkg?.choices || {});
+  const [addonIds, setAddonIds] = useState(entry?.addons || []);
+  const addons = pkg.addons || [];
+  const total = packageTotal(pkg, party, { quantity, choices, addonIds }, addons);
+  const misfit = packageMisfit(pkg, party, quantity);
+  const choiceProblem = packageChoiceProblem(pkg, choices);
+  const problem = misfit || choiceProblem;
+  const optSuffix = pkg.priceType === "per_person" ? "/person" : pkg.priceType === "per_hour" ? "/timme" : pkg.priceType === "per_unit" ? `/${unitWord(pkg)}` : "";
+  const maxQ = Number(pkg.maxGuests) || 10000;
+
+  const pick = (g, optId) =>
+    setChoices((c) => {
+      const cur = c[g.id] || [];
+      if (g.max === 1) return { ...c, [g.id]: cur.includes(optId) ? [] : [optId] };
+      if (cur.includes(optId)) return { ...c, [g.id]: cur.filter((x) => x !== optId) };
+      if (cur.length >= g.max) return c; // full; the customer removes one first
+      return { ...c, [g.id]: [...cur, optId] };
+    });
+  const toggleAddon = (id) => setAddonIds((a) => (a.includes(id) ? a.filter((x) => x !== id) : [...a, id]));
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" style={{ backgroundColor: "rgba(74,21,56,0.45)" }} onClick={onClose}>
+      <div role="dialog" aria-label={pkg.name} className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl" style={{ backgroundColor: colors.cream }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 px-6 pb-3 pt-5" style={{ borderBottom: `1.5px solid ${colors.lilacSoft}` }}>
+          <div>
+            <p className="text-xs font-semibold uppercase" style={{ letterSpacing: "0.08em", color: colors.plumSoft }}>{provider.name}</p>
+            <p style={{ fontFamily: serif, fontWeight: 700, fontSize: 21, color: colors.plum }}>{pkg.name || "Paket"}</p>
+            <p className="text-sm" style={{ color: colors.plumSoft }}>{packagePriceLabel(pkg)}</p>
+          </div>
+          <button onClick={onClose} className="-mr-2 p-2" aria-label="Stäng">
+            <X size={18} color={colors.plumSoft} />
+          </button>
+        </div>
+
+        <div className="space-y-5 overflow-y-auto px-6 py-4">
+          {pkg.priceType === "per_unit" ? (
+            <section>
+              <p className="mb-2 text-sm font-semibold" style={{ color: colors.plum }}>Antal ({unitWord(pkg)})</p>
+              <div className="flex items-center gap-3">
+                <button aria-label="Färre" onClick={() => setQuantity((q) => Math.max(1, q - 1))} className="flex h-10 w-10 items-center justify-center rounded-full text-lg font-semibold" style={fieldStyle}>−</button>
+                <input
+                  type="number"
+                  min={1}
+                  max={maxQ}
+                  value={quantity}
+                  onChange={(e) => setQuantity(Math.min(maxQ, Math.max(1, Math.round(Number(e.target.value) || 1))))}
+                  className="w-20 rounded-xl px-3 py-2 text-center text-sm"
+                  style={fieldStyle}
+                  aria-label="Antal"
+                />
+                <button aria-label="Fler" onClick={() => setQuantity((q) => Math.min(maxQ, q + 1))} className="flex h-10 w-10 items-center justify-center rounded-full text-lg font-semibold" style={fieldStyle}>+</button>
+              </div>
+            </section>
+          ) : (
+            <section className="grid grid-cols-3 gap-2">
+              <label className="flex flex-col gap-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                Start
+                <input type="time" value={party.startTime} onChange={(e) => onUpdateParty({ startTime: e.target.value })} className="rounded-xl px-2 py-2 text-sm" style={fieldStyle} />
+              </label>
+              <label className="flex flex-col gap-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                Slut
+                <input type="time" value={party.endTime} onChange={(e) => onUpdateParty({ endTime: e.target.value })} className="rounded-xl px-2 py-2 text-sm" style={fieldStyle} />
+              </label>
+              <label className="flex flex-col gap-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                Gäster
+                <input
+                  type="number"
+                  min={1}
+                  value={party.guests}
+                  onChange={(e) => onUpdateParty({ guests: e.target.value === "" ? "" : Math.max(1, Math.round(Number(e.target.value) || 1)) })}
+                  className="rounded-xl px-2 py-2 text-sm"
+                  style={fieldStyle}
+                />
+              </label>
+            </section>
+          )}
+
+          {(pkg.choiceGroups || []).map((g) => {
+            const picked = choices[g.id] || [];
+            const need = g.min === g.max ? `Välj ${g.min}` : `Välj ${g.min}–${g.max}`;
+            const done = picked.length >= g.min && picked.length <= g.max;
+            return (
+              <section key={g.id}>
+                <div className="mb-2 flex items-baseline justify-between gap-2">
+                  <p className="text-sm font-semibold" style={{ color: colors.plum }}>{g.label}</p>
+                  <span className="text-xs font-semibold" style={{ color: done ? colors.green : colors.coralDeep }}>
+                    {need} · {picked.length} valda
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {g.options.map((o) => {
+                    const on = picked.includes(o.id);
+                    const full = !on && g.max > 1 && picked.length >= g.max;
+                    return (
+                      <button
+                        key={o.id}
+                        onClick={() => pick(g, o.id)}
+                        disabled={full}
+                        aria-pressed={on}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-sm"
+                        style={{ border: `1.5px solid ${on ? colors.coral : colors.beige}`, backgroundColor: on ? colors.coralSoft : colors.white, color: colors.plum, opacity: full ? 0.45 : 1 }}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center ${g.max === 1 ? "rounded-full" : "rounded-md"}`}
+                            style={{ border: `1.5px solid ${on ? colors.coral : colors.lilac}`, backgroundColor: on ? colors.coral : colors.white }}
+                          >
+                            {on && <Check size={12} color={colors.white} strokeWidth={3} />}
+                          </span>
+                          {o.label}
+                        </span>
+                        {Number(o.price) > 0 && <span style={{ color: colors.plumSoft }}>+{formatKr(Number(o.price))}{optSuffix}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
+
+          {addons.length > 0 && (
+            <section>
+              <p className="mb-2 text-sm font-semibold" style={{ color: colors.plum }}>Tillägg (valfritt)</p>
+              <div className="space-y-1.5">
+                {addons.map((a) => {
+                  const on = addonIds.includes(a.id);
+                  return (
+                    <label key={a.id} className="flex cursor-pointer items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-sm" style={{ border: `1.5px solid ${on ? colors.coral : colors.beige}`, backgroundColor: on ? colors.coralSoft : colors.white, color: colors.plum }}>
+                      <span className="flex items-center gap-2">
+                        <input type="checkbox" checked={on} onChange={() => toggleAddon(a.id)} />
+                        {a.name}
+                      </span>
+                      <span style={{ color: colors.plumSoft }}>{addonPriceLabel(a)}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+        </div>
+
+        <div className="px-6 py-4" style={{ borderTop: `1.5px solid ${colors.lilacSoft}` }}>
+          <div className="mb-1 flex items-baseline justify-between gap-2">
+            <span className="text-sm" style={{ color: colors.plumSoft }}>
+              {packageBreakdown({ ...pkg, name: "" }, party, quantity)}
+              {total > packageTotal(pkg, party, { quantity }) ? " + val och tillägg" : ""}
+            </span>
+            <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 22, color: colors.plum }}>{formatKr(total)}</span>
+          </div>
+          {problem && (
+            <p className="mb-2 text-sm font-semibold" style={{ color: colors.coralDeep }}>
+              {problem}
+            </p>
+          )}
+          <button
+            onClick={() => {
+              onAdd({ quantity, choices, addonIds });
+              onClose();
+            }}
+            disabled={!!problem}
+            className="mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-full text-sm font-semibold"
+            style={{ backgroundColor: colors.coral, color: colors.white, opacity: problem ? 0.45 : 1 }}
+          >
+            {entry ? "Spara ändringarna" : "Lägg till"} · {formatKr(total)}
+          </button>
+          {entry && (
+            <button
+              onClick={() => {
+                onRemove();
+                onClose();
+              }}
+              className="mt-2 w-full py-1.5 text-sm font-medium underline"
+              style={{ color: colors.plumSoft }}
+            >
+              Ta bort paketet
+            </button>
+          )}
+          <p className="mt-2 text-center text-xs" style={{ color: colors.plumSoft }}>
+            Leverantören bekräftar bokningen innan något är klart.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3623,7 +4232,7 @@ function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddo
 
         <div className="px-6 pb-4 pt-4" style={{ borderBottom: `1.5px solid ${colors.lilacSoft}` }}>
           <p style={{ fontFamily: serif, fontSize: 18, color: colors.plum }}>
-            {occasionInfo ? `${occasionInfo.emoji} ${occasionInfo.boardLabel}` : "Din fest"}
+            {occasionInfo ? `${occasionInfo.emoji} ${occasionInfo.boardLabel}` : "Ditt event"}
           </p>
           <div className="mt-2 flex flex-wrap gap-3 text-sm" style={{ color: colors.plumSoft }}>
             {party.date && (
@@ -3697,6 +4306,19 @@ function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddo
                           <p className="text-xs" style={{ color: colors.plumSoft }}>
                             {getBreakdownText(p, party)}
                           </p>
+                          {p.package && (p.package.choiceGroups || []).length > 0 && (
+                            <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                              {p.package.choiceGroups
+                                .map((g) => g.options.filter((o) => (p.choices?.[g.id] || []).includes(o.id)).map((o) => o.label).join(", "))
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          )}
+                          {p.package && (packageMisfit(p.package, party, p.quantity) || packageChoiceProblem(p.package, p.choices)) && (
+                            <p className="mt-0.5 text-xs font-semibold" style={{ color: colors.coralDeep }}>
+                              {packageMisfit(p.package, party, p.quantity) || packageChoiceProblem(p.package, p.choices)}. Ändra eller ta bort paketet.
+                            </p>
+                          )}
                         </div>
                         <div className="flex flex-shrink-0 flex-col items-end gap-1">
                           <span className="text-sm font-semibold" style={{ color: colors.plum }}>
@@ -3721,7 +4343,7 @@ function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddo
                               className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs"
                               style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}
                             >
-                              {a.name} (+{formatKr(a.price)}) <X size={11} />
+                              {a.name} ({addonPriceLabel(a)}) <X size={11} />
                             </button>
                           ))}
                         </div>
@@ -4155,7 +4777,10 @@ function ConfirmationView({ booking, onRestart, onMinaBokningar }) {
             const meta = BOOKING_STATUS_META[item.status] || BOOKING_STATUS_META.pending;
             return (
               <div key={item.id} className="flex items-center justify-between text-sm">
-                <span style={{ color: colors.plum }}>{item.name}</span>
+                <span style={{ color: colors.plum }}>
+                  {item.name}
+                  {item.packageName ? <span style={{ color: colors.plumSoft }}> · {item.packageName}</span> : null}
+                </span>
                 <span
                   className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
                   style={{ backgroundColor: meta.bg, color: meta.fg }}
@@ -4262,6 +4887,7 @@ function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem
                     <div key={item.id} className="flex items-center justify-between gap-2 text-sm">
                       <span className="flex items-center gap-2" style={{ color: colors.plum }}>
                         {Icon && <Icon size={14} color={colors.lilacDeep} />} {item.name}
+                        {item.packageName ? <span style={{ color: colors.plumSoft }}> · {item.packageName}</span> : null}
                       </span>
                       <div className="flex items-center gap-2">
                         <span style={{ color: colors.plumSoft }}>{formatKr(item.price)}</span>
@@ -6238,6 +6864,385 @@ function VendorTabBar({ active, unread, pending, onOverview, onBookings, onInbox
   );
 }
 
+// ---------------------------------------------------------------------------
+// Vendor editor for package cards ("rutor"): one block per category with the
+// category's packages, and the quote option that every vendor always has.
+// ---------------------------------------------------------------------------
+const pkgInput = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+const smallLabel = "flex flex-col gap-1 text-xs font-semibold";
+
+function PackageEditor({ pkg, index, count, onChange, onRemove, onMove }) {
+  const hint = packageHint(pkg.category);
+  const set = (field) => (e) => onChange(field, e.target.value);
+  const includes = pkg.includes?.length ? pkg.includes : [""];
+  const groups = pkg.choiceGroups || [];
+  const [open, setOpen] = useState(!pkg.name || !(Number(pkg.price) > 0));
+  const setGroups = (next) => onChange("choiceGroups", next);
+  const updGroup = (gi, patch) => setGroups(groups.map((g, i) => (i === gi ? { ...g, ...patch } : g)));
+  const updOption = (gi, oi, patch) => updGroup(gi, { options: groups[gi].options.map((o, i) => (i === oi ? { ...o, ...patch } : o)) });
+  const nextId = (list, prefix) => {
+    let n = list.length + 1;
+    while (list.some((x) => x.id === `${prefix}${n}`)) n += 1;
+    return `${prefix}${n}`;
+  };
+  const priced = Number(pkg.price) > 0;
+  const unitHint = PACKAGE_UNITS.find((u) => u.id === pkg.priceType)?.hint;
+
+  return (
+    <div className="rounded-2xl" style={{ backgroundColor: colors.cream, border: `1.5px solid ${priced ? colors.beige : colors.coral}` }}>
+      <div className="flex items-center gap-2 p-3">
+        <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="min-w-0 flex-1 text-left">
+          <span className="block truncate text-sm font-semibold" style={{ color: colors.plum }}>{pkg.name || "Nytt paket"}</span>
+          <span className="block text-xs" style={{ color: priced ? colors.plumSoft : colors.coralDeep }}>
+            {priced ? packagePriceLabel(pkg) : "Sätt ett pris, annars visas paketet inte"}
+          </span>
+        </button>
+        <button onClick={() => onMove(-1)} disabled={index === 0} aria-label="Flytta upp" title="Flytta upp" className="rounded-full p-2" style={{ backgroundColor: colors.white, opacity: index === 0 ? 0.35 : 1 }}>
+          <ChevronLeft size={14} color={colors.plum} style={{ transform: "rotate(90deg)" }} />
+        </button>
+        <button onClick={() => onMove(1)} disabled={index === count - 1} aria-label="Flytta ner" title="Flytta ner" className="rounded-full p-2" style={{ backgroundColor: colors.white, opacity: index === count - 1 ? 0.35 : 1 }}>
+          <ChevronRight size={14} color={colors.plum} style={{ transform: "rotate(90deg)" }} />
+        </button>
+        <button onClick={onRemove} aria-label="Ta bort paketet" title="Ta bort paketet" className="rounded-full p-2" style={{ backgroundColor: colors.white }}>
+          <Trash2 size={14} color={colors.coralDeep} />
+        </button>
+        <button onClick={() => setOpen((o) => !o)} className="rounded-full px-3 py-1.5 text-xs font-semibold" style={{ backgroundColor: colors.white, color: colors.plum }}>
+          {open ? "Stäng" : "Ändra"}
+        </button>
+      </div>
+
+      {open && (
+        <div className="space-y-4 border-t px-4 pb-4 pt-3" style={{ borderColor: colors.beige }}>
+          <label className={smallLabel} style={{ color: colors.plum }}>
+            Paketets namn
+            <input value={pkg.name} onChange={set("name")} placeholder={hint.name} className="rounded-lg px-3 py-2 text-sm font-normal" style={pkgInput} />
+          </label>
+          <label className={smallLabel} style={{ color: colors.plum }}>
+            Kort beskrivning (valfritt)
+            <textarea value={pkg.description} onChange={set("description")} rows={2} className="rounded-lg px-3 py-2 text-sm font-normal" style={pkgInput} />
+          </label>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className={smallLabel} style={{ color: colors.plum }}>
+              Hur räknas priset?
+              <select value={pkg.priceType} onChange={set("priceType")} className="rounded-lg px-2 py-2 text-sm font-normal" style={pkgInput}>
+                {PACKAGE_UNITS.map((u) => (
+                  <option key={u.id} value={u.id}>{u.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className={smallLabel} style={{ color: colors.plum }}>
+              Pris (kr{packageSuffix(pkg)})
+              <input type="number" inputMode="numeric" min={0} value={pkg.price} onChange={set("price")} placeholder="0" className="rounded-lg px-3 py-2 text-sm font-normal" style={{ ...pkgInput, borderColor: priced ? colors.beige : colors.coral }} />
+            </label>
+            {unitHint && <p className="col-span-2 -mt-1 text-xs" style={{ color: colors.plumSoft }}>{unitHint}.</p>}
+            {pkg.priceType === "per_unit" && (
+              <label className={`${smallLabel} col-span-2`} style={{ color: colors.plum }}>
+                Pris per vad? Skriv enheten
+                <input value={pkg.unitLabel} onChange={set("unitLabel")} placeholder="T.ex. bord, stolsklädsel, glas" maxLength={30} className="rounded-lg px-3 py-2 text-sm font-normal" style={pkgInput} />
+              </label>
+            )}
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-semibold" style={{ color: colors.plum }}>Det här ingår</p>
+            <div className="space-y-1.5">
+              {includes.map((line, i) => (
+                <div key={i} className="flex gap-2">
+                  <input
+                    value={line}
+                    onChange={(e) => onChange("includes", includes.map((x, j) => (j === i ? e.target.value : x)))}
+                    placeholder={hint.include}
+                    maxLength={120}
+                    className="min-w-0 flex-1 rounded-lg px-3 py-2 text-sm"
+                    style={pkgInput}
+                  />
+                  <button onClick={() => onChange("includes", includes.filter((_, j) => j !== i))} aria-label="Ta bort raden" className="rounded-full p-2" style={{ backgroundColor: colors.white }}>
+                    <X size={13} color={colors.plumSoft} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {includes.length < 20 && (
+              <button onClick={() => onChange("includes", [...includes, ""])} className="mt-1.5 flex items-center gap-1 text-xs font-semibold" style={{ color: colors.coralDeep }}>
+                <Plus size={12} /> Lägg till rad
+              </button>
+            )}
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold" style={{ color: colors.plum }}>Val som kunden gör (valfritt)</p>
+            <p className="mb-2 text-xs" style={{ color: colors.plumSoft }}>
+              T.ex. "Välj 4 förrätter" av 6. Ett val kan kosta extra, och då räknas det på samma sätt som paketets pris.
+            </p>
+            <div className="space-y-3">
+              {groups.map((g, gi) => (
+                <div key={g.id} className="rounded-xl p-3" style={{ backgroundColor: colors.white }}>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className={`${smallLabel} min-w-0 basis-full`} style={{ color: colors.plum }}>
+                      Rubrik
+                      <input value={g.label} onChange={(e) => updGroup(gi, { label: e.target.value })} placeholder={hint.group} maxLength={60} className="rounded-lg px-3 py-2 text-sm font-normal" style={pkgInput} />
+                    </label>
+                    <label className={`${smallLabel} w-16`} style={{ color: colors.plum }}>
+                      Minst
+                      <input type="number" min={0} value={g.min} onChange={(e) => updGroup(gi, { min: e.target.value === "" ? "" : Math.max(0, Math.round(Number(e.target.value))) })} className="rounded-lg px-2 py-2 text-sm font-normal" style={pkgInput} />
+                    </label>
+                    <label className={`${smallLabel} w-16`} style={{ color: colors.plum }}>
+                      Högst
+                      <input type="number" min={1} value={g.max} onChange={(e) => updGroup(gi, { max: e.target.value === "" ? "" : Math.max(1, Math.round(Number(e.target.value))) })} className="rounded-lg px-2 py-2 text-sm font-normal" style={pkgInput} />
+                    </label>
+                    <button onClick={() => setGroups(groups.filter((_, i) => i !== gi))} aria-label="Ta bort valet" className="mb-0.5 ml-auto flex items-center gap-1 rounded-full px-3 py-2 text-xs font-semibold" style={{ backgroundColor: colors.cream, color: colors.coralDeep }}>
+                      <Trash2 size={13} color={colors.coralDeep} /> Ta bort valet
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs" style={{ color: colors.plumSoft }}>
+                    Kunden väljer {Number(g.min) === Number(g.max) ? `exakt ${g.min || 0}` : `${g.min || 0}–${g.max || 0}`} av {g.options.filter((o) => String(o.label).trim()).length} alternativ.
+                  </p>
+                  <div className="mt-2 space-y-1.5">
+                    {g.options.map((o, oi) => (
+                      <div key={o.id} className="flex gap-2">
+                        <input value={o.label} onChange={(e) => updOption(gi, oi, { label: e.target.value })} placeholder={hint.option} maxLength={60} className="min-w-0 flex-1 rounded-lg px-3 py-2 text-sm" style={pkgInput} />
+                        <input type="number" min={0} value={o.price ?? ""} onChange={(e) => updOption(gi, oi, { price: e.target.value })} placeholder="+ kr" aria-label="Extra pris" className="w-16 flex-shrink-0 rounded-lg px-2 py-2 text-sm" style={pkgInput} />
+                        <button onClick={() => updGroup(gi, { options: g.options.filter((_, i) => i !== oi) })} aria-label="Ta bort alternativet" className="rounded-full p-2" style={{ backgroundColor: colors.cream }}>
+                          <X size={13} color={colors.plumSoft} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  {g.options.length < 30 && (
+                    <button onClick={() => updGroup(gi, { options: [...g.options, { id: nextId(g.options, "o"), label: "", price: "" }] })} className="mt-1.5 flex items-center gap-1 text-xs font-semibold" style={{ color: colors.coralDeep }}>
+                      <Plus size={12} /> Lägg till alternativ
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {groups.length < 10 && (
+              <button
+                onClick={() => setGroups([...groups, { id: nextId(groups, "g"), label: "", min: 1, max: 1, options: emptyOptions(2) }])}
+                className="mt-2 flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold"
+                style={{ backgroundColor: colors.coralSoft, color: colors.coralDeep }}
+              >
+                <Plus size={12} /> Lägg till ett val
+              </button>
+            )}
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-semibold" style={{ color: colors.plum }}>Gränser (valfritt)</p>
+            <div className="grid grid-cols-2 gap-2">
+              <label className={smallLabel} style={{ color: colors.plumSoft }}>
+                {pkg.priceType === "per_unit" ? "Minsta antal" : "Minst antal gäster"}
+                <input type="number" min={1} value={pkg.minGuests} onChange={set("minGuests")} className="rounded-lg px-3 py-2 text-sm font-normal" style={pkgInput} />
+              </label>
+              <label className={smallLabel} style={{ color: colors.plumSoft }}>
+                {pkg.priceType === "per_unit" ? "Högsta antal" : "Max antal gäster"}
+                <input type="number" min={1} value={pkg.maxGuests} onChange={set("maxGuests")} className="rounded-lg px-3 py-2 text-sm font-normal" style={pkgInput} />
+              </label>
+              {pkg.priceType === "per_hour" && (
+                <label className={smallLabel} style={{ color: colors.plumSoft }}>
+                  Minsta antal timmar
+                  <input type="number" min={0.5} step={0.5} value={pkg.minHours} onChange={set("minHours")} className="rounded-lg px-3 py-2 text-sm font-normal" style={pkgInput} />
+                </label>
+              )}
+              <label className={`${smallLabel} col-span-2`} style={{ color: colors.plumSoft }}>
+                Bara vissa tider (t.ex. 18:00–02:00)
+                <span className="flex items-center gap-2">
+                  <input type="time" value={pkg.timeFrom} onChange={set("timeFrom")} className="flex-1 rounded-lg px-2 py-2 text-sm font-normal" style={pkgInput} aria-label="Från" />
+                  –
+                  <input type="time" value={pkg.timeTo} onChange={set("timeTo")} className="flex-1 rounded-lg px-2 py-2 text-sm font-normal" style={pkgInput} aria-label="Till" />
+                  {(pkg.timeFrom || pkg.timeTo) && (
+                    <button onClick={() => { onChange("timeFrom", ""); onChange("timeTo", ""); }} aria-label="Ta bort tiderna" className="rounded-full p-2" style={{ backgroundColor: colors.white }}>
+                      <X size={13} color={colors.plumSoft} />
+                    </button>
+                  )}
+                </span>
+              </label>
+            </div>
+            <p className="mt-1 text-xs" style={{ color: colors.plumSoft }}>
+              Passar inte kundens gäster eller tid blir paketet grått, och kunden kan kontakta er.
+              {pkg.priceType === "per_hour" ? " Är eventet kortare än minsta tiden betalar kunden ändå för minsta tiden." : ""}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VendorPackagesSection({ vendor, onAddService, onUpdateService, onRemoveService, onMoveService, onAddAddon, onUpdateAddon, onRemoveAddon, onRequestForm }) {
+  const services = vendor.profile.services;
+  const addons = vendor.profile.addons;
+  const allPackages = services.filter((s) => s.priceType !== "quote");
+  const setDirect = (cat, on) => onRequestForm(cat, { ...(vendor.requestForms?.[cat] || {}), fields: vendor.requestForms?.[cat]?.fields || [], direct: on });
+  const toggleLink = (a, sid) =>
+    onUpdateAddon(a.id, "serviceIds", (a.serviceIds || []).includes(sid) ? a.serviceIds.filter((x) => x !== sid) : [...(a.serviceIds || []), sid]);
+
+  return (
+    <>
+      {vendor.categories.map((cat) => {
+        const label = catMap[cat]?.label || cat;
+        const packages = services.filter((s) => s.priceType !== "quote" && (s.category === cat || (!s.category && vendor.categories.length === 1)));
+        const quote = services.find((s) => s.priceType === "quote" && (s.category === cat || (!s.category && vendor.categories.length === 1)));
+        const quoteFirst = QUOTE_FIRST_CATEGORIES.includes(cat);
+        const directSetting = vendor.requestForms?.[cat]?.direct;
+        const on = quoteFirst ? directSetting === true : directSetting !== false;
+        return (
+          <section key={cat} className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+            <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
+              {label}: paket & priser
+            </h2>
+
+            {quoteFirst && !on ? (
+              <>
+                <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
+                  Kunder skickar en förfrågan och ni svarar med en offert. Har ni även fasta paket, till exempel en ballongbåge för 2 500 kr, kan kunderna boka dem direkt.
+                </p>
+                <button
+                  onClick={() => {
+                    setDirect(cat, true);
+                    if (packages.length === 0) onAddService(cat, "package");
+                  }}
+                  className="mb-5 flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold"
+                  style={{ border: `2px dashed ${colors.coral}`, color: colors.coralDeep, backgroundColor: colors.coralSoft + "55" }}
+                >
+                  <Plus size={15} /> Vill ni även visa färdiga paketpriser? Klicka här
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
+                  Varje paket blir en vit ruta på er sida som kunden kan lägga direkt i sin bokning. Ni bekräftar sedan bokningen.
+                </p>
+                <div className="space-y-3">
+                  {packages.map((s, i) => (
+                    <PackageEditor
+                      key={s.id}
+                      pkg={{ ...s, category: cat }}
+                      index={i}
+                      count={packages.length}
+                      onChange={(field, value) => onUpdateService(s.id, field, value)}
+                      onRemove={() => onRemoveService(s.id)}
+                      onMove={(dir) => onMoveService(s.id, dir)}
+                    />
+                  ))}
+                </div>
+                {packages.length === 0 && (
+                  <p className="text-xs" style={{ color: colors.plumSoft }}>
+                    Inga paket än. Utan paket kan kunder bara skicka en förfrågan.
+                  </p>
+                )}
+                <button onClick={() => onAddService(cat, "package")} className="mt-3 flex items-center gap-1 rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coralSoft, color: colors.coralDeep }}>
+                  <Plus size={14} /> Nytt paket
+                </button>
+                {packages.length > 0 && (
+                  <label className="mt-4 flex items-start gap-2 text-sm" style={{ color: colors.plum }}>
+                    <input type="checkbox" className="mt-1" checked={on} onChange={(e) => setDirect(cat, e.target.checked)} />
+                    <span>
+                      Visa paketen för kunder
+                      <span className="block text-xs" style={{ color: colors.plumSoft }}>
+                        Avmarkera för att tillfälligt bara ta emot förfrågningar. Paketen sparas.
+                      </span>
+                    </span>
+                  </label>
+                )}
+                {quoteFirst && (
+                  <button onClick={() => setDirect(cat, false)} className="mt-2 text-xs underline" style={{ color: colors.plumSoft }}>
+                    Visa inte paketpriser, bara offert
+                  </button>
+                )}
+              </>
+            )}
+
+            <div className="mt-5 rounded-2xl p-4" style={{ backgroundColor: colors.lilacSoft }}>
+              <p className="text-sm font-semibold" style={{ color: colors.plum }}>Offert</p>
+              <p className="mb-3 text-xs" style={{ color: colors.plumSoft }}>
+                Alla kunder kan alltid skicka en förfrågan till er. Ett från-pris hjälper dem att veta om ni passar budgeten.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={quote?.fromPrice ?? ""}
+                  onChange={(e) => (quote ? onUpdateService(quote.id, "fromPrice", e.target.value) : onAddService(cat, "quote", { fromPrice: e.target.value }))}
+                  placeholder="Från-pris (kr)"
+                  aria-label="Från-pris för offert"
+                  className="rounded-lg px-3 py-2 text-sm"
+                  style={pkgInput}
+                />
+                <input
+                  value={quote?.description ?? ""}
+                  onChange={(e) => (quote ? onUpdateService(quote.id, "description", e.target.value) : onAddService(cat, "quote", { description: e.target.value }))}
+                  placeholder='T.ex. "Pris utifrån önskemål och storlek"'
+                  aria-label="Text om offert"
+                  className="rounded-lg px-3 py-2 text-sm sm:col-span-2"
+                  style={pkgInput}
+                />
+              </div>
+            </div>
+          </section>
+        );
+      })}
+
+      <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+        <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
+          Tillägg (valfritt)
+        </h2>
+        <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
+          Extra saker kunden kan lägga till, till exempel vinpaket, champagne eller rökmaskin. Skapa ett tillägg en gång och välj vilka paket det hör till.
+        </p>
+        <div className="space-y-3">
+          {addons.map((a) => (
+            <div key={a.id} className="rounded-2xl p-3" style={{ backgroundColor: colors.cream }}>
+              <div className="flex flex-wrap items-center gap-2">
+                <input value={a.name} onChange={(e) => onUpdateAddon(a.id, "name", e.target.value)} placeholder="T.ex. Vinpaket" className="min-w-[140px] flex-1 rounded-lg px-3 py-2 text-sm" style={pkgInput} />
+                <input type="number" value={a.price} onChange={(e) => onUpdateAddon(a.id, "price", e.target.value)} placeholder="Pris (kr)" className="w-24 rounded-lg px-3 py-2 text-sm" style={pkgInput} />
+                <select value={a.priceType || "fixed"} onChange={(e) => onUpdateAddon(a.id, "priceType", e.target.value)} className="rounded-lg px-2 py-2 text-sm" style={pkgInput} aria-label="Hur räknas tillägget?">
+                  <option value="fixed">Fast pris</option>
+                  <option value="per_person">Per person</option>
+                </select>
+                <button onClick={() => onRemoveAddon(a.id)} aria-label="Ta bort tillägget" className="rounded-full p-2" style={{ backgroundColor: colors.white }}>
+                  <Trash2 size={14} color={colors.coralDeep} />
+                </button>
+              </div>
+              {allPackages.length > 0 ? (
+                <div className="mt-2">
+                  <p className="mb-1 text-xs" style={{ color: colors.plumSoft }}>Gäller för:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {allPackages.map((s) => {
+                      const linked = (a.serviceIds || []).includes(s.id);
+                      return (
+                        <button
+                          key={s.id}
+                          onClick={() => toggleLink(a, s.id)}
+                          aria-pressed={linked}
+                          className="flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold"
+                          style={{ backgroundColor: linked ? colors.coral : colors.white, color: linked ? colors.white : colors.plum, border: `1px solid ${linked ? colors.coral : colors.beige}` }}
+                        >
+                          {linked && <Check size={11} />} {s.name || "Namnlöst paket"}
+                          {vendor.categories.length > 1 ? ` (${catMap[s.category]?.label || ""})` : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(a.serviceIds || []).filter((id) => allPackages.some((s) => s.id === id)).length === 0 && (
+                    <p className="mt-1 text-xs" style={{ color: colors.coralDeep }}>Välj minst ett paket, annars syns tillägget inte.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs" style={{ color: colors.plumSoft }}>Skapa ett paket först, sedan kopplar ni tillägget till det.</p>
+              )}
+            </div>
+          ))}
+        </div>
+        <button onClick={() => onAddAddon([])} className="mt-4 flex items-center gap-1 rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coralSoft, color: colors.coralDeep }}>
+          <Plus size={14} /> Nytt tillägg
+        </button>
+      </section>
+    </>
+  );
+}
+
 function VendorProfileEditorView({
   vendor,
   onField,
@@ -6255,6 +7260,7 @@ function VendorProfileEditorView({
   onAddAddon,
   onUpdateAddon,
   onRemoveAddon,
+  onMoveService,
   onPreview,
   onDashboard,
   onShowToast,
@@ -6443,200 +7449,17 @@ function VendorProfileEditorView({
 
       </section>
 
-      {vendor.categories.length > 0 && (() => {
-        const quoteMode = vendor.categories.every((c) => vendor.requestForms?.[c]?.direct === false || !vendor.profile.services.some((sv) => (!sv.category || sv.category === c) && Number(sv.price) > 0));
-        const choose = (mode) => vendor.categories.forEach((c) => onRequestForm(c, { ...(vendor.requestForms?.[c] || {}), direct: mode === "fixed" }));
-        const options = [
-          { id: "fixed", title: "Fasta priser", text: "Kunder ser ert pris och bokar direkt. Ni bekräftar sedan bokningen." },
-          { id: "quote", title: "Offert efter samtal", text: "Kunder skickar en förfrågan, ni diskuterar och skickar en offert med ert pris. Passar när priset beror på uppdraget." },
-        ];
-        return (
-          <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
-            <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
-              Hur vill ni sätta pris?
-            </h2>
-            <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
-              Välj hur kunder bokar er. Ni kan ändra när som helst.
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {options.map((o) => {
-                const active = (o.id === "quote") === quoteMode;
-                return (
-                  <button
-                    key={o.id}
-                    onClick={() => choose(o.id)}
-                    className="rounded-2xl p-4 text-left"
-                    style={{ border: `2px solid ${active ? colors.coral : colors.beige}`, backgroundColor: active ? colors.coralSoft : colors.white }}
-                    aria-pressed={active}
-                  >
-                    <p className="font-semibold" style={{ color: colors.plum }}>{o.title}</p>
-                    <p className="mt-1 text-xs" style={{ color: colors.plumSoft }}>{o.text}</p>
-                  </button>
-                );
-              })}
-            </div>
-            {quoteMode && (
-              <p className="mt-3 text-xs" style={{ color: colors.plumSoft }}>
-                Tips: välj <strong>Pris enligt överenskommelse</strong> på era tjänster nedan, eller ange ett riktpris i prisnoteringen.
-              </p>
-            )}
-          </section>
-        );
-      })()}
-
-      <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
-        <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
-          Tjänster & priser
-        </h2>
-        <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
-          Lägg till det ni säljer, ett paket eller en tjänst i taget. Skriv namn, vad som ingår och priset.
-        </p>
-        {vendor.profile.services.length === 0 && (
-          <p className="mb-3 text-xs" style={{ color: colors.coralDeep }}>
-            Lägg till minst en tjänst.
-          </p>
-        )}
-        <div className="space-y-4">
-          {vendor.profile.services.map((s) => (
-            <div key={s.id} className="rounded-2xl p-4" style={{ backgroundColor: colors.cream }}>
-              <div className="flex items-start justify-between gap-2">
-                <input
-                  value={s.name}
-                  onChange={(e) => onUpdateService(s.id, "name", e.target.value)}
-                  placeholder="T.ex. DJ-paket 4 timmar"
-                  className="flex-1 rounded-lg px-3 py-2 text-sm font-medium"
-                  style={fieldInputStyle}
-                />
-                <button onClick={() => onRemoveService(s.id)} className="flex-shrink-0 rounded-full p-2" style={{ backgroundColor: colors.white }}>
-                  <Trash2 size={14} color={colors.coralDeep} />
-                </button>
-              </div>
-              <textarea
-                value={s.description}
-                onChange={(e) => onUpdateService(s.id, "description", e.target.value)}
-                placeholder="Kort beskrivning"
-                rows={2}
-                className="mt-2 w-full rounded-lg px-3 py-2 text-sm"
-                style={fieldInputStyle}
-              />
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {vendor.categories.length > 1 && (
-                <select
-                  value={s.category || ""}
-                  onChange={(e) => onUpdateService(s.id, "category", e.target.value)}
-                  className="col-span-2 rounded-lg px-2 py-2 text-sm sm:col-span-1"
-                  style={fieldInputStyle}
-                  aria-label="Vilken kategori hör tjänsten till?"
-                >
-                  <option value="">Välj kategori</option>
-                  {vendor.categories.map((catId) => (
-                    <option key={catId} value={catId}>
-                      {catMap[catId]?.label}
-                    </option>
-                  ))}
-                </select>
-                )}
-                <select
-                  value={s.priceType}
-                  onChange={(e) => onUpdateService(s.id, "priceType", e.target.value)}
-                  className="rounded-lg px-2 py-2 text-sm"
-                  style={fieldInputStyle}
-                >
-                  <option value="fixed">Fast pris</option>
-                  <option value="per_person">Per person</option>
-                  <option value="per_hour">Per timme</option>
-                  <option value="quote">Pris enligt överenskommelse</option>
-                </select>
-                {s.priceType === "quote" ? (
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    value={s.fromPrice ?? ""}
-                    onChange={(e) => onUpdateService(s.id, "fromPrice", e.target.value)}
-                    placeholder="Från-pris (kr) *"
-                    aria-label="Ungefärligt från-pris i kronor"
-                    className="rounded-lg px-3 py-2 text-sm"
-                    style={{ ...fieldInputStyle, border: `1.5px solid ${Number(s.fromPrice) > 0 ? colors.beige : colors.coral}` }}
-                  />
-                ) : (
-                  <input
-                    type="number"
-                    value={s.price}
-                    onChange={(e) => onUpdateService(s.id, "price", e.target.value)}
-                    placeholder="Pris (kr)"
-                    className="rounded-lg px-3 py-2 text-sm"
-                    style={fieldInputStyle}
-                  />
-                )}
-                <input
-                  value={s.priceNote}
-                  onChange={(e) => onUpdateService(s.id, "priceNote", e.target.value)}
-                  placeholder={s.priceType === "quote" ? "T.ex. \"beroende på antal gäster\"" : "Extra info om priset (valfritt)"}
-                  className="rounded-lg px-3 py-2 text-sm"
-                  style={fieldInputStyle}
-                />
-              </div>
-              {s.priceType === "quote" && !(Number(s.fromPrice) > 0) && (
-                <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
-                  Skriv ett ungefärligt från-pris. Kunderna ser "från ... kr" och vet direkt om ni passar budgeten. Det slutliga priset sätter ni i offerten.
-                </p>
-              )}
-              {!s.category && vendor.categories.length > 1 && (
-                <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
-                  Välj vilken kategori tjänsten hör till.
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={onAddService}
-          className="mt-4 flex items-center gap-1 rounded-full px-4 py-2 text-sm font-semibold"
-          style={{ backgroundColor: colors.coralSoft, color: colors.coralDeep }}
-        >
-          <Plus size={14} /> Lägg till tjänst
-        </button>
-      </section>
-
-      <section className="mb-6 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
-        <h2 className="mb-1" style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>
-          Tillägg (valfritt)
-        </h2>
-        <p className="mb-4 text-sm" style={{ color: colors.plumSoft }}>
-          Extra saker kunden kan lägga till mot en kostnad, till exempel rökmaskin eller extra timme. Hoppa över om det inte passar.
-        </p>
-        <div className="space-y-3">
-          {vendor.profile.addons.map((a) => (
-            <div key={a.id} className="flex items-center gap-2">
-              <input
-                value={a.name}
-                onChange={(e) => onUpdateAddon(a.id, "name", e.target.value)}
-                placeholder="T.ex. Rökmaskin"
-                className="flex-1 rounded-lg px-3 py-2 text-sm"
-                style={fieldInputStyle}
-              />
-              <input
-                type="number"
-                value={a.price}
-                onChange={(e) => onUpdateAddon(a.id, "price", e.target.value)}
-                placeholder="Pris (kr)"
-                className="w-28 rounded-lg px-3 py-2 text-sm"
-                style={fieldInputStyle}
-              />
-              <button onClick={() => onRemoveAddon(a.id)} className="flex-shrink-0 rounded-full p-2" style={{ backgroundColor: colors.cream }}>
-                <Trash2 size={14} color={colors.coralDeep} />
-              </button>
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={onAddAddon}
-          className="mt-4 flex items-center gap-1 rounded-full px-4 py-2 text-sm font-semibold"
-          style={{ backgroundColor: colors.coralSoft, color: colors.coralDeep }}
-        >
-          <Plus size={14} /> Lägg till tillägg
-        </button>
-      </section>
+      <VendorPackagesSection
+        vendor={vendor}
+        onAddService={onAddService}
+        onUpdateService={onUpdateService}
+        onRemoveService={onRemoveService}
+        onMoveService={onMoveService}
+        onAddAddon={onAddAddon}
+        onUpdateAddon={onUpdateAddon}
+        onRemoveAddon={onRemoveAddon}
+        onRequestForm={onRequestForm}
+      />
 
       {vendor.categories.length > 0 && (
         <div className="mb-6">
@@ -8871,7 +9694,7 @@ function RequestFormEditor({ categoryId, form, hasPrice, onChange }) {
   const useTemplate = () =>
     emit({
       fields: (REQUEST_TEMPLATES[categoryId] || DEFAULT_REQUEST_FIELDS).map((f) => ({ ...f, options: f.options ? f.options.map((o) => ({ ...o })) : undefined })),
-      ...(categoryId === "tarta" ? { direct: false } : {}),
+      ...(categoryId === "tarta" && form?.direct !== true ? { direct: false } : {}),
     });
   const setOption = (i, k, patch) => setField(i, { options: fields[i].options.map((o, j) => (j === k ? { ...o, ...patch } : o)) });
 
@@ -9107,6 +9930,34 @@ function MessagesPanel({ open, conversations, soundOn, onToggleSound, onOpen, on
   );
 }
 
+// What the customer picked in a booked package, as saved when they booked.
+function PackageDetails({ name, details }) {
+  if (!name && !details) return null;
+  const groups = (details?.groups || []).filter((g) => (g.picked || []).length);
+  const adds = details?.addons || [];
+  const qty = details?.unit === "per_unit" ? `${details.quantity} ${String(details.unit_label || "st").replace(/^per\s+/i, "")}` : "";
+  return (
+    <div className="mt-3 rounded-xl p-3 text-sm" style={{ backgroundColor: colors.white, color: colors.plum }}>
+      {name && (
+        <p className="font-semibold">
+          {name}
+          {qty ? ` · ${qty}` : ""}
+        </p>
+      )}
+      {groups.map((g, i) => (
+        <p key={i} className="mt-1">
+          <span style={{ color: colors.plumSoft }}>{g.label}:</span> {g.picked.join(", ")}
+        </p>
+      ))}
+      {adds.length > 0 && (
+        <p className="mt-1">
+          <span style={{ color: colors.plumSoft }}>Tillägg:</span> {adds.map((a) => a.name).join(", ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime, onRemoveBlockedTime, onShowToast, onFetchGuestContact }) {
   const [blockDate, setBlockDate] = useState("");
   const [blockStart, setBlockStart] = useState("09:00");
@@ -9219,7 +10070,7 @@ function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime,
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <p className="font-semibold" style={{ color: colors.plum }}>
-                        {occasionInfo ? `${occasionInfo.emoji} ${occasionInfo.boardLabel}` : "Kundens fest"}
+                        {occasionInfo ? `${occasionInfo.emoji} ${occasionInfo.boardLabel}` : "Kundens event"}
                       </p>
                       <p className="mt-1 flex flex-wrap gap-3 text-sm" style={{ color: colors.plumSoft }}>
                         <span className="flex items-center gap-1">
@@ -9235,6 +10086,7 @@ function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime,
                     </div>
                     <span style={{ fontFamily: serif, fontSize: 17, color: colors.plum }}>{formatKr(i.price)}</span>
                   </div>
+                  <PackageDetails name={i.packageName} details={i.packageDetails} />
                   <div className="mt-3 flex gap-2">
                     <button
                       onClick={() => onRespond(i.bookingNumber, i.id, "declined")}
@@ -9281,6 +10133,7 @@ function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime,
                     </span>
                     <span style={{ color: colors.plumSoft }}>{formatKr(e.item.price)}</span>
                   </div>
+                  <PackageDetails name={e.item.packageName} details={e.item.packageDetails} />
                   {e.item.isGuest && onFetchGuestContact && <GuestContact bookingId={e.item.bookingId} fetchContact={onFetchGuestContact} />}
                 </div>
               ) : (
@@ -10665,6 +11518,8 @@ export default function App() {
             providerId: i.vendor_id ? `${i.vendor_id}-${i.category_id}` : i.id,
             vendorId: i.vendor_id,
             name: i.name,
+            packageName: i.package_name || "",
+            packageDetails: i.package_details || null,
             category: i.category_id,
             price: i.price,
             status: i.status,
@@ -10705,6 +11560,8 @@ export default function App() {
             providerId: `${item.vendor_id}-${item.category_id}`,
             vendorId: item.vendor_id,
             name: item.name,
+            packageName: item.package_name || "",
+            packageDetails: item.package_details || null,
             category: item.category_id,
             price: item.price,
             status: item.status,
@@ -11070,12 +11927,32 @@ export default function App() {
 
   const cart = cartItems
     .map((ci) => {
+      if (ci.pkg) {
+        // A package card: the vendor's listing, priced by the chosen package
+        const provider = customerProviders.find((p) => p.id === ci.pkg.providerId);
+        const pkg = provider?.packages?.find((x) => x.id === ci.pkg.serviceId);
+        if (!provider || !pkg) return null;
+        return {
+          ...provider,
+          id: ci.id,
+          providerId: provider.id,
+          serviceId: pkg.id,
+          package: pkg,
+          packageName: pkg.name,
+          quantity: ci.pkg.quantity || 1,
+          choices: ci.pkg.choices || {},
+          addons: pkg.addons || [],
+          chosenAddons: ci.addons,
+          pricing: { type: pkg.priceType, amount: Number(pkg.price) || 0, note: pkg.name, suffix: packageSuffix(pkg) },
+          requestOnly: false,
+        };
+      }
       const provider = customerProviders.find((p) => p.id === ci.id);
       return provider ? { ...provider, chosenAddons: ci.addons } : null;
     })
     .filter(Boolean);
   const total = cart.reduce((sum, p) => sum + getLineTotal(p, p.chosenAddons, party), 0);
-  const cartProviderIds = cartItems.map((ci) => ci.id);
+  const cartProviderIds = cartItems.map((ci) => (ci.pkg ? ci.pkg.providerId : ci.id));
 
   const sortWithinCategory = (list) => {
     const sorted = [...list];
@@ -11124,6 +12001,22 @@ export default function App() {
       return;
     }
     setCartItems((c) => (c.some((x) => x.id === id) ? c : [...c, { id, addons: addonIds }]));
+  };
+  // Adds (or updates) one package card. Choosing the same package again replaces the earlier choices.
+  const addPackageToCart = (provider, pkg, { quantity = 1, choices = {}, addonIds = [] } = {}) => {
+    const id = `${provider.id}::${pkg.id}`;
+    const entry = { id, addons: addonIds, pkg: { providerId: provider.id, serviceId: pkg.id, quantity, choices } };
+    if (swapContext) {
+      setCartItems((c) => c.filter((x) => x.id !== swapContext.oldId && x.id !== id).concat(entry));
+      setSwapContext(null);
+      setView("results");
+      setCartOpen(true);
+      showToast("Utbytt ✓");
+      return;
+    }
+    const existed = cartItems.some((x) => x.id === id);
+    setCartItems((c) => (c.some((x) => x.id === id) ? c.map((x) => (x.id === id ? entry : x)) : [...c, entry]));
+    showToast(existed ? "Paketet är uppdaterat ✓" : `${pkg.name || "Paketet"} är tillagt ✓`);
   };
   const removeFromCart = (id) => {
     // A removed accepted quote must not come back into the cart at the next login
@@ -11175,8 +12068,19 @@ export default function App() {
     setView("checkout");
   };
 
+  // A package that no longer fits (guests or time changed) or lacks a choice can't be booked.
+  const cartPackageProblem = () => {
+    const bad = cart.find((p) => p.package && (packageMisfit(p.package, party, p.quantity) || packageChoiceProblem(p.package, p.choices)));
+    return bad ? `${bad.packageName || bad.name}: ${packageMisfit(bad.package, party, bad.quantity) || packageChoiceProblem(bad.package, bad.choices)}. Ändra paketet i din bokning.` : "";
+  };
+
   const confirmBooking = async (company = null) => {
     const companyFields = company && typeof company === "object" && company.company_name ? company : {};
+    const pkgProblem = cartPackageProblem();
+    if (pkgProblem) {
+      showToast(pkgProblem);
+      return;
+    }
     if (!session?.access_token) {
       openAuthModal("signin");
       showToast("Logga in för att slutföra bokningen");
@@ -11212,6 +12116,7 @@ export default function App() {
       quote_message_id: p.quoteMessageId || null,
       service_id: isUuid(p.serviceId) ? p.serviceId : null,
       addon_ids: (p.chosenAddons || []).filter(isUuid),
+      ...(p.package ? { quantity: p.quantity || 1, choices: p.choices || {} } : {}),
     }));
     const { data: itemRows, error: itemsError } = await supabaseRestRequest("/booking_items", session.access_token, {
       method: "POST",
@@ -11224,6 +12129,8 @@ export default function App() {
       showToast(
         String(itemsError?.message || "").includes("vendor_busy")
           ? "En av leverantörerna hann bli bokad den tiden. Välj en annan tid eller en annan leverantör."
+          : String(itemsError?.message || "").includes("package_")
+          ? "Ett av paketen passar inte antalet gäster, tiden eller valen. Kontrollera paketen och försök igen."
           : "Bokningen kunde inte slutföras" + (itemsError?.message ? `: ${itemsError.message}` : "") + ". Försök igen."
       );
       setBusyRefresh((n) => n + 1);
@@ -11245,6 +12152,8 @@ export default function App() {
         providerId: cart[i].id,
         vendorId: row.vendor_id ?? cart[i].vendorDbId ?? null,
         name: row.name,
+        packageName: row.package_name || "",
+        packageDetails: row.package_details || null,
         category: row.category_id,
         price: row.price,
         status: row.status || "pending",
@@ -11265,6 +12174,11 @@ export default function App() {
 
   const submitGuestBooking = async ({ name, email, phone }) => {
     setGuestError("");
+    const pkgProblem = cartPackageProblem();
+    if (pkgProblem) {
+      setGuestError(pkgProblem);
+      return;
+    }
     setGuestSubmitting(true);
     const { error } = await guestRequest({
       action: "create",
@@ -11272,7 +12186,7 @@ export default function App() {
       email,
       phone,
       party: { date: party.date, start: party.startTime, end: party.endTime, guests: Number(party.guests) || 1, occasion: party.occasion || "" },
-      items: cart.map((p) => ({ vendor_id: p.vendorDbId, category_id: p.category, name: p.name, service_id: p.serviceId, addon_ids: (p.chosenAddons || []).filter(isUuid) })),
+      items: cart.map((p) => ({ vendor_id: p.vendorDbId, category_id: p.category, name: p.name, service_id: p.serviceId, addon_ids: (p.chosenAddons || []).filter(isUuid), quantity: p.quantity || 1, choices: p.choices || {} })),
     });
     setGuestSubmitting(false);
     if (error) {
@@ -12462,16 +13376,39 @@ export default function App() {
   // Batch-saves the profile editor's changes to the database before leaving it.
   const saveVendorProfileAndGo = async (nextView) => {
     if (submittedVendor && session?.access_token) {
-      await saveVendorProfile(submittedVendor, session.access_token);
+      const res = await saveVendorProfile(submittedVendor, session.access_token);
+      if (res?.error) {
+        showToast("Kunde inte spara: " + (res.error.message || "kontrollera paketen och försök igen"));
+        return;
+      }
+      applySavedIds(res?.idMap);
       showToast("Sparat ✓");
     }
     setView(nextView);
+  };
+  // New packages get their permanent ids when saved; keep the editor in step with them.
+  const applySavedIds = (idMap) => {
+    if (!idMap || Object.keys(idMap).length === 0) return;
+    const m = (id) => idMap[id] || id;
+    patchVendor((v) => ({
+      ...v,
+      profile: {
+        ...v.profile,
+        services: v.profile.services.map((s) => ({ ...s, id: m(s.id) })),
+        addons: v.profile.addons.map((a) => ({ ...a, id: m(a.id), serviceIds: (a.serviceIds || []).map(m) })),
+      },
+    }));
   };
   const saveAndGoDashboard = () => saveVendorProfileAndGo("vendorDashboard");
   // A rejected vendor saves the changes and sends the application in again (rejected -> pending).
   const resubmitVendorApplication = async () => {
     if (!submittedVendor || !session?.access_token) return;
-    await saveVendorProfile(submittedVendor, session.access_token);
+    const saved = await saveVendorProfile(submittedVendor, session.access_token);
+    if (saved?.error) {
+      showToast("Kunde inte spara: " + (saved.error.message || "kontrollera paketen och försök igen"));
+      return;
+    }
+    applySavedIds(saved?.idMap);
     const { error } = await supabaseRestRequest(`/vendors?id=eq.${submittedVendor.id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ status: "pending" }) });
     if (error) {
       showToast("Ändringarna är sparade, men ansökan kunde inte skickas om. Försök igen.");
@@ -12578,17 +13515,34 @@ export default function App() {
     });
   const uploadVendorImageFile = (file) => uploadVendorImage(file, session);
 
-  const addVendorService = () =>
-    patchVendor((v) => ({
-      ...v,
-      profile: {
-        ...v.profile,
-        services: [
-          ...v.profile.services,
-          { id: "srv-" + Date.now(), name: "", description: "", priceType: "fixed", price: "", priceNote: "", category: v.categories[0] || "" },
-        ],
-      },
-    }));
+  // Adds a package card (or, with priceType "quote", the quote description) for a category,
+  // filled from the category's template so the vendor only adjusts it.
+  const addVendorService = (category, kind = "package", extra = {}) =>
+    patchVendor((v) => {
+      const cat = category || v.categories[0] || "";
+      const base = kind === "quote" ? { priceType: "quote", name: "", description: "" } : newPackageFromTemplate(cat);
+      return {
+        ...v,
+        profile: {
+          ...v.profile,
+          services: [
+            ...v.profile.services,
+            { unitLabel: "", minGuests: "", maxGuests: "", timeFrom: "", timeTo: "", minHours: "", includes: [], choiceGroups: [], price: "", priceNote: "", fromPrice: "", ...base, ...extra, id: newId(), category: cat },
+          ],
+        },
+      };
+    });
+  const moveVendorService = (id, dir) =>
+    patchVendor((v) => {
+      const list = [...v.profile.services];
+      const i = list.findIndex((s) => s.id === id);
+      const cat = list[i]?.category;
+      let j = i + dir;
+      while (j >= 0 && j < list.length && list[j].category !== cat) j += dir;
+      if (i < 0 || j < 0 || j >= list.length) return v;
+      [list[i], list[j]] = [list[j], list[i]];
+      return { ...v, profile: { ...v.profile, services: list } };
+    });
   const updateVendorService = (id, field, value) =>
     patchVendor((v) => ({
       ...v,
@@ -12597,10 +13551,10 @@ export default function App() {
   const removeVendorService = (id) =>
     patchVendor((v) => ({ ...v, profile: { ...v.profile, services: v.profile.services.filter((s) => s.id !== id) } }));
 
-  const addVendorAddon = () =>
+  const addVendorAddon = (serviceIds) =>
     patchVendor((v) => ({
       ...v,
-      profile: { ...v.profile, addons: [...v.profile.addons, { id: "addon-" + Date.now(), name: "", price: "" }] },
+      profile: { ...v.profile, addons: [...v.profile.addons, { id: newId(), name: "", price: "", priceType: "fixed", serviceIds: serviceIds || [] }] },
     }));
   const updateVendorAddon = (id, field, value) =>
     patchVendor((v) => ({
@@ -13002,6 +13956,9 @@ export default function App() {
           party={party}
           inCart={!!activeCartEntry}
           cartAddons={activeCartEntry?.addons}
+          cartPackages={cartItems.filter((ci) => ci.pkg?.providerId === activeProvider.id)}
+          onAddPackage={addPackageToCart}
+          onOpenCart={() => setCartOpen(true)}
           onBack={() => setView("results")}
           onAdd={addToCart}
           onRemove={removeFromCart}
@@ -13221,6 +14178,7 @@ export default function App() {
           onAddAddon={addVendorAddon}
           onUpdateAddon={updateVendorAddon}
           onRemoveAddon={removeVendorAddon}
+          onMoveService={moveVendorService}
           onPreview={saveAndGoPreview}
           onDashboard={saveAndGoDashboard}
           onResubmit={resubmitVendorApplication}
