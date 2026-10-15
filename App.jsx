@@ -5567,222 +5567,206 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
   if (!vendor) return null;
   const { percent, missing } = getVendorCompleteness(vendor);
   const locationName = locationMap[vendor.baseLocation]?.name || vendor.baseLocation;
-  const categoryLabels = vendor.categories.map((id) => catMap[id]?.label).filter(Boolean).join(", ") || "Inga valda ännu";
-  const status = STATUS_META[vendor.status] || STATUS_META.pending;
-  const pendingCount = bookingItems.filter((i) => i.status === "pending").length;
+  const categoryLabels = vendor.categories.map((id) => catMap[id]?.label).filter(Boolean).join(" · ") || "Inga kategorier valda ännu";
   const pendingItems = bookingItems.filter((i) => i.status === "pending");
   const upcomingAll = bookingItems
     .filter((i) => i.status === "confirmed" && i.date >= todayStr())
     .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`));
   const hhmm = (t) => String(t || "").slice(0, 5);
+  const fmtDate = (ds) => (ds ? new Date(`${ds}T00:00:00`).toLocaleDateString("sv-SE", { weekday: "short", day: "numeric", month: "short" }) : "");
+  const avatar = (vendor.profile?.images || [])[0];
+  const first = (vendor.contactPerson || "").trim().split(/\s+/)[0];
+  const card = { backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 22 };
   const banner = {
-    pending: {
-      bg: colors.lilacSoft,
-      fg: colors.lilacDeep,
-      title: "Din ansökan granskas",
-      text: "Vi går igenom din ansökan och mejlar dig så fort den är klar. Du kan fylla i din profil under tiden.",
-    },
-    approved: { bg: colors.greenSoft, fg: colors.green, title: "Du är godkänd!", text: "Din profil är publicerad och syns för kunder på Planifest." },
-    rejected: {
-      bg: "#FBDCD8",
-      fg: colors.coralDeep,
-      title: "Din ansökan godkändes inte den här gången",
-      text: "Du är välkommen att höra av dig om du vill veta mer eller komplettera dina uppgifter.",
-    },
+    pending: { bg: colors.lilacSoft, title: "Din ansökan granskas", text: "Vi går igenom din ansökan och mejlar dig så fort den är klar. Du kan fylla i din profil under tiden." },
+    rejected: { bg: colors.coralSoft, title: "Din ansökan godkändes inte den här gången", text: "Du är välkommen att höra av dig om du vill veta mer eller komplettera dina uppgifter." },
   }[vendor.status];
 
-  const cards = [
-    { title: "Profil", desc: "Tagline, beskrivning och kontaktuppgifter", icon: Sparkles, action: onEditProfile },
-    { title: "Tjänster & priser", desc: "Vad ni erbjuder och vad det kostar", icon: Check, action: onEditProfile },
-    { title: "Bilder", desc: "Visa upp er verksamhet", icon: Camera, action: onEditProfile },
-    {
-      title: "Bokningar & kalender",
-      desc: pendingCount > 0 ? `${pendingCount} ny${pendingCount > 1 ? "a" : ""} förfrågan att svara på` : "Se förfrågningar och din kalender",
-      icon: Calendar,
-      action: onBookings,
-    },
+  const links = [
+    { title: "Profil & beskrivning", desc: "Det kunderna läser om er", icon: Sparkles, action: onEditProfile },
+    { title: "Tjänster & priser", desc: "Vad ni erbjuder och vad det kostar", icon: Wallet, action: onEditProfile },
+    { title: "Bilder", desc: "Bildflödet på er profil", icon: Camera, action: onEditProfile },
+    { title: "Bokningar & kalender", desc: "Förfrågningar och lediga dagar", icon: Calendar, action: onBookings },
     { title: "Meddelanden", desc: "Frågor och offerter till kunder", icon: MessageCircle, action: onInbox },
-    { title: "Förhandsvisning", desc: "Se hur kunder kommer se er profil", icon: Star, action: onPreview },
+    { title: "Förhandsvisa profilen", desc: "Se den som en kund", icon: Eye, action: onPreview },
   ];
 
   return (
-    <div className="mx-auto max-w-3xl px-6 pb-24 pt-10 sm:px-10">
-      <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Hej, {vendor.contactPerson || vendor.companyName}! 👋</h1>
+    <div className="mx-auto max-w-3xl px-5 pb-24 pt-6 sm:px-8 sm:pt-10">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex min-w-0 items-center gap-3">
+          <span className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-full" style={{ backgroundColor: colors.coralSoft, border: `2px solid ${colors.white}`, boxShadow: `0 0 0 2px ${colors.lilac}` }}>
+            {avatar ? (
+              <img src={avatar} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span className="flex h-full w-full items-center justify-center text-xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.coral }}>
+                {(vendor.companyName || "?").charAt(0).toUpperCase()}
+              </span>
+            )}
+          </span>
+          <span className="min-w-0">
+            <span className="block text-xs font-semibold uppercase" style={{ letterSpacing: "0.1em", color: colors.plumSoft }}>Leverantörsportal</span>
+            <h1 className="truncate text-2xl sm:text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum, lineHeight: 1.15 }}>
+              {first ? `Hej ${first}!` : vendor.companyName}
+            </h1>
+          </span>
+        </span>
+        <button onClick={onPreview} className="flex-shrink-0 rounded-full px-4 py-2.5 text-sm font-semibold" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.white, color: colors.plum }}>
+          Se min profil
+        </button>
+      </div>
 
       {banner && (
-        <div className="mt-5 rounded-3xl p-5" style={{ backgroundColor: banner.bg }}>
-          <p className="font-semibold" style={{ color: banner.fg }}>
-            {banner.title}
-          </p>
-          <p className="mt-1 text-sm" style={{ color: colors.plum }}>
-            {banner.text}
-          </p>
+        <div className="mt-5 p-5" style={{ backgroundColor: banner.bg, borderRadius: 22 }}>
+          <p className="font-semibold" style={{ color: colors.plum }}>{banner.title}</p>
+          <p className="mt-1 text-sm" style={{ color: colors.plum }}>{banner.text}</p>
           {vendor.status === "rejected" && (
-            <a
-              href="mailto:info@planifest.se"
-              className="mt-3 inline-block rounded-full px-4 py-2 text-sm font-semibold"
-              style={{ backgroundColor: colors.coral, color: colors.white }}
-            >
+            <a href="mailto:info@planifest.se" className="mt-3 inline-block rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
               Kontakta oss
             </a>
           )}
         </div>
       )}
 
-      {storyManager}
-
-      <div className="mt-5 grid grid-cols-3 gap-3">
+      <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">
         {[
-          { label: "Nya förfrågningar", value: pendingItems.length, action: onBookings },
-          { label: "Kommande bokningar", value: upcomingAll.length, action: onBookings },
-          { label: "Konversationer", value: conversationCount, action: onInbox },
+          { label: pendingItems.length === 1 ? "ny förfrågan" : "nya förfrågningar", value: pendingItems.length, action: onBookings, bg: colors.pinkSoft },
+          { label: "kommande event", value: upcomingAll.length, action: onBookings, bg: colors.lilacSoft },
+          { label: conversationCount === 1 ? "konversation" : "konversationer", value: conversationCount, action: onInbox, bg: colors.peachSoft },
         ].map((t) => (
-          <button key={t.label} onClick={t.action} className="rounded-2xl p-4 text-center" style={{ backgroundColor: colors.lilacSoft }}>
-            <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>{t.value}</p>
-            <p className="text-xs" style={{ color: colors.lilacDeep }}>
-              {t.label}
-            </p>
+          <button key={t.label} onClick={t.action} className="flex flex-col gap-0.5 p-3 text-left sm:p-4" style={{ backgroundColor: t.bg, borderRadius: 18 }}>
+            <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 28, lineHeight: 1.1, color: colors.coral }}>{t.value}</span>
+            <span className="text-xs" style={{ color: colors.plum }}>{t.label}</span>
           </button>
         ))}
       </div>
 
+      {storyManager}
+
       {pendingItems.length > 0 && (
-        <section className="mt-5 rounded-3xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
-          <h2 className="mb-3 font-semibold" style={{ color: colors.plum }}>
-            Nya förfrågningar
-          </h2>
+        <section className="mt-6">
+          <h2 className="mb-3 text-xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Nya förfrågningar</h2>
           <div className="space-y-3">
             {pendingItems.slice(0, 3).map((i) => (
-              <div key={`${i.bookingNumber}-${i.id}`} className="rounded-2xl p-4" style={{ backgroundColor: colors.cream }}>
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <p className="font-semibold" style={{ color: colors.plum }}>
-                      {i.name}
-                    </p>
-                    <p className="mt-0.5 text-sm" style={{ color: colors.plumSoft }}>
-                      {i.date}, {hhmm(i.startTime)}–{hhmm(i.endTime)} · {i.guests} gäster
-                    </p>
-                  </div>
-                  <span style={{ fontFamily: serif, fontSize: 17, color: colors.plum }}>{formatKr(i.price)}</span>
+              <article key={`${i.bookingNumber}-${i.id}`} className="p-4" style={card}>
+                <div className="flex items-start justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block font-semibold" style={{ color: colors.plum }}>{i.name}</span>
+                    <span className="mt-0.5 block text-sm" style={{ color: colors.plumSoft }}>
+                      {fmtDate(i.date)} · {hhmm(i.startTime)}–{hhmm(i.endTime)} · {i.guests} gäster
+                    </span>
+                  </span>
+                  <span className="flex-shrink-0 font-bold" style={{ color: colors.plum }}>{formatKr(i.price)}</span>
                 </div>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={() => onRespond(i.bookingNumber, i.id, "declined")}
-                    className="flex-1 rounded-full px-4 py-2 text-sm font-medium"
-                    style={{ border: `1.5px solid ${colors.coral}`, color: colors.coralDeep, backgroundColor: colors.white }}
-                  >
-                    Neka
-                  </button>
-                  <button
-                    onClick={() => onRespond(i.bookingNumber, i.id, "confirmed")}
-                    className="flex-1 rounded-full px-4 py-2 text-sm font-semibold"
-                    style={{ backgroundColor: colors.green, color: colors.white }}
-                  >
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button onClick={() => onRespond(i.bookingNumber, i.id, "confirmed")} className="h-11 rounded-full text-sm font-semibold" style={{ backgroundColor: colors.plum, color: colors.white }}>
                     Acceptera
                   </button>
+                  <button onClick={() => onRespond(i.bookingNumber, i.id, "declined")} className="h-11 rounded-full text-sm font-medium" style={{ border: `1px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}>
+                    Neka
+                  </button>
                 </div>
-              </div>
+              </article>
             ))}
           </div>
           {pendingItems.length > 3 && (
-            <button onClick={onBookings} className="mt-3 text-sm font-medium underline" style={{ color: colors.lilacDeep }}>
-              Visa alla {pendingItems.length} förfrågningar
+            <button onClick={onBookings} className="mt-3 text-sm font-semibold" style={{ color: colors.coral }}>
+              Visa alla {pendingItems.length} förfrågningar →
             </button>
           )}
         </section>
       )}
 
       {upcomingAll.length > 0 && (
-        <section className="mt-5 rounded-3xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
-          <h2 className="mb-3 font-semibold" style={{ color: colors.plum }}>
-            Kommande bokningar
-          </h2>
-          <div className="space-y-2">
-            {upcomingAll.slice(0, 3).map((i) => (
-              <div key={`${i.bookingNumber}-${i.id}`} className="flex items-center justify-between rounded-xl p-3 text-sm" style={{ backgroundColor: colors.greenSoft }}>
-                <span className="flex items-center gap-2" style={{ color: colors.plum }}>
-                  <Check size={14} color={colors.green} /> {i.date}, {hhmm(i.startTime)}–{hhmm(i.endTime)} · {i.name}
+        <section className="mt-6">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="text-xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Kommande bokningar</h2>
+            <button onClick={onBookings} className="text-sm font-semibold" style={{ color: colors.coral }}>Kalendern</button>
+          </div>
+          <div className="overflow-hidden" style={card}>
+            {upcomingAll.slice(0, 4).map((i, idx) => (
+              <div key={`${i.bookingNumber}-${i.id}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm" style={{ borderTop: idx ? `1px solid ${colors.cream}` : "none" }}>
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-11 w-11 flex-shrink-0 flex-col items-center justify-center rounded-xl" style={{ backgroundColor: colors.lilacSoft, color: colors.coral }}>
+                    <span className="text-[10px] font-semibold uppercase">{i.date ? new Date(`${i.date}T00:00:00`).toLocaleDateString("sv-SE", { month: "short" }).replace(".", "") : ""}</span>
+                    <span className="text-base font-bold leading-none">{i.date ? Number(i.date.slice(8, 10)) : ""}</span>
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold" style={{ color: colors.plum }}>{i.name}</span>
+                    <span className="block text-xs" style={{ color: colors.plumSoft }}>{hhmm(i.startTime)}–{hhmm(i.endTime)}</span>
+                  </span>
                 </span>
-                <span style={{ color: colors.plumSoft }}>{formatKr(i.price)}</span>
+                <span className="flex-shrink-0 font-semibold" style={{ color: colors.plum }}>{formatKr(i.price)}</span>
               </div>
             ))}
           </div>
-          <button onClick={onBookings} className="mt-3 text-sm font-medium underline" style={{ color: colors.lilacDeep }}>
-            Öppna kalendern
-          </button>
         </section>
       )}
 
-      <div className="mt-5 rounded-3xl p-6" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
-        <p style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>{vendor.companyName}</p>
-        <span
-          className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
-          style={{ backgroundColor: status.bg, color: status.fg }}
-        >
-          {status.emoji} Status: {status.label}
-        </span>
-        <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2" style={{ color: colors.plumSoft }}>
-          <span className="flex items-center gap-1">
-            <MapPin size={13} /> {locationName}
-          </span>
-          <span>{vendor.serviceArea?.value || "Arbetsområde ej valt"}</span>
-          <span className="sm:col-span-2">{categoryLabels}</span>
+      <section className="mt-6 p-5" style={card}>
+        <div className="flex items-center justify-between text-sm font-semibold" style={{ color: colors.plum }}>
+          <span>Profilen är {percent} % klar</span>
+          <span style={{ color: colors.coral }}>{percent} %</span>
         </div>
-      </div>
-
-      <div className="mt-5 rounded-3xl p-6" style={{ backgroundColor: colors.lilacSoft }}>
-        <p className="font-semibold" style={{ color: colors.plum }}>
-          Profil {percent} % klar
-        </p>
-        <div className="mt-2 h-2 w-full overflow-hidden rounded-full" style={{ backgroundColor: colors.white }}>
+        <div className="mt-2 h-2 w-full overflow-hidden rounded-full" style={{ backgroundColor: colors.lilacSoft }}>
           <div className="h-2 rounded-full" style={{ width: `${percent}%`, backgroundColor: colors.coral }} />
         </div>
-        {missing.length > 0 && (
-          <p className="mt-2 text-sm" style={{ color: colors.lilacDeep }}>
-            Saknas: {missing.join(", ")}
-          </p>
+        {missing.length > 0 ? (
+          <p className="mt-2 text-sm" style={{ color: colors.plumSoft }}>Saknas: {missing.join(", ")}</p>
+        ) : (
+          <p className="mt-2 text-sm" style={{ color: colors.plumSoft }}>Snyggt! Profiler med många bilder får fler förfrågningar.</p>
         )}
-      </div>
+        <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs" style={{ color: colors.plumSoft }}>
+          <span className="flex items-center gap-1"><MapPin size={12} /> {locationName}</span>
+          <span>{categoryLabels}</span>
+        </p>
+      </section>
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-2">
-        {cards.map((card) => {
-          const Icon = card.icon;
+      <section className="mt-6 overflow-hidden" style={card}>
+        {links.map((l, idx) => {
+          const Icon = l.icon;
           return (
-            <button
-              key={card.title}
-              onClick={card.action}
-              className="flex items-start gap-3 rounded-2xl p-4 text-left"
-              style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}
-            >
-              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: colors.lilacSoft }}>
-                <Icon size={16} color={colors.lilacDeep} />
-              </div>
-              <div>
-                <p className="font-semibold" style={{ color: colors.plum }}>
-                  {card.title}
-                </p>
-                <p className="text-sm" style={{ color: colors.plumSoft }}>
-                  {card.desc}
-                </p>
-              </div>
+            <button key={l.title} onClick={l.action} className="flex w-full items-center gap-3 px-4 text-left" style={{ minHeight: 64, borderTop: idx ? `1px solid ${colors.cream}` : "none" }}>
+              <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: colors.lilacSoft }}>
+                <Icon size={18} color={colors.coral} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[15px] font-semibold" style={{ color: colors.plum }}>{l.title}</span>
+                <span className="block truncate text-xs" style={{ color: colors.plumSoft }}>{l.desc}</span>
+              </span>
+              <ChevronRight size={18} color={colors.plumSoft} />
             </button>
           );
         })}
-      </div>
-
-      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-        <button onClick={onEditProfile} className="flex-1 rounded-full px-5 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
-          Redigera profil
-        </button>
-        <button
-          onClick={onPreview}
-          className="flex-1 rounded-full px-5 py-3 text-sm font-semibold"
-          style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}
-        >
-          Förhandsvisa profil
-        </button>
-      </div>
+      </section>
     </div>
+  );
+}
+
+function VendorTabBar({ active, unread, pending, onOverview, onBookings, onInbox, onProfile }) {
+  const items = [
+    { id: "overview", label: "Översikt", icon: Home, onClick: onOverview },
+    { id: "bookings", label: "Bokningar", icon: Calendar, onClick: onBookings, badge: pending },
+    { id: "inbox", label: "Meddelanden", icon: MessageCircle, onClick: onInbox, badge: unread },
+    { id: "profile", label: "Min profil", icon: User, onClick: onProfile },
+  ];
+  return (
+    <nav aria-label="Leverantörsmeny" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 lg:hidden" style={{ backgroundColor: colors.white, borderTop: `1px solid ${colors.beige}`, paddingBottom: "env(safe-area-inset-bottom)" }}>
+      {items.map(({ id, label, icon: Icon, onClick, badge }) => {
+        const on = active === id;
+        return (
+          <button key={id} onClick={onClick} aria-current={on ? "page" : undefined} className="relative flex flex-col items-center gap-1 pb-2.5 pt-2 text-[11px]" style={{ color: on ? colors.coral : colors.plumSoft, fontWeight: on ? 700 : 500 }}>
+            <Icon size={23} strokeWidth={on ? 2.2 : 1.8} />
+            {label}
+            {badge > 0 && (
+              <span className="absolute top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold" style={{ left: "calc(50% + 6px)", backgroundColor: colors.korall, color: colors.white }}>
+                {badge}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -11875,7 +11859,7 @@ export default function App() {
 
   return (
     <FavoritesContext.Provider value={{ ids: favoriteIds, toggle: toggleFavorite }}>
-    <div className={showTabBar ? "pb-20 lg:pb-0" : ""} style={{ fontFamily: sans, backgroundColor: colors.cream, minHeight: "100%", color: colors.plum }}>
+    <div className={showTabBar || (isVendorPortalView && submittedVendor && !isAdminView) ? "pb-20 lg:pb-0" : ""} style={{ fontFamily: sans, backgroundColor: colors.cream, minHeight: "100%", color: colors.plum }}>
       <style>{`
         input[type="checkbox"], input[type="radio"] { accent-color: #7D2248; }
         input[type="date"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator { cursor: pointer; }
@@ -12428,7 +12412,7 @@ export default function App() {
             onOpen={openConversationFromPanel}
             onClose={() => setPanelOpen(false)}
           />
-          <div className={isVendorPortalView ? "" : "hidden lg:block"}>
+          <div className="hidden lg:block">
           <ChatBubble
             count={unreadTotal}
             onClick={() => {
@@ -12442,6 +12426,17 @@ export default function App() {
           />
           </div>
         </>
+      )}
+      {isVendorPortalView && submittedVendor && !isAdminView && (
+        <VendorTabBar
+          active={view === "vendorDashboard" ? "overview" : view === "vendorBookings" ? "bookings" : view === "vendorInbox" ? "inbox" : ["vendorProfileEditor", "vendorProfilePreview"].includes(view) ? "profile" : null}
+          unread={unreadTotal}
+          pending={vendorBookingItems.filter((i) => i.status === "pending").length}
+          onOverview={goVendorDashboard}
+          onBookings={goVendorBookings}
+          onInbox={goVendorInbox}
+          onProfile={goVendorEditor}
+        />
       )}
       {showTabBar && (
         <BottomTabBar
