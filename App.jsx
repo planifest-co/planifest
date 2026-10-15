@@ -812,15 +812,40 @@ function StoryViewer({ groups, startIndex, onClose, onSeen, onViewProvider, canD
   );
 }
 
-function StoryManager({ approved, stories, uploading, onUpload, onDelete }) {
+function StoryThumb({ story, children }) {
+  return (
+    <div className="relative h-36 w-24 flex-shrink-0 overflow-hidden rounded-2xl" style={{ backgroundColor: colors.coralSoft }}>
+      {story.type === "video" ? <video src={story.url} muted playsInline preload="metadata" className="h-full w-full object-cover" /> : <img src={story.url} alt="" className="h-full w-full object-cover" />}
+      {children}
+    </div>
+  );
+}
+
+function StoryManager({ approved, stories, highlights, uploading, onUpload, onDelete, onSaveToHighlight, onRemoveFromHighlight, onDeleteHighlight }) {
   const inputRef = useRef(null);
+  const [saving, setSaving] = useState(null); // story being filed into a highlight
+  const [choice, setChoice] = useState("");
+  const [newTitle, setNewTitle] = useState("");
+  const now = Date.now();
+  const active = stories.filter((s) => new Date(s.expiresAt).getTime() > now);
+  const smallBtn = "absolute flex h-8 w-8 items-center justify-center rounded-full";
+  const smallBtnStyle = { backgroundColor: "rgba(255,255,255,0.92)", color: colors.plum };
+  const submitSave = () => {
+    const title = newTitle.trim();
+    if (choice === "new" && !title) return;
+    onSaveToHighlight(saving, choice === "new" ? { title } : { id: choice });
+    setSaving(null);
+    setChoice("");
+    setNewTitle("");
+  };
+
   return (
     <section className="mt-5 rounded-3xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-semibold" style={{ color: colors.plum }}>Din story</h2>
           <p className="mt-0.5 text-sm" style={{ color: colors.plumSoft }}>
-            {approved ? "Visa vad ni gör just nu. En story syns på startsidan i 24 timmar." : "Du kan lägga upp stories när din profil är godkänd."}
+            {approved ? "Visa vad ni gör just nu. En story syns på startsidan i 24 timmar – spara den i en höjdpunkt så ligger den kvar på din profil." : "Du kan lägga upp stories när din profil är godkänd."}
           </p>
         </div>
         {approved && (
@@ -847,19 +872,93 @@ function StoryManager({ approved, stories, uploading, onUpload, onDelete }) {
           </>
         )}
       </div>
-      {stories.length > 0 && (
+
+      {active.length > 0 && (
         <div className="mt-4 flex gap-3 overflow-x-auto pb-1">
-          {stories.map((s) => (
-            <div key={s.id} className="relative h-36 w-24 flex-shrink-0 overflow-hidden rounded-2xl" style={{ backgroundColor: colors.coralSoft }}>
-              {s.type === "video" ? <video src={s.url} muted playsInline preload="metadata" className="h-full w-full object-cover" /> : <img src={s.url} alt="" className="h-full w-full object-cover" />}
-              <span className="absolute bottom-1.5 left-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.9)", color: colors.plum }}>
+          {active.map((s) => (
+            <StoryThumb key={s.id} story={s}>
+              <span className="absolute bottom-1.5 left-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={smallBtnStyle}>
                 {storyTimeAgo(s.createdAt)}
               </span>
-              <button onClick={() => onDelete(s)} aria-label="Ta bort storyn" className="absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.9)", color: colors.plum }}>
+              <button onClick={() => onDelete(s)} aria-label="Ta bort storyn" className={`${smallBtn} right-1 top-1`} style={smallBtnStyle}>
                 <Trash2 size={14} />
               </button>
-            </div>
+              {!s.highlightId && (
+                <button onClick={() => setSaving(s)} aria-label="Spara i höjdpunkt" className={`${smallBtn} right-1 top-10`} style={smallBtnStyle}>
+                  <Heart size={14} />
+                </button>
+              )}
+              {s.highlightId && (
+                <span className="absolute right-1 top-10 flex h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: colors.coral, color: colors.white }} title="Sparad i höjdpunkt">
+                  <Heart size={14} fill={colors.white} />
+                </span>
+              )}
+            </StoryThumb>
           ))}
+        </div>
+      )}
+
+      {saving && (
+        <div className="mt-4 rounded-2xl p-4" style={{ backgroundColor: colors.cream }}>
+          <p className="text-sm font-semibold" style={{ color: colors.plum }}>Spara i höjdpunkt</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {highlights.map((h) => (
+              <PillChip key={h.id} active={choice === h.id} onClick={() => setChoice(h.id)}>
+                {h.title}
+              </PillChip>
+            ))}
+            <PillChip active={choice === "new"} onClick={() => setChoice("new")}>
+              <Plus size={14} /> Ny höjdpunkt
+            </PillChip>
+          </div>
+          {choice === "new" && (
+            <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plumSoft }}>
+              Namn, t.ex. "Babyshower" eller "Menyer"
+              <input value={newTitle} maxLength={30} onChange={(e) => setNewTitle(e.target.value)} className="h-11 rounded-xl px-3 text-sm" style={{ border: `1px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }} />
+            </label>
+          )}
+          <div className="mt-3 flex gap-2">
+            <button onClick={submitSave} disabled={!choice || (choice === "new" && !newTitle.trim())} className="h-10 rounded-full px-5 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white, opacity: !choice || (choice === "new" && !newTitle.trim()) ? 0.5 : 1 }}>
+              Spara
+            </button>
+            <button onClick={() => setSaving(null)} className="h-10 rounded-full px-5 text-sm font-medium" style={{ border: `1px solid ${colors.beige}`, color: colors.plum }}>
+              Avbryt
+            </button>
+          </div>
+        </div>
+      )}
+
+      {highlights.length > 0 && (
+        <div className="mt-5 border-t pt-4" style={{ borderColor: colors.beige }}>
+          <h3 className="text-sm font-semibold" style={{ color: colors.plum }}>Höjdpunkter på din profil</h3>
+          <div className="mt-2 space-y-4">
+            {highlights.map((h) => {
+              const list = stories.filter((s) => s.highlightId === h.id);
+              return (
+                <div key={h.id}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold" style={{ color: colors.plum }}>{h.title} <span style={{ color: colors.plumSoft, fontWeight: 400 }}>({list.length})</span></span>
+                    <button onClick={() => onDeleteHighlight(h)} className="px-2 py-2 text-xs font-semibold underline" style={{ color: colors.coral }}>
+                      Ta bort höjdpunkten
+                    </button>
+                  </div>
+                  {list.length > 0 ? (
+                    <div className="mt-1 flex gap-3 overflow-x-auto pb-1">
+                      {list.map((s) => (
+                        <StoryThumb key={s.id} story={s}>
+                          <button onClick={() => onRemoveFromHighlight(s)} aria-label="Ta ur höjdpunkten" className={`${smallBtn} right-1 top-1`} style={smallBtnStyle}>
+                            <X size={14} />
+                          </button>
+                        </StoryThumb>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs" style={{ color: colors.plumSoft }}>Tom – spara en story hit med hjärtat.</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
       {approved && <p className="mt-3 text-xs" style={{ color: colors.plumSoft }}>Bild eller video, max 60 sekunder och 25 MB. Stories syns direkt för alla besökare.</p>}
@@ -2789,7 +2888,7 @@ function ResultsView({
   );
 }
 
-function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty, onSendRequest, siblings = [], cartIds = [], onViewOther, storyIndex = -1, storyUnseen = false, onOpenStory }) {
+function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty, onSendRequest, siblings = [], cartIds = [], onViewOther, storyIndex = -1, storyUnseen = false, onOpenStory, highlightGroups = [], onOpenHighlight }) {
   const cat = catMap[provider.category];
   const [requestOpen, setRequestOpen] = useState(false);
   const [pendingAddons, setPendingAddons] = useState([]);
@@ -2971,6 +3070,25 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
             </button>
           )}
         </div>
+
+        {highlightGroups.length > 0 && (
+          <div className="mt-5 flex gap-4 overflow-x-auto pb-1">
+            {highlightGroups.map((g, i) => (
+              <button key={g.key} onClick={() => onOpenHighlight(highlightGroups, i)} aria-label={`Visa höjdpunkten ${g.name}`} className="flex w-[68px] flex-shrink-0 flex-col items-center gap-1.5">
+                <span className="h-16 w-16 overflow-hidden rounded-full p-[2px]" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.white }}>
+                  <span className="block h-full w-full overflow-hidden rounded-full" style={{ backgroundColor: colors.coralSoft }}>
+                    {g.cover?.type === "video" ? (
+                      <video src={g.cover.url} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+                    ) : g.cover ? (
+                      <img src={g.cover.url} alt="" className="h-full w-full object-cover" />
+                    ) : null}
+                  </span>
+                </span>
+                <span className="w-full truncate text-center text-xs" style={{ color: colors.plum }}>{g.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {siblings.length > 0 && (
           <div className="mt-5">
@@ -10755,13 +10873,17 @@ export default function App() {
   const [seenStories, setSeenStories] = useState(() => readSeenStories());
   const [storyViewer, setStoryViewer] = useState(null); // { groups, index } — a snapshot, so the order stays put while watching
   const [storyUploading, setStoryUploading] = useState(false);
+  const [highlights, setHighlights] = useState([]);
+  // Returns active stories plus any saved in a highlight (the database only hands out those).
   const loadStories = async () => {
-    const { data } = await supabaseRestRequest(
-      `/vendor_stories?select=id,vendor_id,media_url,media_type,created_at,expires_at&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&order=created_at.asc`,
-      session?.access_token
-    );
-    if (Array.isArray(data)) setStories(data);
+    const [st, hl] = await Promise.all([
+      supabaseRestRequest(`/vendor_stories?select=id,vendor_id,media_url,media_type,created_at,expires_at,highlight_id&order=created_at.asc`, session?.access_token),
+      supabaseRestRequest(`/vendor_highlights?select=id,vendor_id,title,created_at&order=created_at.asc`, session?.access_token),
+    ]);
+    if (Array.isArray(st.data)) setStories(st.data);
+    if (Array.isArray(hl.data)) setHighlights(hl.data);
   };
+  const toStory = (st) => ({ id: st.id, url: st.media_url, type: st.media_type, createdAt: st.created_at, expiresAt: st.expires_at, highlightId: st.highlight_id || null });
   useEffect(() => {
     loadStories();
     const t = setInterval(loadStories, 5 * 60 * 1000);
@@ -10770,7 +10892,9 @@ export default function App() {
   }, [session?.access_token]);
   const storyGroups = useMemo(() => {
     const byVendor = new Map();
+    const nowMs = Date.now();
     stories.forEach((st) => {
+      if (new Date(st.expires_at).getTime() <= nowMs) return; // only live stories in the ring row
       if (!byVendor.has(st.vendor_id)) byVendor.set(st.vendor_id, []);
       byVendor.get(st.vendor_id).push({ id: st.id, url: st.media_url, type: st.media_type, createdAt: st.created_at });
     });
@@ -10794,9 +10918,66 @@ export default function App() {
       return ub - ua || String(b.latest).localeCompare(String(a.latest));
     });
   }, [stories, customerProviders, seenStories]);
-  const myStories = submittedVendor
-    ? stories.filter((st) => st.vendor_id === submittedVendor.id).map((st) => ({ id: st.id, url: st.media_url, type: st.media_type, createdAt: st.created_at }))
-    : [];
+  const myStories = submittedVendor ? stories.filter((st) => st.vendor_id === submittedVendor.id).map(toStory) : [];
+  const myHighlights = submittedVendor ? highlights.filter((h) => h.vendor_id === submittedVendor.id) : [];
+  // Highlights on a vendor's profile: each one plays like its own story.
+  const highlightGroupsFor = (vendorDbId, provider) =>
+    highlights
+      .filter((h) => h.vendor_id === vendorDbId)
+      .map((h) => {
+        const list = stories.filter((st) => st.highlight_id === h.id).map(toStory);
+        return {
+          key: h.id,
+          vendorId: vendorDbId,
+          name: h.title,
+          avatar: (provider?.images && provider.images[0]) || provider?.image || null,
+          cover: list[0] || null,
+          providerId: null,
+          stories: list,
+        };
+      })
+      .filter((g) => g.stories.length > 0);
+  const saveStoryToHighlight = async (story, target) => {
+    let highlightId = target.id;
+    if (!highlightId) {
+      const { data, error } = await supabaseRestRequest("/vendor_highlights", session?.access_token, {
+        method: "POST",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ vendor_id: submittedVendor.id, title: target.title }),
+      });
+      if (error || !Array.isArray(data) || !data[0]) {
+        showToast("Kunde inte skapa höjdpunkten.");
+        return;
+      }
+      setHighlights((list) => [...list, data[0]]);
+      highlightId = data[0].id;
+    }
+    const { error } = await supabaseRestRequest(`/vendor_stories?id=eq.${story.id}`, session?.access_token, { method: "PATCH", body: JSON.stringify({ highlight_id: highlightId }) });
+    if (error) {
+      showToast("Kunde inte spara storyn i höjdpunkten.");
+      return;
+    }
+    setStories((list) => list.map((st) => (st.id === story.id ? { ...st, highlight_id: highlightId } : st)));
+    showToast("Sparad i höjdpunkten ♥");
+  };
+  const removeStoryFromHighlight = async (story) => {
+    const { error } = await supabaseRestRequest(`/vendor_stories?id=eq.${story.id}`, session?.access_token, { method: "PATCH", body: JSON.stringify({ highlight_id: null }) });
+    if (error) {
+      showToast("Kunde inte ta ur storyn.");
+      return;
+    }
+    setStories((list) => list.map((st) => (st.id === story.id ? { ...st, highlight_id: null } : st)));
+  };
+  const deleteHighlight = async (h) => {
+    if (!window.confirm(`Ta bort höjdpunkten "${h.title}"? Stories i den som är äldre än 24 timmar försvinner.`)) return;
+    const { error } = await supabaseRestRequest(`/vendor_highlights?id=eq.${h.id}`, session?.access_token, { method: "DELETE" });
+    if (error) {
+      showToast("Kunde inte ta bort höjdpunkten.");
+      return;
+    }
+    setHighlights((list) => list.filter((x) => x.id !== h.id));
+    setStories((list) => list.map((st) => (st.highlight_id === h.id ? { ...st, highlight_id: null } : st)));
+  };
   const markStorySeen = (id) =>
     setSeenStories((prevSeen) => {
       if (prevSeen.has(id)) return prevSeen;
@@ -11921,6 +12102,8 @@ export default function App() {
           storyIndex={activeProvider.vendorDbId ? storyGroups.findIndex((g) => g.vendorId === activeProvider.vendorDbId) : -1}
           storyUnseen={!!storyGroups.find((g) => g.vendorId === activeProvider.vendorDbId)?.stories.some((x) => !seenStories.has(x.id))}
           onOpenStory={openStory}
+          highlightGroups={activeProvider.vendorDbId ? highlightGroupsFor(activeProvider.vendorDbId, activeProvider) : []}
+          onOpenHighlight={(groups, index) => setStoryViewer({ groups, index })}
           onViewOther={(id) => {
             viewProfile(id);
             window.scrollTo({ top: 0 });
@@ -12058,7 +12241,17 @@ export default function App() {
           onRespond={respondToBookingItem}
           conversationCount={vendorConversations.length}
           storyManager={
-            <StoryManager approved={submittedVendor?.status === "approved"} stories={myStories} uploading={storyUploading} onUpload={addStory} onDelete={removeStory} />
+            <StoryManager
+              approved={submittedVendor?.status === "approved"}
+              stories={myStories}
+              highlights={myHighlights}
+              uploading={storyUploading}
+              onUpload={addStory}
+              onDelete={removeStory}
+              onSaveToHighlight={saveStoryToHighlight}
+              onRemoveFromHighlight={removeStoryFromHighlight}
+              onDeleteHighlight={deleteHighlight}
+            />
           }
         />
       )}
