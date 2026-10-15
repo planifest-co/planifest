@@ -531,6 +531,342 @@ function deleteVendorImageFile(url, session) {
   }).catch(() => {});
 }
 
+// ---------------------------------------------------------------------------
+// Stories — approved vendors post a photo or a short video that is shown for
+// 24 hours, like on Instagram. Files live in the public "vendor-stories"
+// bucket (one folder per user); the rows live in public.vendor_stories, whose
+// RLS only returns stories that haven't expired yet.
+// ---------------------------------------------------------------------------
+const STORY_BUCKET = "vendor-stories";
+const STORY_PUBLIC_PREFIX = `${SUPABASE_URL}/storage/v1/object/public/${STORY_BUCKET}/`;
+const STORY_SEEN_KEY = "planifest-stories-seen";
+const STORY_IMAGE_MS = 5000;
+const STORY_MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+const STORY_MAX_VIDEO_SECONDS = 60;
+const STORY_VIDEO_TYPES = { "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm" };
+
+function readVideoDuration(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      resolve(Number.isFinite(v.duration) ? v.duration : null);
+    };
+    v.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+    v.src = url;
+  });
+}
+
+// Returns { url, mediaType } or { error }.
+async function uploadStoryMedia(file, session) {
+  if (!session?.access_token || !session?.user?.id) return { error: "Du måste vara inloggad för att lägga upp en story." };
+  let body;
+  let contentType;
+  let ext;
+  let mediaType;
+  if (file.type.startsWith("image/")) {
+    try {
+      body = await shrinkImage(file, 1440);
+    } catch (e) {
+      return { error: "Kunde inte läsa bilden. Prova en JPG- eller PNG-bild." };
+    }
+    contentType = "image/jpeg";
+    ext = "jpg";
+    mediaType = "image";
+  } else if (STORY_VIDEO_TYPES[file.type]) {
+    if (file.size > STORY_MAX_VIDEO_BYTES) return { error: "Videon är för stor. Max 25 MB – prova en kortare video." };
+    const seconds = await readVideoDuration(file);
+    if (seconds != null && seconds > STORY_MAX_VIDEO_SECONDS + 1) return { error: "Videon är för lång. Max 60 sekunder." };
+    body = file;
+    contentType = file.type;
+    ext = STORY_VIDEO_TYPES[file.type];
+    mediaType = "video";
+  } else {
+    return { error: "Välj en bild eller en video (MP4, MOV eller WebM)." };
+  }
+  const path = `${session.user.id}/${newId()}.${ext}`;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORY_BUCKET}/${path}`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}`, "Content-Type": contentType, "Cache-Control": "86400" },
+      body,
+    });
+    if (!res.ok) return { error: "Uppladdningen misslyckades. Försök igen." };
+    return { url: STORY_PUBLIC_PREFIX + path, mediaType };
+  } catch (e) {
+    return { error: "Nådde inte servern. Kontrollera din uppkoppling och försök igen." };
+  }
+}
+
+function deleteStoryFile(url, session) {
+  if (!session?.access_token || typeof url !== "string" || !url.startsWith(STORY_PUBLIC_PREFIX)) return;
+  const path = url.slice(STORY_PUBLIC_PREFIX.length);
+  fetch(`${SUPABASE_URL}/storage/v1/object/${STORY_BUCKET}/${path}`, {
+    method: "DELETE",
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` },
+  }).catch(() => {});
+}
+
+function storyTimeAgo(iso) {
+  const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (min < 1) return "nyss";
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} tim`;
+}
+
+function readSeenStories() {
+  try {
+    return new Set(JSON.parse(window.localStorage.getItem(STORY_SEEN_KEY) || "[]"));
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function StoryRings({ groups, seen, onOpen }) {
+  return (
+    <div className="mx-auto flex max-w-5xl gap-4 overflow-x-auto px-5 pb-2 sm:gap-6 sm:px-8">
+      {groups.map((g, i) => {
+        const unseen = g.stories.some((s) => !seen.has(s.id));
+        return (
+          <button key={g.key} onClick={() => onOpen(i)} aria-label={`Visa story från ${g.name}`} className="flex w-[78px] flex-shrink-0 flex-col items-center gap-2">
+            <span
+              className="flex h-[74px] w-[74px] rounded-full p-[3px]"
+              style={{ background: unseen ? `conic-gradient(${colors.korall}, ${colors.coral}, ${colors.lilac}, ${colors.korall})` : colors.beige }}
+            >
+              <span className="h-full w-full overflow-hidden rounded-full" style={{ border: `3px solid ${colors.cream}`, backgroundColor: colors.coralSoft }}>
+                {g.avatar && <img src={g.avatar} alt="" className="h-full w-full object-cover" />}
+              </span>
+            </span>
+            <span className="w-full truncate text-center text-xs font-semibold" style={{ color: colors.plum }}>{g.name}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function StoryViewer({ groups, startIndex, onClose, onSeen, onViewProvider, canDelete, onDelete }) {
+  const [gi, setGi] = useState(startIndex);
+  const [si, setSi] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [muted, setMuted] = useState(true);
+  const [paused, setPaused] = useState(false);
+  const videoRef = useRef(null);
+  const group = groups[gi];
+  const story = group?.stories[si];
+
+  const next = () => {
+    if (!group) return onClose();
+    if (si < group.stories.length - 1) {
+      setSi(si + 1);
+    } else if (gi < groups.length - 1) {
+      setGi(gi + 1);
+      setSi(0);
+    } else {
+      onClose();
+    }
+  };
+  const prev = () => {
+    if (si > 0) setSi(si - 1);
+    else if (gi > 0) {
+      setGi(gi - 1);
+      setSi(Math.max(0, groups[gi - 1].stories.length - 1));
+    } else setProgress(0);
+  };
+
+  useEffect(() => {
+    setProgress(0);
+    if (story) onSeen(story.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [story?.id]);
+
+  // Photos advance on a timer; videos advance when they end.
+  useEffect(() => {
+    if (!story || story.type !== "image" || paused) return;
+    const started = Date.now() - progress * STORY_IMAGE_MS;
+    const t = setInterval(() => {
+      const p = (Date.now() - started) / STORY_IMAGE_MS;
+      if (p >= 1) {
+        clearInterval(t);
+        next();
+      } else setProgress(p);
+    }, 50);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [story?.id, paused]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (paused) v.pause();
+    else v.play().catch(() => {});
+  }, [paused, story?.id]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowRight") next();
+      if (e.key === "ArrowLeft") prev();
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  });
+
+  if (!group || !story) return null;
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label={`Story från ${group.name}`} className="fixed inset-0 z-[60] flex items-center justify-center" style={{ backgroundColor: "#1E0816" }}>
+      <div className="relative h-full w-full overflow-hidden sm:h-[92vh] sm:max-w-[440px] sm:rounded-3xl" style={{ backgroundColor: "#000" }}>
+        {story.type === "video" ? (
+          <video
+            key={story.id}
+            ref={videoRef}
+            src={story.url}
+            autoPlay
+            playsInline
+            muted={muted}
+            onTimeUpdate={(e) => e.currentTarget.duration && setProgress(e.currentTarget.currentTime / e.currentTarget.duration)}
+            onEnded={next}
+            className="h-full w-full object-contain"
+          />
+        ) : (
+          <img key={story.id} src={story.url} alt={`Story från ${group.name}`} className="h-full w-full object-contain" />
+        )}
+
+        <div className="absolute inset-x-0 top-0 p-3" style={{ background: "linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0))" }}>
+          <div className="flex gap-1">
+            {group.stories.map((s, i) => (
+              <span key={s.id} className="h-[3px] flex-1 overflow-hidden rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.35)" }}>
+                <span className="block h-full rounded-full" style={{ backgroundColor: colors.white, width: `${i < si ? 100 : i === si ? Math.round(progress * 100) : 0}%` }} />
+              </span>
+            ))}
+          </div>
+          <div className="mt-3 flex items-center gap-2.5">
+            <span className="h-9 w-9 overflow-hidden rounded-full" style={{ border: "2px solid #fff", backgroundColor: colors.coralSoft }}>
+              {group.avatar && <img src={group.avatar} alt="" className="h-full w-full object-cover" />}
+            </span>
+            <span className="min-w-0 flex-1 text-white">
+              <span className="block truncate text-sm font-semibold">{group.name}</span>
+              <span className="block text-xs opacity-80">{storyTimeAgo(story.createdAt)}</span>
+            </span>
+            {story.type === "video" && (
+              <button onClick={() => setMuted((m) => !m)} aria-label={muted ? "Slå på ljud" : "Stäng av ljud"} className="flex h-11 w-11 items-center justify-center text-white">
+                {muted ? <VolumeX size={22} /> : <Volume2 size={22} />}
+              </button>
+            )}
+            {canDelete(group, story) && (
+              <button
+                onClick={() => {
+                  onDelete(story);
+                  next();
+                }}
+                aria-label="Ta bort storyn"
+                className="flex h-11 w-11 items-center justify-center text-white"
+              >
+                <Trash2 size={20} />
+              </button>
+            )}
+            <button onClick={onClose} aria-label="Stäng" className="flex h-11 w-11 items-center justify-center text-white">
+              <X size={26} />
+            </button>
+          </div>
+        </div>
+
+        <button aria-label="Föregående" onClick={prev} className="absolute bottom-24 left-0 top-24 w-1/3" style={{ background: "transparent" }} />
+        <button
+          aria-label="Nästa"
+          onClick={next}
+          onPointerDown={() => setPaused(true)}
+          onPointerUp={() => setPaused(false)}
+          onPointerLeave={() => setPaused(false)}
+          className="absolute bottom-24 right-0 top-24 w-2/3"
+          style={{ background: "transparent" }}
+        />
+
+        {group.providerId && (
+          <div className="absolute inset-x-0 bottom-0 flex justify-center p-5" style={{ background: "linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0.5))" }}>
+            <button
+              onClick={() => {
+                onClose();
+                onViewProvider(group.providerId);
+              }}
+              className="flex h-12 items-center gap-2 rounded-full px-6 text-sm font-bold"
+              style={{ backgroundColor: colors.white, color: colors.plum }}
+            >
+              Visa {group.name} <ArrowRight size={16} />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StoryManager({ approved, stories, uploading, onUpload, onDelete }) {
+  const inputRef = useRef(null);
+  return (
+    <section className="mt-5 rounded-3xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold" style={{ color: colors.plum }}>Din story</h2>
+          <p className="mt-0.5 text-sm" style={{ color: colors.plumSoft }}>
+            {approved ? "Visa vad ni gör just nu. En story syns på startsidan i 24 timmar." : "Du kan lägga upp stories när din profil är godkänd."}
+          </p>
+        </div>
+        {approved && (
+          <>
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/*,video/mp4,video/quicktime,video/webm"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files && e.target.files[0];
+                e.target.value = "";
+                if (f) onUpload(f);
+              }}
+            />
+            <button
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading}
+              className="flex flex-shrink-0 items-center gap-1.5 rounded-full px-4 py-2.5 text-sm font-semibold"
+              style={{ backgroundColor: colors.coral, color: colors.white, opacity: uploading ? 0.6 : 1 }}
+            >
+              <Plus size={16} /> {uploading ? "Laddar upp…" : "Ny story"}
+            </button>
+          </>
+        )}
+      </div>
+      {stories.length > 0 && (
+        <div className="mt-4 flex gap-3 overflow-x-auto pb-1">
+          {stories.map((s) => (
+            <div key={s.id} className="relative h-36 w-24 flex-shrink-0 overflow-hidden rounded-2xl" style={{ backgroundColor: colors.coralSoft }}>
+              {s.type === "video" ? <video src={s.url} muted playsInline preload="metadata" className="h-full w-full object-cover" /> : <img src={s.url} alt="" className="h-full w-full object-cover" />}
+              <span className="absolute bottom-1.5 left-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.9)", color: colors.plum }}>
+                {storyTimeAgo(s.createdAt)}
+              </span>
+              <button onClick={() => onDelete(s)} aria-label="Ta bort storyn" className="absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.9)", color: colors.plum }}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {approved && <p className="mt-3 text-xs" style={{ color: colors.plumSoft }}>Bild eller video, max 60 sekunder och 25 MB. Stories syns direkt för alla besökare.</p>}
+    </section>
+  );
+}
+
 async function supabaseRestRequest(path, accessToken, options = {}) {
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
@@ -1842,7 +2178,7 @@ function SectionTitle({ children, action }) {
   );
 }
 
-function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howItWorksRef, onVendorIntro, session, profile, upcomingEvent, onPlanning, onToggleTask, popular = [], onViewProvider }) {
+function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howItWorksRef, onVendorIntro, session, profile, upcomingEvent, onPlanning, onToggleTask, popular = [], onViewProvider, storyGroups = [], seenStories, onOpenStory }) {
   const ev = session ? upcomingEvent : null;
   const evDays = ev?.date ? daysUntil(ev.date) : null;
   const tasks = ev?.tasks || [];
@@ -1949,6 +2285,25 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
         </section>
       )}
 
+      {storyGroups.length > 0 ? (
+        <>
+          <section aria-label="Stories" className="pt-8">
+            <StoryRings groups={storyGroups} seen={seenStories} onOpen={onOpenStory} />
+          </section>
+          <section aria-label="Kategorier" className="pt-3">
+            <div className="mx-auto flex max-w-5xl gap-2 overflow-x-auto px-5 pb-1 sm:flex-wrap sm:px-8">
+              {CATEGORIES.map((c) => {
+                const Icon = c.icon;
+                return (
+                  <PillChip key={c.id} onClick={() => onExploreCategory(c.id)}>
+                    <Icon size={15} color={colors.coral} /> {c.label}
+                  </PillChip>
+                );
+              })}
+            </div>
+          </section>
+        </>
+      ) : (
       <section aria-label="Kategorier" className="pt-8">
         <div className="mx-auto flex max-w-5xl gap-4 overflow-x-auto px-5 pb-2 sm:flex-wrap sm:justify-center sm:gap-7 sm:px-8">
           {CATEGORIES.map((c) => {
@@ -1966,6 +2321,7 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
           })}
         </div>
       </section>
+      )}
 
       {!ev && (
         <section className="mx-auto max-w-5xl px-5 pt-10 sm:px-8">
@@ -2433,7 +2789,7 @@ function ResultsView({
   );
 }
 
-function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty, onSendRequest, siblings = [], cartIds = [], onViewOther }) {
+function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRemove, onToggleAddon, onOpenChat, onSelectDate, onUpdateParty, onSendRequest, siblings = [], cartIds = [], onViewOther, storyIndex = -1, storyUnseen = false, onOpenStory }) {
   const cat = catMap[provider.category];
   const [requestOpen, setRequestOpen] = useState(false);
   const [pendingAddons, setPendingAddons] = useState([]);
@@ -2535,11 +2891,17 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
 
       <div className="px-5 pt-5 sm:px-8">
         <div className="flex items-center gap-5">
-          <span className="flex h-[92px] w-[92px] flex-shrink-0 rounded-full p-[3px]" style={{ background: `conic-gradient(${colors.korall}, ${colors.coral}, ${colors.lilac}, ${colors.korall})` }}>
+          <button
+            onClick={() => storyIndex >= 0 && onOpenStory(storyIndex)}
+            disabled={storyIndex < 0}
+            aria-label={storyIndex >= 0 ? `Visa story från ${provider.name}` : undefined}
+            className="flex h-[92px] w-[92px] flex-shrink-0 rounded-full p-[3px]"
+            style={{ background: storyIndex >= 0 ? (storyUnseen ? `conic-gradient(${colors.korall}, ${colors.coral}, ${colors.lilac}, ${colors.korall})` : colors.beige) : "transparent", cursor: storyIndex >= 0 ? "pointer" : "default" }}
+          >
             <span className="h-full w-full overflow-hidden rounded-full" style={{ border: `3px solid ${colors.cream}` }}>
               <img src={avatar} alt={`${provider.name}s profilbild`} className="h-full w-full object-cover" />
             </span>
-          </span>
+          </button>
           <div className="grid flex-1 grid-cols-3 text-center">
             <span className="flex flex-col">
               <span style={statNum}>{images.length}</span>
@@ -5083,7 +5445,7 @@ const SEED_BOOKINGS = [
   },
 ];
 
-function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditProfile, onPreview, onBookings, onInbox, onRespond }) {
+function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditProfile, onPreview, onBookings, onInbox, onRespond, storyManager = null }) {
   if (!vendor) return null;
   const { percent, missing } = getVendorCompleteness(vendor);
   const locationName = locationMap[vendor.baseLocation]?.name || vendor.baseLocation;
@@ -5148,6 +5510,8 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
           )}
         </div>
       )}
+
+      {storyManager}
 
       <div className="mt-5 grid grid-cols-3 gap-3">
         {[
@@ -10386,6 +10750,101 @@ export default function App() {
       })
       .slice(0, 4);
   }, [customerProviders]);
+  // --- Stories ---
+  const [stories, setStories] = useState([]);
+  const [seenStories, setSeenStories] = useState(() => readSeenStories());
+  const [storyViewer, setStoryViewer] = useState(null); // { groups, index } — a snapshot, so the order stays put while watching
+  const [storyUploading, setStoryUploading] = useState(false);
+  const loadStories = async () => {
+    const { data } = await supabaseRestRequest(
+      `/vendor_stories?select=id,vendor_id,media_url,media_type,created_at,expires_at&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&order=created_at.asc`,
+      session?.access_token
+    );
+    if (Array.isArray(data)) setStories(data);
+  };
+  useEffect(() => {
+    loadStories();
+    const t = setInterval(loadStories, 5 * 60 * 1000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.access_token]);
+  const storyGroups = useMemo(() => {
+    const byVendor = new Map();
+    stories.forEach((st) => {
+      if (!byVendor.has(st.vendor_id)) byVendor.set(st.vendor_id, []);
+      byVendor.get(st.vendor_id).push({ id: st.id, url: st.media_url, type: st.media_type, createdAt: st.created_at });
+    });
+    const groups = [];
+    byVendor.forEach((list, vendorId) => {
+      const provider = customerProviders.find((p) => p.vendorDbId === vendorId);
+      if (!provider) return;
+      groups.push({
+        key: vendorId,
+        vendorId,
+        name: provider.name,
+        avatar: (provider.images && provider.images[0]) || provider.image || null,
+        providerId: provider.id,
+        stories: list,
+        latest: list[list.length - 1].createdAt,
+      });
+    });
+    return groups.sort((a, b) => {
+      const ua = a.stories.some((x) => !seenStories.has(x.id)) ? 1 : 0;
+      const ub = b.stories.some((x) => !seenStories.has(x.id)) ? 1 : 0;
+      return ub - ua || String(b.latest).localeCompare(String(a.latest));
+    });
+  }, [stories, customerProviders, seenStories]);
+  const myStories = submittedVendor
+    ? stories.filter((st) => st.vendor_id === submittedVendor.id).map((st) => ({ id: st.id, url: st.media_url, type: st.media_type, createdAt: st.created_at }))
+    : [];
+  const markStorySeen = (id) =>
+    setSeenStories((prevSeen) => {
+      if (prevSeen.has(id)) return prevSeen;
+      const nextSeen = new Set(prevSeen);
+      nextSeen.add(id);
+      try {
+        window.localStorage.setItem(STORY_SEEN_KEY, JSON.stringify([...nextSeen].slice(-500)));
+      } catch (e) {
+        // fine
+      }
+      return nextSeen;
+    });
+  const addStory = async (file) => {
+    if (!submittedVendor || submittedVendor.status !== "approved") return;
+    setStoryUploading(true);
+    const up = await uploadStoryMedia(file, session);
+    if (up.error) {
+      setStoryUploading(false);
+      showToast(up.error);
+      return;
+    }
+    const { data, error } = await supabaseRestRequest("/vendor_stories", session.access_token, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ vendor_id: submittedVendor.id, media_url: up.url, media_type: up.mediaType }),
+    });
+    setStoryUploading(false);
+    if (error || !Array.isArray(data) || !data[0]) {
+      deleteStoryFile(up.url, session);
+      showToast("Det gick inte att publicera storyn. Försök igen.");
+      return;
+    }
+    setStories((list) => [...list, data[0]]);
+    showToast("Din story är publicerad i 24 timmar ✨");
+  };
+  const removeStory = async (story) => {
+    setStories((list) => list.filter((st) => st.id !== story.id));
+    const { error } = await supabaseRestRequest(`/vendor_stories?id=eq.${story.id}`, session?.access_token, { method: "DELETE" });
+    if (error) {
+      showToast("Kunde inte ta bort storyn.");
+      loadStories();
+      return;
+    }
+    deleteStoryFile(story.url, session);
+    showToast("Storyn är borttagen.");
+  };
+  const openStory = (index) => setStoryViewer({ groups: storyGroups, index });
+
   const goBuilder = () => {
     setView("builder");
     setSwapContext(null);
@@ -11406,6 +11865,9 @@ export default function App() {
           onToggleTask={(eventId, taskId) => taskApi.toggle(eventId, taskId)}
           popular={popularProviders}
           onViewProvider={viewProfile}
+          storyGroups={storyGroups}
+          seenStories={seenStories}
+          onOpenStory={openStory}
         />
       )}
 
@@ -11456,6 +11918,9 @@ export default function App() {
               : []
           }
           cartIds={cartProviderIds}
+          storyIndex={activeProvider.vendorDbId ? storyGroups.findIndex((g) => g.vendorId === activeProvider.vendorDbId) : -1}
+          storyUnseen={!!storyGroups.find((g) => g.vendorId === activeProvider.vendorDbId)?.stories.some((x) => !seenStories.has(x.id))}
+          onOpenStory={openStory}
           onViewOther={(id) => {
             viewProfile(id);
             window.scrollTo({ top: 0 });
@@ -11592,6 +12057,9 @@ export default function App() {
           onInbox={goVendorInbox}
           onRespond={respondToBookingItem}
           conversationCount={vendorConversations.length}
+          storyManager={
+            <StoryManager approved={submittedVendor?.status === "approved"} stories={myStories} uploading={storyUploading} onUpload={addStory} onDelete={removeStory} />
+          }
         />
       )}
 
@@ -11732,6 +12200,17 @@ export default function App() {
       />
       )}
 
+      {storyViewer && storyViewer.groups[storyViewer.index] && (
+        <StoryViewer
+          groups={storyViewer.groups}
+          startIndex={storyViewer.index}
+          onClose={() => setStoryViewer(null)}
+          onSeen={markStorySeen}
+          onViewProvider={viewProfile}
+          canDelete={(g) => profile?.role === "admin" || (!!submittedVendor && g.vendorId === submittedVendor.id)}
+          onDelete={removeStory}
+        />
+      )}
       <ReviewModal target={reviewTarget} onSubmit={submitReview} onClose={closeReview} />
       <ChatModal
         target={chatTarget}
