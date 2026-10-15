@@ -966,6 +966,76 @@ function StoryManager({ approved, stories, highlights, uploading, onUpload, onDe
   );
 }
 
+// Customer profile picture: a small JPEG in the public "avatars" bucket, one folder per user.
+const AVATAR_PUBLIC_PREFIX = `${SUPABASE_URL}/storage/v1/object/public/avatars/`;
+async function uploadAvatar(file, session) {
+  if (!session?.access_token || !session?.user?.id) return { error: "Du måste vara inloggad." };
+  if (!file.type.startsWith("image/")) return { error: "Välj en bild." };
+  let blob;
+  try {
+    blob = await shrinkImage(file, 600);
+  } catch (e) {
+    return { error: "Kunde inte läsa bilden. Prova en JPG- eller PNG-bild." };
+  }
+  const path = `${session.user.id}/${newId()}.jpg`;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/avatars/${path}`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}`, "Content-Type": "image/jpeg", "Cache-Control": "31536000" },
+      body: blob,
+    });
+    if (!res.ok) return { error: "Uppladdningen misslyckades. Försök igen." };
+    return { url: AVATAR_PUBLIC_PREFIX + path };
+  } catch (e) {
+    return { error: "Nådde inte servern. Kontrollera din uppkoppling och försök igen." };
+  }
+}
+function deleteAvatarFile(url, session) {
+  if (!session?.access_token || typeof url !== "string" || !url.startsWith(AVATAR_PUBLIC_PREFIX)) return;
+  fetch(`${SUPABASE_URL}/storage/v1/object/avatars/${url.slice(AVATAR_PUBLIC_PREFIX.length)}`, {
+    method: "DELETE",
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` },
+  }).catch(() => {});
+}
+
+// Round profile picture that opens the file picker when tapped.
+function AvatarPicker({ url, initial, size = 64, uploading, onPick }) {
+  const ref = useRef(null);
+  return (
+    <>
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files && e.target.files[0];
+          e.target.value = "";
+          if (f) onPick(f);
+        }}
+      />
+      <button
+        onClick={() => ref.current?.click()}
+        disabled={uploading}
+        aria-label="Byt profilbild"
+        className="relative flex-shrink-0 rounded-full"
+        style={{ width: size, height: size, backgroundColor: colors.lilacSoft, border: `2px solid ${colors.white}`, boxShadow: `0 0 0 2px ${colors.lilac}`, opacity: uploading ? 0.6 : 1 }}
+      >
+        <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-full">
+          {url ? (
+            <img src={url} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <span style={{ fontFamily: serif, fontWeight: 700, fontSize: size * 0.38, color: colors.coral }}>{initial}</span>
+          )}
+        </span>
+        <span className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full" style={{ backgroundColor: colors.coral, border: `2px solid ${colors.cream}` }}>
+          <Camera size={12} color={colors.white} />
+        </span>
+      </button>
+    </>
+  );
+}
+
 async function supabaseRestRequest(path, accessToken, options = {}) {
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
@@ -2311,9 +2381,12 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
       )}
       {ev ? (
         <section className="mx-auto max-w-3xl px-5 pt-6 sm:px-8 sm:pt-10">
-          <h1 className="mb-4 text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>
-            Hej{firstName ? ` ${firstName}` : ""}!
-          </h1>
+          <div className="mb-4 flex items-center gap-3">
+            {profile?.avatar_url && <img src={profile.avatar_url} alt="" className="h-11 w-11 rounded-full object-cover" style={{ border: `2px solid ${colors.white}`, boxShadow: `0 0 0 2px ${colors.lilac}` }} />}
+            <h1 className="text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>
+              Hej{firstName ? ` ${firstName}` : ""}!
+            </h1>
+          </div>
           <div className="mb-4">
             <EventSwitcher events={events} activeId={ev.id} onSelect={onSelectEvent} onNew={onNewEvent} label={events.length > 1 ? "Dina fester" : null} />
           </div>
@@ -6435,7 +6508,7 @@ function VendorProfilePreviewView({ vendor, onBack }) {
 // chat) since a vendor spends more focused time here. Reuses the same quote
 // bubble treatment as the customer's ChatModal.
 // ---------------------------------------------------------------------------
-function VendorInboxView({ conversations, activeConversationId, messages, onOpenConversation, onSendMessage, onSendQuote, onBack, inboxById = {}, quoteFromBrief }) {
+function VendorInboxView({ conversations, activeConversationId, messages, onOpenConversation, onSendMessage, onSendQuote, onBack, inboxById = {}, quoteFromBrief, customerAvatars = {} }) {
   const [text, setText] = useState("");
   const [quoteMode, setQuoteMode] = useState(false);
   const [quoteAmount, setQuoteAmount] = useState("");
@@ -6481,9 +6554,12 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
         <button onClick={onBack} className="-ml-2 mb-4 flex items-center gap-1 px-2 py-1.5 text-sm font-medium" style={{ color: colors.plumSoft }}>
           <ChevronLeft size={16} /> Alla konversationer
         </button>
-        <div className="mb-3">
-          <p style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>{catMap[active.category_id]?.label || "Fråga"}</p>
-          <p className="text-xs" style={{ color: colors.plumSoft }}>Kund</p>
+        <div className="mb-3 flex items-center gap-3">
+          {customerAvatars[active.customer_id] && <img src={customerAvatars[active.customer_id]} alt="" className="h-11 w-11 rounded-full object-cover" />}
+          <div>
+            <p style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>{catMap[active.category_id]?.label || "Fråga"}</p>
+            <p className="text-xs" style={{ color: colors.plumSoft }}>Kund</p>
+          </div>
         </div>
         <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto rounded-3xl p-4" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
           {messages.length === 0 && (
@@ -6630,8 +6706,8 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
               className="flex w-full items-center gap-3 rounded-2xl p-4 text-left"
               style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}
             >
-              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: colors.lilacSoft }}>
-                {Icon && <Icon size={16} color={colors.lilacDeep} />}
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full" style={{ backgroundColor: colors.lilacSoft }}>
+                {customerAvatars[c.customer_id] ? <img src={customerAvatars[c.customer_id]} alt="" className="h-full w-full object-cover" /> : Icon && <Icon size={16} color={colors.lilacDeep} />}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="font-semibold" style={{ color: colors.plum }}>
@@ -7644,7 +7720,7 @@ function ReviewPrompt({ due, onReview }) {
   );
 }
 
-function MinSidaHeader({ name, email, isAdmin, hasVendor, onAccount, onSaved, onSupport, onVendor, onAdmin, onSignOut, reviewsDue = [], onReview }) {
+function MinSidaHeader({ name, email, isAdmin, hasVendor, onAccount, onSaved, onSupport, onVendor, onAdmin, onSignOut, reviewsDue = [], onReview, avatarUrl, avatarUploading, onChangeAvatar, onRemoveAvatar }) {
   const first = (name || "").trim().split(/\s+/)[0];
   const links = [
     { label: "Mina uppgifter", onClick: onAccount },
@@ -7656,12 +7732,15 @@ function MinSidaHeader({ name, email, isAdmin, hasVendor, onAccount, onSaved, on
   return (
     <div className="mx-auto max-w-3xl px-6 pt-8 sm:px-10">
       <div className="flex items-center gap-4">
-        <span className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full text-xl" style={{ fontFamily: serif, fontWeight: 700, backgroundColor: colors.lilacSoft, border: `1px solid ${colors.lilac}`, color: colors.coral }}>
-          {(first || email || "?").charAt(0).toUpperCase()}
-        </span>
+        <AvatarPicker url={avatarUrl} initial={(first || email || "?").charAt(0).toUpperCase()} size={64} uploading={avatarUploading} onPick={onChangeAvatar} />
         <span className="min-w-0">
           <h1 className="truncate text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Hej{first ? ` ${first}` : ""}!</h1>
           <span className="block truncate text-sm" style={{ color: colors.plumSoft }}>{email}</span>
+          {avatarUrl && (
+            <button onClick={onRemoveAvatar} className="mt-0.5 text-xs font-semibold underline" style={{ color: colors.coral }}>
+              Ta bort profilbild
+            </button>
+          )}
         </span>
       </div>
       {reviewsDue.length > 0 && (
@@ -9276,7 +9355,7 @@ function AdminVendorDetailView({ vendor, onBack, onApprove, onReject }) {
 // ---------------------------------------------------------------------------
 // Shown as "Senast uppdaterad" at the bottom of each legal page — update this
 // one line whenever the texts change. Must stay above the section lists below.
-const LEGAL_LAST_UPDATED = "14 oktober 2026";
+const LEGAL_LAST_UPDATED = "15 oktober 2026";
 
 const PRIVACY_POLICY_SECTIONS = [
   {
@@ -9290,8 +9369,8 @@ const PRIVACY_POLICY_SECTIONS = [
     heading: "2. Vilka personuppgifter samlar vi in?",
     paragraphs: ["Vilka uppgifter vi samlar in beror på om du använder Planifest som kund eller leverantör:"],
     bullets: [
-      "Kund: namn, e-postadress, telefonnummer, uppgifter om ditt event (datum, tid, antal gäster, typ av tillställning) och vilka leverantörer du bokar.",
-      "Leverantör: företagsnamn, organisationsnummer, kontaktperson, e-post, telefonnummer, verksamhetsområde, bilder samt beskrivningar av tjänster och priser.",
+      "Kund: namn, e-postadress, telefonnummer, uppgifter om ditt event (datum, tid, antal gäster, typ av tillställning), vilka leverantörer du bokar och – om du själv väljer att lägga upp en – din profilbild.",
+      "Leverantör: företagsnamn, organisationsnummer, kontaktperson, e-post, telefonnummer, verksamhetsområde, bilder, stories (bilder och videor) samt beskrivningar av tjänster och priser.",
       "Automatiskt insamlad information via cookies och liknande tekniker — se vår cookiepolicy.",
     ],
   },
@@ -9310,6 +9389,7 @@ const PRIVACY_POLICY_SECTIONS = [
     heading: "4. Vem delar vi dina uppgifter med?",
     paragraphs: [
       "Leverantörer du väljer att boka får del av de uppgifter som krävs för att genomföra bokningen (namn, kontaktuppgifter, eventdetaljer).",
+      "Har du laddat upp en profilbild visas den för de leverantörer du skickar meddelanden eller bokningsförfrågningar till. Du kan byta eller ta bort bilden när du vill.",
       "När betalning införs på plattformen kommer nödvändiga uppgifter att delas med vår betaltjänstleverantör.",
       "Vi säljer aldrig dina uppgifter till tredje part för marknadsföringsändamål.",
     ],
@@ -9318,6 +9398,7 @@ const PRIVACY_POLICY_SECTIONS = [
     heading: "5. Hur länge sparar vi dina uppgifter?",
     paragraphs: [
       "Vi sparar dina uppgifter så länge det behövs för ändamålen ovan, eller så länge lagen kräver — till exempel kräver bokföringslagen att räkenskapsinformation sparas i sju år. Kontouppgifter raderas eller anonymiseras på begäran, om vi inte är skyldiga att spara dem enligt lag.",
+      "Stories som leverantörer lägger upp visas i 24 timmar och raderas därefter automatiskt, om leverantören inte har sparat dem i en höjdpunkt på sin profil.",
     ],
   },
   {
@@ -11207,6 +11288,51 @@ export default function App() {
     window.scrollTo(0, 0);
   };
 
+  const [customerAvatarUploading, setCustomerAvatarUploading] = useState(false);
+  const changeCustomerAvatar = async (file) => {
+    if (!session?.access_token) return;
+    setCustomerAvatarUploading(true);
+    const up = await uploadAvatar(file, session);
+    if (up.error) {
+      setCustomerAvatarUploading(false);
+      showToast(up.error);
+      return;
+    }
+    const old = profile?.avatar_url;
+    const { error } = await supabaseRestRequest(`/profiles?id=eq.${session.user.id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ avatar_url: up.url }) });
+    setCustomerAvatarUploading(false);
+    if (error) {
+      deleteAvatarFile(up.url, session);
+      showToast("Kunde inte spara profilbilden. Försök igen.");
+      return;
+    }
+    setProfile((pr) => (pr ? { ...pr, avatar_url: up.url } : pr));
+    if (old) deleteAvatarFile(old, session);
+    showToast("Ny profilbild ✓");
+  };
+  const removeCustomerAvatar = async () => {
+    const old = profile?.avatar_url;
+    if (!old || !session?.access_token) return;
+    const { error } = await supabaseRestRequest(`/profiles?id=eq.${session.user.id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ avatar_url: null }) });
+    if (error) {
+      showToast("Kunde inte ta bort profilbilden.");
+      return;
+    }
+    setProfile((pr) => (pr ? { ...pr, avatar_url: null } : pr));
+    deleteAvatarFile(old, session);
+    showToast("Profilbilden är borttagen.");
+  };
+
+  // Profile pictures of the customers a vendor talks to (the database only hands out those).
+  const [customerAvatars, setCustomerAvatars] = useState({});
+  const customerIdsKey = [...new Set(vendorConversations.map((c) => c.customer_id).filter(Boolean))].sort().join(",");
+  useEffect(() => {
+    if (!customerIdsKey || !session?.access_token) return;
+    supabaseRestRequest("/rpc/customer_avatars", session.access_token, { method: "POST", body: JSON.stringify({ p_ids: customerIdsKey.split(",") }) }).then(({ data }) => {
+      if (Array.isArray(data)) setCustomerAvatars(Object.fromEntries(data.map((r) => [r.id, r.avatar_url])));
+    });
+  }, [customerIdsKey, session?.access_token]);
+
   const goBuilder = () => {
     setView("builder");
     setSwapContext(null);
@@ -12371,6 +12497,10 @@ export default function App() {
               onSignOut={signOut}
               reviewsDue={reviewsDue}
               onReview={openReview}
+              avatarUrl={profile?.avatar_url || null}
+              avatarUploading={customerAvatarUploading}
+              onChangeAvatar={changeCustomerAvatar}
+              onRemoveAvatar={removeCustomerAvatar}
             />
           )}
           <MinaBokningarView bookings={bookings} onCancelBooking={cancelBooking} onReviewItem={openReview} onChatItem={openBookingChat} events={events} />
@@ -12457,6 +12587,7 @@ export default function App() {
           onOpenConversation={openVendorConversation}
           onSendMessage={sendVendorMessage}
           onSendQuote={sendVendorQuote}
+          customerAvatars={customerAvatars}
           onBack={closeVendorConversation}
           inboxById={Object.fromEntries(inbox.map((c) => [c.conversation_id, c]))}
           quoteFromBrief={quoteFromBrief}
