@@ -2181,19 +2181,10 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
             Ledig ditt datum
           </span>
         ) : null}
-        {!compact && (
-          <button
-            onClick={handleAction}
-            className="absolute bottom-2.5 right-2.5 flex h-10 w-10 items-center justify-center rounded-full shadow-md"
-            style={{
-              backgroundColor: busy ? colors.beige : added ? colors.greenSoft : colors.coral,
-              color: busy ? colors.plumSoft : added ? colors.green : colors.white,
-              opacity: busy ? 0.8 : 1,
-            }}
-            aria-label={busy ? "Upptagen din tid, visa profilen" : provider.requestOnly ? "Skicka förfrågan" : swapMode ? "Välj denna" : inCart ? "Ta bort från Min fest" : "Lägg till i Min fest"}
-          >
-            {swapMode || inCart ? <Check size={17} /> : <Plus size={17} />}
-          </button>
+        {inCart && !swapMode && (
+          <span className="absolute bottom-2.5 right-2.5 flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ backgroundColor: colors.greenSoft, color: colors.green }}>
+            <Check size={12} /> I din fest
+          </span>
         )}
       </div>
       <div className="min-w-0 px-0.5">
@@ -2277,7 +2268,7 @@ function SectionTitle({ children, action }) {
   );
 }
 
-function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howItWorksRef, onVendorIntro, session, profile, upcomingEvent, onPlanning, onToggleTask, popular = [], onViewProvider, storyGroups = [], seenStories, onOpenStory }) {
+function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howItWorksRef, onVendorIntro, session, profile, upcomingEvent, onPlanning, onToggleTask, popular = [], onViewProvider, storyGroups = [], seenStories, onOpenStory, reviewsDue = [], onReview }) {
   const ev = session ? upcomingEvent : null;
   const evDays = ev?.date ? daysUntil(ev.date) : null;
   const tasks = ev?.tasks || [];
@@ -2290,6 +2281,11 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
 
   return (
     <div className="pb-6">
+      {session && reviewsDue.length > 0 && (
+        <section className="mx-auto max-w-3xl px-5 pt-6 sm:px-8">
+          <ReviewPrompt due={reviewsDue} onReview={onReview} />
+        </section>
+      )}
       {ev ? (
         <section className="mx-auto max-w-3xl px-5 pt-6 sm:px-8 sm:pt-10">
           <h1 className="mb-4 text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>
@@ -2945,22 +2941,15 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
   const statNum = { fontFamily: sans, fontWeight: 700, fontSize: 18, color: colors.plum };
   const btnBase = "flex h-11 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-semibold";
 
-  const primaryButton = provider.requestOnly ? (
-    <button onClick={() => setRequestOpen(true)} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.coral, color: colors.white }}>
-      Skicka förfrågan
-    </button>
-  ) : inCart ? (
-    <button onClick={() => onRemove(provider.id)} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.greenSoft, color: colors.green }}>
-      <Check size={16} /> I din fest
-    </button>
+  // Everything is booked through a quote first, so nobody can claim a price the vendor never agreed to.
+  const askForQuote = () => (provider.request && provider.vendorDbId ? setRequestOpen(true) : onOpenChat(provider));
+  const primaryButton = inCart ? (
+    <span className={`${btnBase} flex-1`} style={{ backgroundColor: colors.greenSoft, color: colors.green }}>
+      <Check size={16} /> Offert accepterad
+    </span>
   ) : (
-    <button
-      onClick={() => !unavailableNow && onAdd(provider.id, pendingAddons)}
-      disabled={unavailableNow}
-      className={`${btnBase} flex-1`}
-      style={{ backgroundColor: unavailableNow ? colors.beige : colors.coral, color: unavailableNow ? colors.plumSoft : colors.white, cursor: unavailableNow ? "not-allowed" : "pointer" }}
-    >
-      {unavailableNow ? "Upptagen din tid" : "Lägg till i Min fest"}
+    <button onClick={askForQuote} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.coral, color: colors.white }}>
+      Begär offert
     </button>
   );
 
@@ -3055,20 +3044,9 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
 
         <div className="mt-4 flex gap-2">
           {primaryButton}
-          {provider.request && provider.vendorDbId && !provider.requestOnly ? (
-            <button onClick={() => setRequestOpen(true)} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
-              Begär offert
-            </button>
-          ) : (
-            <button onClick={() => onOpenChat(provider)} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
-              Meddelande
-            </button>
-          )}
-          {provider.request && provider.vendorDbId && !provider.requestOnly && (
-            <button onClick={() => onOpenChat(provider)} aria-label="Skicka meddelande" className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
-              <MessageCircle size={19} />
-            </button>
-          )}
+          <button onClick={() => onOpenChat(provider)} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+            <MessageCircle size={17} /> Meddelande
+          </button>
         </div>
 
         {highlightGroups.length > 0 && (
@@ -3216,9 +3194,10 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                 </div>
               )}
               <div className="mt-4 flex items-center justify-between border-t pt-4" style={{ borderColor: colors.beige }}>
-                <span className="text-sm font-semibold" style={{ color: colors.plum }}>Uppskattat pris</span>
+                <span className="text-sm font-semibold" style={{ color: colors.plum }}>Riktpris</span>
                 <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 20, color: colors.plum }}>{formatKr(estimate)}</span>
               </div>
+              <p className="mt-2 text-xs" style={{ color: colors.plumSoft }}>Slutpriset får du i leverantörens offert. Först när du accepterar den läggs leverantören till i Min fest.</p>
             </section>
           )}
 
@@ -5563,7 +5542,11 @@ const SEED_BOOKINGS = [
   },
 ];
 
-function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditProfile, onPreview, onBookings, onInbox, onRespond, storyManager = null }) {
+function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditProfile, onPreview, onBookings, onInbox, onRespond, storyManager = null, onChangeAvatar, avatarUploading = false, onSaveDescription }) {
+  const avatarInput = useRef(null);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descDraft, setDescDraft] = useState("");
+  const [savingDesc, setSavingDesc] = useState(false);
   if (!vendor) return null;
   const { percent, missing } = getVendorCompleteness(vendor);
   const locationName = locationMap[vendor.baseLocation]?.name || vendor.baseLocation;
@@ -5595,15 +5578,37 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
     <div className="mx-auto max-w-3xl px-5 pb-24 pt-6 sm:px-8 sm:pt-10">
       <div className="flex items-center justify-between gap-3">
         <span className="flex min-w-0 items-center gap-3">
-          <span className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-full" style={{ backgroundColor: colors.coralSoft, border: `2px solid ${colors.white}`, boxShadow: `0 0 0 2px ${colors.lilac}` }}>
-            {avatar ? (
-              <img src={avatar} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <span className="flex h-full w-full items-center justify-center text-xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.coral }}>
-                {(vendor.companyName || "?").charAt(0).toUpperCase()}
-              </span>
-            )}
-          </span>
+          <input
+            ref={avatarInput}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files && e.target.files[0];
+              e.target.value = "";
+              if (f) onChangeAvatar(f);
+            }}
+          />
+          <button
+            onClick={() => avatarInput.current?.click()}
+            disabled={avatarUploading}
+            aria-label="Byt profilbild"
+            className="relative h-16 w-16 flex-shrink-0 rounded-full"
+            style={{ backgroundColor: colors.coralSoft, border: `2px solid ${colors.white}`, boxShadow: `0 0 0 2px ${colors.lilac}`, opacity: avatarUploading ? 0.6 : 1 }}
+          >
+            <span className="block h-full w-full overflow-hidden rounded-full">
+              {avatar ? (
+                <img src={avatar} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <span className="flex h-full w-full items-center justify-center text-xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.coral }}>
+                  {(vendor.companyName || "?").charAt(0).toUpperCase()}
+                </span>
+              )}
+            </span>
+            <span className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full" style={{ backgroundColor: colors.coral, border: `2px solid ${colors.cream}` }}>
+              <Camera size={12} color={colors.white} />
+            </span>
+          </button>
           <span className="min-w-0">
             <span className="block text-xs font-semibold uppercase" style={{ letterSpacing: "0.1em", color: colors.plumSoft }}>Leverantörsportal</span>
             <h1 className="truncate text-2xl sm:text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum, lineHeight: 1.15 }}>
@@ -5702,6 +5707,61 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
           </div>
         </section>
       )}
+
+      <section className="mt-6 p-5" style={card}>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-semibold" style={{ color: colors.plum }}>Om er</h2>
+          {!editingDesc && (
+            <button
+              onClick={() => {
+                setDescDraft(vendor.profile?.description || "");
+                setEditingDesc(true);
+              }}
+              className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold"
+              style={{ color: colors.coral }}
+            >
+              <Pencil size={14} /> Redigera
+            </button>
+          )}
+        </div>
+        {editingDesc ? (
+          <>
+            <textarea
+              value={descDraft}
+              onChange={(e) => setDescDraft(e.target.value)}
+              rows={5}
+              maxLength={1500}
+              aria-label="Beskrivning"
+              placeholder="Berätta vad ni gör, för vilka fester och vad som gör er speciella."
+              className="mt-2 w-full rounded-2xl p-3 text-sm leading-relaxed"
+              style={{ border: `1px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.cream }}
+            />
+            <div className="mt-1 text-right text-[11px]" style={{ color: colors.plumSoft }}>{descDraft.length}/1500</div>
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={async () => {
+                  setSavingDesc(true);
+                  const ok = await onSaveDescription(descDraft.trim());
+                  setSavingDesc(false);
+                  if (ok) setEditingDesc(false);
+                }}
+                disabled={savingDesc}
+                className="h-10 rounded-full px-5 text-sm font-semibold"
+                style={{ backgroundColor: colors.coral, color: colors.white, opacity: savingDesc ? 0.6 : 1 }}
+              >
+                {savingDesc ? "Sparar…" : "Spara"}
+              </button>
+              <button onClick={() => setEditingDesc(false)} className="h-10 rounded-full px-5 text-sm font-medium" style={{ border: `1px solid ${colors.beige}`, color: colors.plum }}>
+                Avbryt
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="mt-1 whitespace-pre-line text-sm leading-relaxed" style={{ color: vendor.profile?.description ? colors.plum : colors.plumSoft }}>
+            {vendor.profile?.description || "Ingen beskrivning än – tryck på Redigera och berätta om er."}
+          </p>
+        )}
+      </section>
 
       <section className="mt-6 p-5" style={card}>
         <div className="flex items-center justify-between text-sm font-semibold" style={{ color: colors.plum }}>
@@ -7525,7 +7585,28 @@ function RsvpView({ state, onSubmit, onHome }) {
   );
 }
 
-function MinSidaHeader({ name, email, isAdmin, hasVendor, onAccount, onSaved, onSupport, onVendor, onAdmin, onSignOut }) {
+function ReviewPrompt({ due, onReview }) {
+  if (!due || due.length === 0) return null;
+  const first = due[0];
+  return (
+    <div className="flex items-center gap-3 p-4" style={{ backgroundColor: colors.peachSoft, border: `1px solid ${colors.peach}`, borderRadius: 20 }}>
+      <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: colors.white }}>
+        <Star size={20} fill={colors.coral} color={colors.coral} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[15px] font-semibold" style={{ color: colors.plum }}>Hur blev festen?</span>
+        <span className="block text-sm" style={{ color: colors.plumSoft }}>
+          Lämna ett omdöme till {first.item.name}{due.length > 1 ? ` och ${due.length - 1} till` : ""}.
+        </span>
+      </span>
+      <button onClick={() => onReview(first.bookingNumber, first.item)} className="flex-shrink-0 rounded-full px-4 py-2.5 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+        Betygsätt
+      </button>
+    </div>
+  );
+}
+
+function MinSidaHeader({ name, email, isAdmin, hasVendor, onAccount, onSaved, onSupport, onVendor, onAdmin, onSignOut, reviewsDue = [], onReview }) {
   const first = (name || "").trim().split(/\s+/)[0];
   const links = [
     { label: "Mina uppgifter", onClick: onAccount },
@@ -7545,6 +7626,11 @@ function MinSidaHeader({ name, email, isAdmin, hasVendor, onAccount, onSaved, on
           <span className="block truncate text-sm" style={{ color: colors.plumSoft }}>{email}</span>
         </span>
       </div>
+      {reviewsDue.length > 0 && (
+        <div className="mt-5">
+          <ReviewPrompt due={reviewsDue} onReview={onReview} />
+        </div>
+      )}
       <div className="mt-5 overflow-hidden" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 20 }}>
         {links.map((l, i) => (
           <button key={l.label} onClick={l.onClick} className="flex w-full items-center justify-between px-4 text-left text-[15px]" style={{ minHeight: 52, color: colors.plum, borderTop: i ? `1px solid ${colors.cream}` : "none" }}>
@@ -11010,6 +11096,45 @@ export default function App() {
   };
   const openStory = (index) => setStoryViewer({ groups: storyGroups, index });
 
+  // Quick edits from the vendor overview: profile picture and description, saved straight away.
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const patchOwnVendor = (fn) => setVendorApplications((list) => list.map((v) => (v.id === submittedVendor?.id ? fn(v) : v)));
+  const changeVendorAvatar = async (file) => {
+    if (!submittedVendor || !session?.access_token) return;
+    setAvatarUploading(true);
+    const up = await uploadVendorImage(file, session);
+    if (up.error) {
+      setAvatarUploading(false);
+      showToast(up.error);
+      return;
+    }
+    const images = [up.url, ...(submittedVendor.profile?.images || [])];
+    const { error } = await supabaseRestRequest(`/vendors?id=eq.${submittedVendor.id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ images }) });
+    setAvatarUploading(false);
+    if (error) {
+      deleteVendorImageFile(up.url, session);
+      showToast("Kunde inte spara profilbilden. Försök igen.");
+      return;
+    }
+    patchOwnVendor((v) => ({ ...v, profile: { ...v.profile, images } }));
+    showToast("Ny profilbild ✓");
+  };
+  const saveVendorDescription = async (text) => {
+    if (!submittedVendor || !session?.access_token) return false;
+    const { error } = await supabaseRestRequest(`/vendors?id=eq.${submittedVendor.id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ description: text }) });
+    if (error) {
+      showToast("Kunde inte spara beskrivningen. Försök igen.");
+      return false;
+    }
+    patchOwnVendor((v) => ({ ...v, profile: { ...v.profile, description: text } }));
+    showToast("Beskrivningen är sparad ✓");
+    return true;
+  };
+  // Finished bookings the customer hasn't reviewed yet — shown as a gentle reminder.
+  const reviewsDue = bookings
+    .filter((b) => b.completed && !b.cancelled)
+    .flatMap((b) => b.items.filter((i) => !i.reviewed && (i.status === "confirmed" || i.status === "completed")).map((item) => ({ bookingNumber: b.bookingNumber, item })));
+
   const goBuilder = () => {
     setView("builder");
     setSwapContext(null);
@@ -12033,6 +12158,8 @@ export default function App() {
           storyGroups={storyGroups}
           seenStories={seenStories}
           onOpenStory={openStory}
+          reviewsDue={reviewsDue}
+          onReview={openReview}
         />
       )}
 
@@ -12165,6 +12292,8 @@ export default function App() {
               onVendor={goVendorIntro}
               onAdmin={goAdminDashboard}
               onSignOut={signOut}
+              reviewsDue={reviewsDue}
+              onReview={openReview}
             />
           )}
           <MinaBokningarView bookings={bookings} onCancelBooking={cancelBooking} onReviewItem={openReview} onChatItem={openBookingChat} />
@@ -12224,6 +12353,9 @@ export default function App() {
           onInbox={goVendorInbox}
           onRespond={respondToBookingItem}
           conversationCount={vendorConversations.length}
+          onChangeAvatar={changeVendorAvatar}
+          avatarUploading={avatarUploading}
+          onSaveDescription={saveVendorDescription}
           storyManager={
             <StoryManager
               approved={submittedVendor?.status === "approved"}
