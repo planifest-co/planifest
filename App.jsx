@@ -2268,8 +2268,31 @@ function SectionTitle({ children, action }) {
   );
 }
 
-function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howItWorksRef, onVendorIntro, session, profile, upcomingEvent, onPlanning, onToggleTask, popular = [], onViewProvider, storyGroups = [], seenStories, onOpenStory, reviewsDue = [], onReview }) {
-  const ev = session ? upcomingEvent : null;
+// Chips for switching between the customer's parties, plus "Ny fest".
+function EventSwitcher({ events, activeId, onSelect, onNew, label = "Dina fester" }) {
+  if (!events.length && !onNew) return null;
+  return (
+    <div>
+      {label && <p className="mb-2 text-xs font-semibold uppercase" style={{ letterSpacing: "0.08em", color: colors.plumSoft }}>{label}</p>}
+      <div className="-mx-5 flex gap-2 overflow-x-auto px-5 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
+        {events.map((e) => (
+          <PillChip key={e.id} active={e.id === activeId} onClick={() => onSelect(e.id)}>
+            {e.title || "Fest"}
+            {e.date && <span style={{ opacity: 0.75, fontWeight: 400 }}>· {new Date(`${e.date}T00:00:00`).toLocaleDateString("sv-SE", { day: "numeric", month: "short" })}</span>}
+          </PillChip>
+        ))}
+        {onNew && (
+          <button onClick={onNew} className="flex flex-shrink-0 items-center gap-1.5 rounded-full px-4 py-2.5 text-sm font-semibold" style={{ border: `1.5px dashed ${colors.lilac}`, color: colors.coral, backgroundColor: "transparent" }}>
+            <Plus size={15} /> Ny fest
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howItWorksRef, onVendorIntro, session, profile, upcomingEvent, onPlanning, onToggleTask, popular = [], onViewProvider, storyGroups = [], seenStories, onOpenStory, reviewsDue = [], onReview, events = [], activeEventId, onSelectEvent, onNewEvent }) {
+  const ev = session ? events.find((e) => e.id === activeEventId) || upcomingEvent : null;
   const evDays = ev?.date ? daysUntil(ev.date) : null;
   const tasks = ev?.tasks || [];
   const done = tasks.filter((t) => t.done).length;
@@ -2291,6 +2314,9 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
           <h1 className="mb-4 text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>
             Hej{firstName ? ` ${firstName}` : ""}!
           </h1>
+          <div className="mb-4">
+            <EventSwitcher events={events} activeId={ev.id} onSelect={onSelectEvent} onNew={onNewEvent} label={events.length > 1 ? "Dina fester" : null} />
+          </div>
           <button onClick={onPlanning} className="flex w-full flex-col gap-4 p-5 text-left sm:p-7" style={{ backgroundColor: colors.plum, color: colors.white, borderRadius: 26 }}>
             <span className="flex w-full items-start justify-between gap-4">
               <span className="flex min-w-0 flex-col gap-1">
@@ -2318,6 +2344,10 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
                 </span>
               )}
             </span>
+          </button>
+
+          <button onClick={onBuild} className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-full text-[15px] font-bold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+            Hitta leverantörer till {ev.title || "festen"} <ArrowRight size={17} />
           </button>
 
           {nextTasks.length > 0 && (
@@ -2504,7 +2534,7 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
   );
 }
 
-function BuilderView({ party, setParty, onSubmit, onClose }) {
+function BuilderView({ party, setParty, onSubmit, onClose, events = [], activeEventId, onSelectEvent, onNewEvent }) {
   const toggleCategory = (id) =>
     setParty((p) => ({ ...p, categories: p.categories.includes(id) ? p.categories.filter((c) => c !== id) : [...p.categories, id] }));
   const canSubmit = party.date && party.categories.length > 0;
@@ -2518,7 +2548,12 @@ function BuilderView({ party, setParty, onSubmit, onClose }) {
       <button onClick={onClose} className="-ml-2 flex items-center gap-1 rounded-full px-2 py-2 text-sm font-medium" style={{ color: colors.plumSoft }}>
         <ChevronLeft size={18} /> Tillbaka
       </button>
-      <h1 className="mt-2 text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum, lineHeight: 1.15 }}>
+      {events.length > 0 && (
+        <div className="mt-3">
+          <EventSwitcher events={events} activeId={activeEventId} onSelect={onSelectEvent} onNew={onNewEvent} label="Det här gäller" />
+        </div>
+      )}
+      <h1 className="mt-4 text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum, lineHeight: 1.15 }}>
         Berätta om festen
       </h1>
       <p className="mt-2 text-base" style={{ color: colors.plumSoft }}>
@@ -3842,7 +3877,7 @@ function ConfirmationView({ booking, onRestart, onMinaBokningar }) {
   );
 }
 
-function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem }) {
+function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem, events = [] }) {
   const [tab, setTab] = useState("upcoming");
   const tabs = [
     { id: "upcoming", label: "Kommande" },
@@ -3891,7 +3926,7 @@ function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <p style={{ fontFamily: serif, fontSize: 18, color: colors.plum }}>
-                    {occasionInfo ? `${occasionInfo.emoji} ${occasionInfo.boardLabel}` : "Din fest"}
+                    {events.find((e) => e.id === b.eventId)?.title || (occasionInfo ? `${occasionInfo.emoji} ${occasionInfo.boardLabel}` : "Din fest")}
                   </p>
                   <p className="mt-1 flex flex-wrap gap-3 text-sm" style={{ color: colors.plumSoft }}>
                     <span className="flex items-center gap-1">
@@ -6700,7 +6735,10 @@ function EventFormModal({ open, mode, initial, onClose, onSubmit, onDelete }) {
     setWithTemplate(true);
     setConfirmDelete(false);
     setSaving(false);
-  }, [open, initial]);
+    // Only when the form opens: the page behind re-renders now and then (new messages, stories),
+    // and resetting on every render wiped what had been typed, e.g. the budget.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   if (!open) return null;
   const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
   const canSave = title.trim().length > 0 && !saving;
@@ -6749,7 +6787,7 @@ function EventFormModal({ open, mode, initial, onClose, onSubmit, onDelete }) {
         </div>
         <label className="mt-3 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
           Budget (kr, valfritt)
-          <input type="number" min={0} value={budget} onChange={(e) => setBudget(e.target.value)} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
+          <input type="text" inputMode="numeric" placeholder="t.ex. 20 000" value={budget} onChange={(e) => setBudget(e.target.value.replace(/[^0-9 ]/g, ""))} className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
         </label>
         {mode === "create" && (
           <label className="mt-4 flex items-start gap-2 text-sm" style={{ color: colors.plum }}>
@@ -7646,7 +7684,7 @@ function MinSidaHeader({ name, email, isAdmin, hasVendor, onAccount, onSaved, on
   );
 }
 
-function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateEvent, onUpdateEvent, onDeleteEvent, taskApi, budgetApi, guestApi, bookings, savedProviders, onViewProvider, party, onLogin, onSignup, cart = [], cartTotal = 0, onOpenCart, onExploreCategory }) {
+function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateEvent, onUpdateEvent, onDeleteEvent, taskApi, budgetApi, guestApi, bookings, savedProviders, onViewProvider, party, onLogin, onSignup, cart = [], cartTotal = 0, onOpenCart, onExploreCategory, createRequest = 0 }) {
   const [tab, setTab] = useState("vendors");
   const [modal, setModal] = useState(null); // null | "create" | "edit"
   const [newTask, setNewTask] = useState("");
@@ -7659,6 +7697,9 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
   const [budgetInput, setBudgetInput] = useState("");
   const ev = events.find((e) => e.id === activeEventId) || events[0] || null;
   const prevDone = useRef(null);
+  useEffect(() => {
+    if (createRequest && session) setModal("create");
+  }, [createRequest]); // eslint-disable-line react-hooks/exhaustive-deps
   const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
 
   useEffect(() => {
@@ -7822,15 +7863,9 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
     <div className="mx-auto max-w-3xl px-6 pb-28 pt-8 sm:px-10">
       <h1 className="mb-3 text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Min fest</h1>
 
-      {events.length > 1 && (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {events.map((e) => (
-            <ChoiceChip key={e.id} active={e.id === ev.id} onClick={() => onSelectEvent(e.id)}>
-              {(occasionMap[e.eventType] || occasionMap.other).emoji} {e.title}
-            </ChoiceChip>
-          ))}
-        </div>
-      )}
+      <div className="mb-4">
+        <EventSwitcher events={events} activeId={ev.id} onSelect={onSelectEvent} onNew={() => setModal("create")} label={null} />
+      </div>
 
       <div className="relative overflow-hidden rounded-3xl" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
         {confetti > 0 && <Confetti key={confetti} />}
@@ -7944,10 +7979,10 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
           <label className="flex flex-wrap items-center gap-3 text-sm font-semibold" style={{ color: colors.plum }}>
             Din totala budget
             <input
-              type="number"
-              min={0}
+              type="text"
+              inputMode="numeric"
               value={budgetInput}
-              onChange={(e) => setBudgetInput(e.target.value)}
+              onChange={(e) => setBudgetInput(e.target.value.replace(/[^0-9 ]/g, ""))}
               onBlur={() => {
                 const v = budgetInput === "" ? null : toMoney(budgetInput);
                 if (v !== ev.budgetTotal && (budgetInput === "" || v !== null)) onUpdateEvent(ev.id, { budgetTotal: v });
@@ -11135,6 +11170,43 @@ export default function App() {
     .filter((b) => b.completed && !b.cancelled)
     .flatMap((b) => b.items.filter((i) => !i.reviewed && (i.status === "confirmed" || i.status === "completed")).map((item) => ({ bookingNumber: b.bookingNumber, item })));
 
+  // --- Several parties at once ---
+  // Each party has its own builder answers and its own Min fest list. Switching party saves the
+  // current one and loads the other; a brand-new party starts from its own date, guests and type.
+  const [planningCreateRequest, setPlanningCreateRequest] = useState(0);
+  const partyStore = useRef({});
+  const prevEventKey = useRef(null);
+  useEffect(() => {
+    const nextKey = activeEventId || "none";
+    const prevKey = prevEventKey.current;
+    prevEventKey.current = nextKey;
+    if (prevKey === null || prevKey === nextKey) return;
+    partyStore.current[prevKey] = { party, cartItems };
+    const saved = partyStore.current[nextKey];
+    if (saved) {
+      setParty(saved.party);
+      setCartItems(saved.cartItems);
+    } else if (prevKey === "none") {
+      // the first party gets whatever was picked before logging in or creating it
+    } else {
+      const evn = events.find((e) => e.id === activeEventId);
+      setParty({ ...emptyParty(), date: evn?.date || "", guests: evn?.guests || 50, occasion: evn?.eventType || null });
+      setCartItems([]);
+    }
+    setBookingEventId(undefined);
+    setSwapContext(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeEventId]);
+  const startNewEvent = () => {
+    if (!session) {
+      openAuthModal("signup");
+      return;
+    }
+    setView("planning");
+    setPlanningCreateRequest((n) => n + 1);
+    window.scrollTo(0, 0);
+  };
+
   const goBuilder = () => {
     setView("builder");
     setSwapContext(null);
@@ -12155,6 +12227,10 @@ export default function App() {
           onToggleTask={(eventId, taskId) => taskApi.toggle(eventId, taskId)}
           popular={popularProviders}
           onViewProvider={viewProfile}
+          events={events}
+          activeEventId={activeEventId}
+          onSelectEvent={setActiveEventId}
+          onNewEvent={startNewEvent}
           storyGroups={storyGroups}
           seenStories={seenStories}
           onOpenStory={openStory}
@@ -12163,7 +12239,7 @@ export default function App() {
         />
       )}
 
-      {view === "builder" && <BuilderView party={party} setParty={setParty} onSubmit={startBuilder} onClose={goHome} />}
+      {view === "builder" && <BuilderView party={party} setParty={setParty} onSubmit={startBuilder} onClose={goHome} events={session ? events : []} activeEventId={activeEventId} onSelectEvent={setActiveEventId} onNewEvent={startNewEvent} />}
 
       {view === "results" && (
         <ResultsView
@@ -12275,6 +12351,7 @@ export default function App() {
           cartTotal={total}
           onOpenCart={() => setCartOpen(true)}
           onExploreCategory={goExplore}
+          createRequest={planningCreateRequest}
         />
       )}
 
@@ -12296,7 +12373,7 @@ export default function App() {
               onReview={openReview}
             />
           )}
-          <MinaBokningarView bookings={bookings} onCancelBooking={cancelBooking} onReviewItem={openReview} onChatItem={openBookingChat} />
+          <MinaBokningarView bookings={bookings} onCancelBooking={cancelBooking} onReviewItem={openReview} onChatItem={openBookingChat} events={events} />
         </>
       )}
 
