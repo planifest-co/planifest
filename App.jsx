@@ -1382,10 +1382,41 @@ function LogoBalloons({ size = 40 }) {
   );
 }
 
-function Wordmark({ fontSize = 20 }) {
+// Planifest wordmark: lowercase "planifest" where the dot of the i is a
+// hallon balloon. Sizes are ratios of fontSize so it scales everywhere.
+function Wordmark({ fontSize = 20, color = colors.plum }) {
   return (
-    <span style={{ fontFamily: serif, fontWeight: 700, fontSize, letterSpacing: "-0.01em", color: colors.plum }}>
-      Planifest
+    <span
+      role="img"
+      aria-label="Planifest"
+      style={{
+        fontFamily: serif,
+        fontWeight: 600,
+        fontSize,
+        lineHeight: 1,
+        letterSpacing: "-0.02em",
+        color,
+        display: "inline-flex",
+        alignItems: "baseline",
+        fontVariationSettings: "'WONK' 0, 'SOFT' 0",
+      }}
+    >
+      <span aria-hidden="true">plan</span>
+      <span aria-hidden="true" style={{ position: "relative", display: "inline-block", marginRight: fontSize * 0.027 }}>
+        {"\u0131"}
+        <svg
+          viewBox="0 0 60 74"
+          width={fontSize * 0.27}
+          height={fontSize * 0.333}
+          aria-hidden="true"
+          style={{ position: "absolute", left: "50%", bottom: fontSize * 0.6, transform: "translateX(-62%) rotate(-6deg)" }}
+        >
+          <path d="M30 2 C46 2 57 15 57 32 C57 50 43 64 30 66 C17 64 3 50 3 32 C3 15 14 2 30 2 Z" fill={colors.coral} />
+          <path d="M26 65 L34 65 L30 71 Z" fill={colors.coral} />
+          <ellipse cx="19" cy="21" rx="5" ry="10" fill="#FFFFFF" opacity="0.35" transform="rotate(-20 19 21)" />
+        </svg>
+      </span>
+      <span aria-hidden="true">fest</span>
     </span>
   );
 }
@@ -1415,9 +1446,8 @@ function EdgeBalloons() {
 function Logo({ onClick, size = "normal" }) {
   const large = size === "large";
   return (
-    <button onClick={onClick} className="flex items-center gap-2" style={{ background: "none", border: "none", cursor: "pointer" }}>
-      <LogoBalloons size={large ? 46 : 30} />
-      <Wordmark fontSize={large ? 40 : 28} />
+    <button onClick={onClick} aria-label="Planifest – till startsidan" className="flex items-center" style={{ background: "none", border: "none", cursor: "pointer", paddingTop: 6 }}>
+      <Wordmark fontSize={large ? 46 : 32} />
     </button>
   );
 }
@@ -8938,8 +8968,7 @@ function Footer({ onGoHome, onBrowse, onHowItWorks, onBecomeVendor, onOpenTerms,
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           <div className="lg:col-span-2">
             <div className="flex items-center gap-2">
-              <LogoBalloons size={28} />
-              <Wordmark fontSize={18} letterSpacing="0.08em" />
+              <Wordmark fontSize={28} />
             </div>
             <p className="mt-4 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
               Planifest föddes ur en enkel idé: att festen förtjänar lika mycket omtanke som planeringen
