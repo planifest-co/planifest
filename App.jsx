@@ -39,6 +39,8 @@ import {
   Wallet,
   StickyNote,
   Pencil,
+  Home,
+  User,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -90,6 +92,11 @@ const TASK_TEMPLATES = {
   corporate: [
     [12, "Bestäm syfte och budget"], [10, "Boka lokal"], [8, "Boka catering"], [8, "Skicka inbjudan och be om svar"], [6, "Boka underhållning eller talare"],
     [4, "Planera program och tidsschema"], [3, "Boka fotograf"], [2, "Bekräfta leverantörer och antal gäster"], [1, "Skicka praktisk information till gästerna"],
+  ],
+  babyshower: [
+    [8, "Bestäm datum, tema och budget"], [7, "Gör gästlista"], [6, "Boka lokal eller bestäm plats hemma"], [5, "Skicka inbjudningar"],
+    [4, "Beställ tårta"], [3, "Planera mat och dryck"], [3, "Köp dekor och ballonger"], [2, "Planera lekar och aktiviteter"],
+    [1, "Bekräfta leverantörer"], [1, "Handla det sista"],
   ],
   other: [[8, "Bestäm datum och budget"], [6, "Gör gästlista"], [4, "Boka leverantörer"], [2, "Bekräfta allt"]],
 };
@@ -791,6 +798,7 @@ const CATEGORIES = [
 const catMap = Object.fromEntries(CATEGORIES.map((c) => [c.id, c]));
 
 const OCCASIONS = [
+  { id: "babyshower", label: "Babyshower", emoji: "🍼", boardLabel: "Babyshower" },
   { id: "birthday", label: "Födelsedag", emoji: "🎂", boardLabel: "Födelsedagsfest" },
   { id: "wedding", label: "Bröllop", emoji: "💍", boardLabel: "Bröllop" },
   { id: "baptism", label: "Dop", emoji: "👶", boardLabel: "Dop" },
@@ -1687,7 +1695,7 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
       onKeyDown={(e) => e.key === "Enter" && onView(provider.id)}
       className="group flex cursor-pointer flex-col gap-2.5"
     >
-      <div className="relative overflow-hidden" style={{ borderRadius: 22, backgroundColor: colors.coralSoft, aspectRatio: "1 / 1.08" }}>
+      <div className="relative overflow-hidden" style={{ borderRadius: 20, backgroundColor: colors.coralSoft, aspectRatio: "1 / 1.08" }}>
         <img
           src={provider.image || `https://picsum.photos/seed/${provider.seed}/500/540`}
           alt={provider.name}
@@ -1699,11 +1707,15 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
           </span>
         )}
         <HeartButton vendorId={provider.vendorDbId} className="absolute right-2 top-2 shadow-sm" />
-        {busy && (
+        {busy ? (
           <span className="absolute bottom-2.5 left-2.5 rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ backgroundColor: colors.white, color: colors.coralDeep }}>
             Upptagen din tid
           </span>
-        )}
+        ) : party?.date ? (
+          <span className="absolute bottom-2.5 left-2.5 rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ backgroundColor: colors.lilacSoft, color: colors.coral }}>
+            Ledig ditt datum
+          </span>
+        ) : null}
         {!compact && (
           <button
             onClick={handleAction}
@@ -1720,7 +1732,7 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
         )}
       </div>
       <div className="min-w-0 px-0.5">
-        <h3 className="truncate leading-tight" style={{ fontFamily: serif, fontWeight: 700, fontSize: 18, color: colors.plum }}>
+        <h3 className="truncate leading-tight" style={{ fontFamily: serif, fontWeight: 700, fontSize: 17, color: colors.plum }}>
           {provider.name}
         </h3>
         {subtitle && (
@@ -1728,17 +1740,12 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
             {subtitle}
           </p>
         )}
-        {(provider.alsoOffers || []).length > 0 && (
-          <p className="mt-0.5 truncate text-[11px] font-semibold" style={{ color: colors.plumSoft }}>
-            + {provider.alsoOffers.map((id) => catMap[id]?.label).filter(Boolean).join(", ")}
-          </p>
-        )}
         <div className="mt-1.5 flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-semibold" style={{ color: colors.plum }}>
+          <span className="truncate text-[13px] font-semibold" style={{ color: colors.plum }}>
             {priceLabel}
           </span>
           {provider.reviews > 0 ? (
-            <span className="flex flex-shrink-0 items-center gap-1 text-sm font-semibold" style={{ color: colors.plum }}>
+            <span className="flex flex-shrink-0 items-center gap-1 text-[13px] font-semibold" style={{ color: colors.plum }}>
               <Star size={14} fill={colors.coral} color={colors.coral} />
               {provider.rating}
               <span className="font-normal" style={{ color: colors.plumSoft }}>({provider.reviews})</span>
@@ -1757,149 +1764,172 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
 // ---------------------------------------------------------------------------
 // Views
 // ---------------------------------------------------------------------------
-function LightChip({ active, onClick, icon: Icon, emoji, label }) {
+function PillChip({ active, onClick, children, ariaLabel }) {
   return (
     <button
       onClick={onClick}
       aria-pressed={!!active}
-      className="flex items-center gap-1.5 rounded-full px-4 py-2.5 text-sm transition-colors"
+      aria-label={ariaLabel}
+      className="flex flex-shrink-0 items-center gap-1.5 rounded-full px-4 py-2.5 text-sm transition-colors"
       style={{
-        border: `1.5px solid ${active ? colors.plum : colors.beige}`,
+        border: `1px solid ${active ? colors.plum : colors.beige}`,
         backgroundColor: active ? colors.plum : colors.white,
         color: active ? colors.white : colors.plum,
         fontWeight: active ? 600 : 500,
       }}
     >
-      {Icon ? <Icon size={15} /> : emoji ? <span style={{ fontSize: 14, lineHeight: 1 }}>{emoji}</span> : null}
-      {label}
+      {children}
     </button>
   );
 }
 
 function formatEventDate(ds) {
   if (!ds) return "";
-  const [y, m, d] = ds.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("sv-SE", { weekday: "short", day: "numeric", month: "long" });
+  return new Date(`${ds}T00:00:00`).toLocaleDateString("sv-SE", { weekday: "short", day: "numeric", month: "long" });
 }
 
-function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro, session, upcomingEvent, onPlanning, popular = [], onViewProvider }) {
-  const builderRef = useRef(null);
-  const toggleCategory = (id) => {
-    setParty((p) => ({
-      ...p,
-      categories: p.categories.includes(id) ? p.categories.filter((c) => c !== id) : [...p.categories, id],
-    }));
-  };
-  const toggleOccasion = (id) => {
-    setParty((p) => ({ ...p, occasion: p.occasion === id ? null : id }));
-  };
-  const canSubmit = party.date && party.categories.length > 0;
-  const scrollToBuilder = () => builderRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  const fieldStyle = { border: `1.5px solid ${colors.beige}`, backgroundColor: colors.cream, color: colors.plum, fontWeight: 600 };
-  const sectionTitle = { fontFamily: serif, fontWeight: 700, letterSpacing: "-0.01em", color: colors.plum };
+function StoryRing({ active, children }) {
+  return (
+    <span
+      className="flex h-[74px] w-[74px] rounded-full p-[3px]"
+      style={{ background: active ? colors.coral : `conic-gradient(${colors.korall}, ${colors.coral}, ${colors.lilac}, ${colors.korall})` }}
+    >
+      <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-full" style={{ border: `3px solid ${colors.cream}`, backgroundColor: active ? colors.coral : colors.white }}>
+        {children}
+      </span>
+    </span>
+  );
+}
 
+function SectionTitle({ children, action }) {
+  return (
+    <div className="mb-4 flex items-baseline justify-between gap-4">
+      <h2 className="text-2xl sm:text-3xl" style={{ fontFamily: serif, fontWeight: 700, letterSpacing: "-0.01em", color: colors.plum }}>
+        {children}
+      </h2>
+      {action}
+    </div>
+  );
+}
+
+function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howItWorksRef, onVendorIntro, session, profile, upcomingEvent, onPlanning, onToggleTask, popular = [], onViewProvider }) {
   const ev = session ? upcomingEvent : null;
-  const evDays = ev ? daysUntil(ev.date) : null;
-  const evDone = ev ? (ev.tasks || []).filter((t) => t.done).length : 0;
-  const evTotal = ev ? (ev.tasks || []).length : 0;
+  const evDays = ev?.date ? daysUntil(ev.date) : null;
+  const tasks = ev?.tasks || [];
+  const done = tasks.filter((t) => t.done).length;
+  const nextTasks = tasks.filter((t) => !t.done).slice(0, 3);
+  const guestList = ev?.guestList || [];
+  const answered = guestList.filter((g) => g.status && g.status !== "pending").length;
+  const budgetSpent = ev ? (ev.budget || []).reduce((n, b) => n + (b.actual != null ? b.actual : b.estimated || 0), 0) : 0;
+  const firstName = (profile?.full_name || "").trim().split(/\s+/)[0];
 
   return (
-    <div>
-      {ev && (
-        <section className="px-5 pt-6 sm:px-10 sm:pt-10">
-          <button
-            onClick={onPlanning}
-            className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-5 text-left sm:p-7"
-            style={{ backgroundColor: colors.plum, color: colors.white, borderRadius: 28 }}
-          >
+    <div className="pb-6">
+      {ev ? (
+        <section className="mx-auto max-w-3xl px-5 pt-6 sm:px-8 sm:pt-10">
+          <h1 className="mb-4 text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>
+            Hej{firstName ? ` ${firstName}` : ""}!
+          </h1>
+          <button onClick={onPlanning} className="flex w-full flex-col gap-4 p-5 text-left sm:p-7" style={{ backgroundColor: colors.plum, color: colors.white, borderRadius: 26 }}>
             <span className="flex w-full items-start justify-between gap-4">
               <span className="flex min-w-0 flex-col gap-1">
                 <span className="text-xs font-semibold uppercase" style={{ letterSpacing: "0.12em", color: colors.lilacSoft }}>Din fest</span>
                 <span className="truncate" style={{ fontFamily: serif, fontWeight: 700, fontSize: 24, lineHeight: 1.15 }}>{ev.title || "Din fest"}</span>
                 <span className="text-sm" style={{ color: colors.lilacSoft }}>
-                  {[formatEventDate(ev.date), ev.guests ? `${ev.guests} gäster` : null].filter(Boolean).join(" · ")}
+                  {[formatEventDate(ev.date), ev.guests ? `${ev.guests} gäster` : null].filter(Boolean).join(" · ") || "Inget datum satt än"}
                 </span>
               </span>
               {evDays != null && evDays >= 0 && (
-                <span className="flex h-[72px] w-[72px] flex-shrink-0 flex-col items-center justify-center rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.25)" }}>
+                <span className="flex h-[74px] w-[74px] flex-shrink-0 flex-col items-center justify-center rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.25)" }}>
                   <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 24, lineHeight: 1 }}>{evDays}</span>
                   <span className="text-[11px]" style={{ color: colors.lilacSoft }}>{evDays === 1 ? "dag kvar" : "dagar kvar"}</span>
                 </span>
               )}
             </span>
-            {evTotal > 0 && (
-              <span className="flex w-full flex-col gap-1.5">
-                <span className="flex justify-between text-[13px]">
-                  <span>{evDone} av {evTotal} klara i checklistan</span>
-                  <span className="font-semibold">Öppna planeringen →</span>
-                </span>
-                <span className="flex h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.18)" }}>
-                  <span className="rounded-full" style={{ width: `${Math.round((evDone / evTotal) * 100)}%`, backgroundColor: colors.korall }} />
-                </span>
+            <span className="flex w-full flex-col gap-1.5">
+              <span className="flex justify-between text-[13px]">
+                <span>{tasks.length ? `${done} av ${tasks.length} klara i checklistan` : "Din planering väntar"}</span>
+                <span className="font-semibold">Öppna Min fest →</span>
               </span>
-            )}
-            {evTotal === 0 && <span className="text-[13px] font-semibold">Öppna planeringen →</span>}
+              {tasks.length > 0 && (
+                <span className="flex h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.18)" }}>
+                  <span className="rounded-full" style={{ width: `${Math.round((done / tasks.length) * 100)}%`, backgroundColor: colors.korall }} />
+                </span>
+              )}
+            </span>
           </button>
-        </section>
-      )}
 
-      <section className="px-5 pb-6 pt-10 sm:px-10 sm:pb-10 sm:pt-16">
-        <div className="mx-auto max-w-3xl text-center">
-          <div className="mb-5 flex items-center justify-center gap-4">
-            <span className="w-5 sm:w-9" style={{ height: 2, borderRadius: 2, backgroundColor: colors.korall }} />
-            <p className="text-xs font-bold sm:text-[13px]" style={{ letterSpacing: "0.24em", paddingLeft: "0.24em", color: colors.plumSoft }}>
-              PLANERA · BOKA · FIRA
-            </p>
-            <span className="w-5 sm:w-9" style={{ height: 2, borderRadius: 2, backgroundColor: colors.korall }} />
+          {nextTasks.length > 0 && (
+            <div className="mt-6">
+              <SectionTitle>Nästa steg</SectionTitle>
+              <div className="overflow-hidden" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 20 }}>
+                {nextTasks.map((t, i) => (
+                  <div key={t.id} className="flex items-center gap-3 px-3 py-2" style={{ borderTop: i ? `1px solid ${colors.cream}` : "none" }}>
+                    <button onClick={() => onToggleTask(ev.id, t.id)} aria-label={`Markera som klar: ${t.title}`} className="flex h-11 w-11 flex-shrink-0 items-center justify-center">
+                      <span className="h-6 w-6 rounded-full" style={{ border: `2px solid ${colors.lilac}` }} />
+                    </button>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-[15px] font-medium" style={{ color: colors.plum }}>{t.title}</span>
+                      {t.dueDate && <span className="text-xs" style={{ color: colors.plumSoft }}>Senast {formatEventDate(t.dueDate)}</span>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            {[
+              { icon: Users, value: guestList.length ? `${answered}/${guestList.length}` : "–", label: "gäster har svarat", bg: colors.lilacSoft },
+              { icon: Wallet, value: ev.budgetTotal ? formatKr(budgetSpent) : "–", label: ev.budgetTotal ? `av ${formatKr(ev.budgetTotal)}` : "ingen budget satt", bg: colors.peachSoft },
+              { icon: ListChecks, value: tasks.length ? `${done}/${tasks.length}` : "–", label: "i checklistan", bg: colors.pinkSoft },
+            ].map(({ icon: Icon, value, label, bg }) => (
+              <button key={label} onClick={onPlanning} className="flex flex-col gap-1 p-3 text-left" style={{ backgroundColor: bg, borderRadius: 18, color: colors.plum }}>
+                <Icon size={18} color={colors.coral} />
+                <span className="truncate" style={{ fontFamily: serif, fontWeight: 700, fontSize: 19 }}>{value}</span>
+                <span className="text-xs" style={{ color: colors.plumSoft }}>{label}</span>
+              </button>
+            ))}
           </div>
-          <h1 style={{ fontFamily: serif, fontWeight: 700, lineHeight: 1.08, letterSpacing: "-0.02em", color: colors.plum, textWrap: "balance" }} className="text-4xl sm:text-5xl lg:text-6xl">
-            Vad ska ni fira?
-          </h1>
-          <p className="mx-auto mt-4 max-w-md text-base sm:text-lg" style={{ color: colors.plumSoft, lineHeight: 1.55 }}>
-            Hitta, jämför och boka allt till festen – på ett ställe.
-          </p>
-          <div className="mt-7 flex flex-wrap justify-center gap-3">
+        </section>
+      ) : (
+        <section className="px-5 pb-2 pt-8 sm:px-8 sm:pt-14">
+          <div className="mx-auto max-w-5xl">
+            <h1 style={{ fontFamily: serif, fontWeight: 700, lineHeight: 1.08, letterSpacing: "-0.02em", color: colors.plum }} className="text-4xl sm:text-6xl">
+              Vad ska ni fira?
+            </h1>
+            <p className="mt-3 max-w-lg text-base sm:text-lg" style={{ color: colors.plumSoft, lineHeight: 1.55 }}>
+              Hitta, jämför och boka allt till festen – på ett ställe. Just nu i Göteborg.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {["babyshower", "baptism", "birthday", "other"].map((id) => occasionMap[id]).map((o) => (
+                <PillChip key={o.id} active={party.occasion === o.id} onClick={() => setParty((p) => ({ ...p, occasion: p.occasion === o.id ? null : o.id }))}>
+                  {o.label}
+                </PillChip>
+              ))}
+            </div>
             <button
-              onClick={scrollToBuilder}
-              className="inline-flex items-center gap-2 rounded-full px-7 py-3.5 text-base font-bold"
+              onClick={onBuild}
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-full py-4 text-base font-bold sm:w-auto sm:px-10"
               style={{ backgroundColor: colors.coral, color: colors.white }}
             >
               Bygg din fest <ArrowRight size={18} />
             </button>
-            <button
-              onClick={() => howItWorksRef?.current?.scrollIntoView({ behavior: "smooth" })}
-              className="inline-flex items-center rounded-full px-7 py-3.5 text-base font-semibold"
-              style={{ border: `1.5px solid ${colors.beige}`, backgroundColor: colors.white, color: colors.plum }}
-            >
-              Så funkar det
-            </button>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      <section aria-label="Kategorier" className="pb-4 pt-2">
-        <div className="mx-auto flex max-w-4xl gap-4 overflow-x-auto px-5 pb-2 sm:flex-wrap sm:justify-center sm:gap-6 sm:px-10">
+      <section aria-label="Kategorier" className="pt-8">
+        <div className="mx-auto flex max-w-5xl gap-4 overflow-x-auto px-5 pb-2 sm:flex-wrap sm:justify-center sm:gap-7 sm:px-8">
           {CATEGORIES.map((c) => {
             const Icon = c.icon;
-            const on = party.categories.includes(c.id);
             return (
-              <button
-                key={c.id}
-                onClick={() => {
-                  toggleCategory(c.id);
-                  scrollToBuilder();
-                }}
-                aria-pressed={on}
-                className="flex flex-shrink-0 flex-col items-center gap-2"
-              >
-                <span
-                  className="flex h-[72px] w-[72px] rounded-full p-[3px]"
-                  style={{ background: on ? colors.coral : `conic-gradient(${colors.korall}, ${colors.coral}, ${colors.lilac}, ${colors.korall})` }}
-                >
-                  <span className="flex h-full w-full items-center justify-center rounded-full" style={{ border: `3px solid ${colors.cream}`, backgroundColor: on ? colors.coral : colors[c.tint] || colors.lilacSoft }}>
-                    {on ? <Check size={24} color={colors.white} /> : <Icon size={24} color={colors.coral} />}
+              <button key={c.id} onClick={() => onExploreCategory(c.id)} className="flex flex-shrink-0 flex-col items-center gap-2">
+                <StoryRing>
+                  <span className="flex h-full w-full items-center justify-center" style={{ backgroundColor: colors[c.tint] || colors.lilacSoft }}>
+                    <Icon size={26} color={colors.coral} />
                   </span>
-                </span>
+                </StoryRing>
                 <span className="text-xs font-semibold" style={{ color: colors.plum }}>{c.label}</span>
               </button>
             );
@@ -1907,111 +1937,45 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro, ses
         </div>
       </section>
 
-      <section ref={builderRef} className="px-5 pt-8 sm:px-10" style={{ scrollMarginTop: 80 }}>
-        <div className="mx-auto max-w-3xl p-5 sm:p-9" style={{ backgroundColor: colors.white, borderRadius: 28, border: `1px solid ${colors.beige}`, boxShadow: "0 18px 50px rgba(74,21,56,0.08)" }}>
-          <h2 style={sectionTitle} className="text-3xl">Bygg din fest</h2>
-          <p className="mb-6 mt-1 text-sm sm:text-base" style={{ color: colors.plumSoft }}>
-            Berätta om festen, så visar vi leverantörer som är lediga och passar.
-          </p>
-
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <label className="col-span-2 flex flex-col gap-1.5 text-sm font-semibold sm:col-span-1" style={{ color: colors.plumSoft }}>
-              <span className="flex items-center gap-1"><Calendar size={14} /> Datum</span>
-              <input type="date" value={party.date} onChange={(e) => setParty((p) => ({ ...p, date: e.target.value }))} className="rounded-2xl px-4 py-3 text-sm" style={fieldStyle} />
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm font-semibold" style={{ color: colors.plumSoft }}>
-              <span className="flex items-center gap-1"><Clock size={14} /> Start</span>
-              <input type="time" value={party.startTime} onChange={(e) => setParty((p) => ({ ...p, startTime: e.target.value }))} className="rounded-2xl px-4 py-3 text-sm" style={fieldStyle} />
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm font-semibold" style={{ color: colors.plumSoft }}>
-              <span className="flex items-center gap-1"><Clock size={14} /> Slut</span>
-              <input type="time" value={party.endTime} onChange={(e) => setParty((p) => ({ ...p, endTime: e.target.value }))} className="rounded-2xl px-4 py-3 text-sm" style={fieldStyle} />
-            </label>
-            <label className="col-span-2 flex flex-col gap-1.5 text-sm font-semibold sm:col-span-1" style={{ color: colors.plumSoft }}>
-              <span className="flex items-center gap-1"><Users size={14} /> Gäster</span>
-              <input
-                type="number"
-                min={1}
-                value={party.guests}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (raw === "") {
-                    setParty((p) => ({ ...p, guests: "" }));
-                    return;
-                  }
-                  const n = Number(raw);
-                  if (!Number.isNaN(n)) setParty((p) => ({ ...p, guests: n }));
-                }}
-                onBlur={() => setParty((p) => ({ ...p, guests: p.guests === "" || p.guests < 1 ? 1 : p.guests }))}
-                className="rounded-2xl px-4 py-3 text-sm"
-                style={fieldStyle}
-              />
-            </label>
+      {!ev && (
+        <section className="mx-auto max-w-5xl px-5 pt-10 sm:px-8">
+          <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:gap-8 sm:p-8" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 24 }}>
+            <div className="sm:flex-1">
+              <h2 className="text-2xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Hela festen på ett ställe</h2>
+              <p className="mt-1 text-sm leading-relaxed sm:text-base" style={{ color: colors.plumSoft }}>
+                När du bygger din fest får du en egen planeringssida – gratis.
+              </p>
+              <button onClick={onPlanning} className="mt-4 inline-flex items-center gap-1.5 text-sm font-bold" style={{ color: colors.coral }}>
+                Se hur det fungerar <ArrowRight size={15} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:w-[320px]">
+              {[
+                { icon: ListChecks, label: "Checklista", bg: colors.lilacSoft },
+                { icon: Users, label: "Gästlista", bg: colors.pinkSoft },
+                { icon: Wallet, label: "Budget", bg: colors.peachSoft },
+                { icon: PartyPopper, label: "Leverantörer", bg: colors.coralSoft },
+              ].map(({ icon: Icon, label, bg }) => (
+                <span key={label} className="flex items-center gap-2 rounded-2xl px-3 py-3 text-sm font-semibold" style={{ backgroundColor: bg, color: colors.plum }}>
+                  <Icon size={18} color={colors.coral} /> {label}
+                </span>
+              ))}
+            </div>
           </div>
-
-          <p className="mb-3 mt-7 text-sm font-bold" style={{ color: colors.plum }}>
-            Vad ska du fira? <span style={{ color: colors.plumSoft, fontWeight: 500 }}>(valfritt)</span>
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {OCCASIONS.map((o) => (
-              <LightChip key={o.id} active={party.occasion === o.id} onClick={() => toggleOccasion(o.id)} emoji={o.emoji} label={o.label} />
-            ))}
-          </div>
-
-          <p className="mb-3 mt-6 text-sm font-bold" style={{ color: colors.plum }}>
-            Vad behöver du?
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {CATEGORIES.map((c) => (
-              <LightChip key={c.id} active={party.categories.includes(c.id)} onClick={() => toggleCategory(c.id)} icon={c.icon} label={c.label} />
-            ))}
-          </div>
-
-          <button
-            disabled={!canSubmit}
-            onClick={onSubmit}
-            className="mt-8 flex w-full items-center justify-center gap-2 rounded-full py-4 text-base font-bold transition-opacity"
-            style={{ backgroundColor: colors.coral, color: colors.white, opacity: canSubmit ? 1 : 0.45, cursor: canSubmit ? "pointer" : "not-allowed" }}
-          >
-            Visa leverantörer <ArrowRight size={18} />
-          </button>
-          {!canSubmit && (
-            <p className="mt-3 text-center text-xs" style={{ color: colors.plumSoft }}>
-              Välj datum och minst en kategori för att komma igång.
-            </p>
-          )}
-        </div>
-      </section>
-
-      <section className="px-5 pt-10 sm:px-10">
-        <div className="mx-auto flex max-w-3xl flex-col gap-4 p-5 sm:flex-row sm:items-center sm:gap-8 sm:p-8" style={{ backgroundColor: colors.lilacSoft, borderRadius: 28 }}>
-          <div className="sm:flex-1">
-            <h2 style={sectionTitle} className="text-2xl">Hela festen på ett ställe</h2>
-            <p className="mt-1 text-sm leading-relaxed sm:text-base" style={{ color: colors.plumSoft }}>
-              Med ett gratis konto får du en egen planeringssida för din fest.
-            </p>
-            <button onClick={onPlanning} className="mt-4 inline-flex items-center gap-1.5 rounded-full px-5 py-3 text-sm font-bold" style={{ backgroundColor: colors.plum, color: colors.white }}>
-              {session ? "Till min planering" : "Börja planera gratis"} <ArrowRight size={16} />
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:w-[300px]">
-            {[
-              { icon: ListChecks, label: "Checklista" },
-              { icon: Users, label: "Gästlista" },
-              { icon: Wallet, label: "Budget" },
-              { icon: Heart, label: "Leverantörer" },
-            ].map(({ icon: Icon, label }) => (
-              <span key={label} className="flex items-center gap-2 rounded-2xl px-3 py-3 text-sm font-semibold" style={{ backgroundColor: colors.white, color: colors.plum }}>
-                <Icon size={18} color={colors.coral} /> {label}
-              </span>
-            ))}
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {popular.length > 0 && (
-        <section className="mx-auto max-w-6xl px-5 pt-14 sm:px-10">
-          <h2 style={sectionTitle} className="mb-5 text-2xl sm:text-3xl">Populära just nu</h2>
+        <section className="mx-auto max-w-5xl px-5 pt-12 sm:px-8">
+          <SectionTitle
+            action={
+              <button onClick={onExplore} className="text-sm font-semibold" style={{ color: colors.coral }}>
+                Se alla
+              </button>
+            }
+          >
+            {ev ? "Förslag till din fest" : "Populära just nu"}
+          </SectionTitle>
           <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:gap-x-5 lg:grid-cols-4">
             {popular.map((p) => (
               <VendorCard key={p.id} provider={p} party={null} compact onView={onViewProvider} onAdd={() => {}} onRemove={() => {}} />
@@ -2020,38 +1984,253 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro, ses
         </section>
       )}
 
-      <section ref={howItWorksRef} className="mx-auto max-w-6xl px-5 pt-14 sm:px-10" style={{ scrollMarginTop: 80 }}>
-        <h2 style={sectionTitle} className="mb-5 text-2xl sm:text-3xl">Så funkar det</h2>
-        <div className="grid gap-3 sm:grid-cols-3 sm:gap-5">
-          {[
-            { n: 1, title: "Bygg din fest", text: "Välj datum, antal gäster och vad du behöver – vi visar vilka som är lediga." },
-            { n: 2, title: "Jämför & fråga", text: "Kika på bilder och omdömen, chatta med leverantören eller begär offert." },
-            { n: 3, title: "Boka & fira", text: "Godkänn offerten, fira din dag och lämna ett omdöme efteråt." },
-          ].map((st) => (
-            <div key={st.n} className="flex items-start gap-4 p-5 sm:flex-col sm:gap-3 sm:p-7" style={{ backgroundColor: colors.coralSoft, borderRadius: 24 }}>
-              <span style={{ fontFamily: serif, fontStyle: "italic", fontWeight: 600, fontSize: 38, lineHeight: 1, color: colors.coral, minWidth: 24 }}>{st.n}</span>
-              <span className="flex flex-col gap-1">
-                <span className="text-base font-bold" style={{ color: colors.plum }}>{st.title}</span>
-                <span className="text-sm leading-relaxed" style={{ color: colors.plumSoft }}>{st.text}</span>
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
+      {!ev && (
+        <section ref={howItWorksRef} className="mx-auto max-w-5xl px-5 pt-12 sm:px-8" style={{ scrollMarginTop: 80 }}>
+          <SectionTitle>Så funkar det</SectionTitle>
+          <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
+            {[
+              { n: 1, title: "Bygg din fest", text: "Välj datum, antal gäster och vad du behöver – vi visar vilka som är lediga." },
+              { n: 2, title: "Jämför & fråga", text: "Kika på bilder och omdömen, chatta med leverantören eller begär offert." },
+              { n: 3, title: "Boka & fira", text: "Godkänn offerten, fira din dag och lämna ett omdöme efteråt." },
+            ].map((st) => (
+              <div key={st.n} className="flex items-start gap-4 p-5 sm:flex-col sm:gap-3 sm:p-6" style={{ backgroundColor: colors.coralSoft, borderRadius: 22 }}>
+                <span style={{ fontFamily: serif, fontStyle: "italic", fontWeight: 600, fontSize: 38, lineHeight: 1, color: colors.coral, minWidth: 24 }}>{st.n}</span>
+                <span className="flex flex-col gap-1">
+                  <span className="text-base font-bold" style={{ color: colors.plum }}>{st.title}</span>
+                  <span className="text-sm leading-relaxed" style={{ color: colors.plumSoft }}>{st.text}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
-      {onVendorIntro && (
-        <section className="mx-auto max-w-6xl px-5 pb-16 pt-14 sm:px-10">
-          <div className="flex flex-col items-start justify-between gap-5 p-6 sm:flex-row sm:items-center sm:p-12" style={{ backgroundColor: colors.peach, borderRadius: 28 }}>
+      {onVendorIntro && !ev && (
+        <section className="mx-auto max-w-5xl px-5 pb-10 pt-12 sm:px-8">
+          <div className="flex flex-col items-start gap-3 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-10" style={{ backgroundColor: colors.lilacSoft, border: `1px solid ${colors.lilac}`, borderRadius: 24 }}>
             <div className="max-w-lg">
               <p className="text-xs font-bold uppercase" style={{ letterSpacing: "0.12em", color: colors.coral }}>För leverantörer</p>
-              <h2 style={sectionTitle} className="mt-1 text-2xl sm:text-3xl">Visa upp ditt arbete där festplanerarna letar</h2>
-              <p className="mt-2 text-sm sm:text-base" style={{ color: colors.plum, opacity: 0.85 }}>Precis som på Instagram – men här kan kunderna boka dig direkt.</p>
+              <h2 className="mt-1 text-2xl sm:text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum, lineHeight: 1.2 }}>Visa upp ditt arbete där festplanerarna letar</h2>
+              <p className="mt-2 text-sm sm:text-base" style={{ color: colors.plumSoft }}>Samla bilder, omdömen och bokningar på en egen profil – och låt kunderna boka dig direkt.</p>
             </div>
-            <button onClick={onVendorIntro} className="flex-shrink-0 rounded-full px-7 py-3.5 text-base font-bold" style={{ backgroundColor: colors.plum, color: colors.white }}>
+            <button onClick={onVendorIntro} className="mt-2 flex-shrink-0 rounded-full px-6 py-3 text-sm font-bold sm:mt-0" style={{ backgroundColor: colors.plum, color: colors.white }}>
               Bli leverantör
             </button>
           </div>
         </section>
+      )}
+    </div>
+  );
+}
+
+function BuilderView({ party, setParty, onSubmit, onClose }) {
+  const toggleCategory = (id) =>
+    setParty((p) => ({ ...p, categories: p.categories.includes(id) ? p.categories.filter((c) => c !== id) : [...p.categories, id] }));
+  const canSubmit = party.date && party.categories.length > 0;
+  const fieldStyle = { border: `1px solid ${colors.beige}`, backgroundColor: colors.white, color: colors.plum, fontWeight: 500 };
+  const guestsNum = Number(party.guests) || 0;
+  const setGuests = (n) => setParty((p) => ({ ...p, guests: Math.max(1, n) }));
+  const occ = party.occasion ? occasionMap[party.occasion] : null;
+
+  return (
+    <div className="mx-auto max-w-2xl px-5 pb-36 pt-4 sm:px-8 sm:pt-8">
+      <button onClick={onClose} className="-ml-2 flex items-center gap-1 rounded-full px-2 py-2 text-sm font-medium" style={{ color: colors.plumSoft }}>
+        <ChevronLeft size={18} /> Tillbaka
+      </button>
+      <h1 className="mt-2 text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum, lineHeight: 1.15 }}>
+        Berätta om festen
+      </h1>
+      <p className="mt-2 text-base" style={{ color: colors.plumSoft }}>
+        Så visar vi bara leverantörer som är lediga och passar.
+      </p>
+
+      <fieldset className="mt-7">
+        <legend className="mb-3 text-[15px] font-bold" style={{ color: colors.plum }}>Vad firar ni?</legend>
+        <div className="flex flex-wrap gap-2">
+          {OCCASIONS.map((o) => (
+            <PillChip key={o.id} active={party.occasion === o.id} onClick={() => setParty((p) => ({ ...p, occasion: p.occasion === o.id ? null : o.id }))}>
+              {o.label}
+            </PillChip>
+          ))}
+        </div>
+      </fieldset>
+
+      <div className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <label className="col-span-2 flex flex-col gap-1.5 text-[13px] font-semibold sm:col-span-1" style={{ color: colors.plumSoft }}>
+          Datum
+          <input type="date" value={party.date} onChange={(e) => setParty((p) => ({ ...p, date: e.target.value }))} className="h-12 rounded-2xl px-4 text-[15px]" style={fieldStyle} />
+        </label>
+        <label className="flex flex-col gap-1.5 text-[13px] font-semibold" style={{ color: colors.plumSoft }}>
+          Start
+          <input type="time" value={party.startTime} onChange={(e) => setParty((p) => ({ ...p, startTime: e.target.value }))} className="h-12 rounded-2xl px-4 text-[15px]" style={fieldStyle} />
+        </label>
+        <label className="flex flex-col gap-1.5 text-[13px] font-semibold" style={{ color: colors.plumSoft }}>
+          Slut
+          <input type="time" value={party.endTime} onChange={(e) => setParty((p) => ({ ...p, endTime: e.target.value }))} className="h-12 rounded-2xl px-4 text-[15px]" style={fieldStyle} />
+        </label>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-3 px-4 py-3" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 18 }}>
+        <span className="flex flex-col">
+          <span className="text-[15px] font-bold" style={{ color: colors.plum }}>Antal gäster</span>
+          <span className="text-[13px]" style={{ color: colors.plumSoft }}>Ungefär räcker</span>
+        </span>
+        <span className="flex items-center gap-2">
+          <button onClick={() => setGuests(guestsNum - 5)} aria-label="Färre gäster" className="flex h-11 w-11 items-center justify-center rounded-full text-xl" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.cream, color: colors.plum }}>
+            −
+          </button>
+          <input
+            type="number"
+            min={1}
+            aria-label="Antal gäster"
+            value={party.guests}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === "") {
+                setParty((p) => ({ ...p, guests: "" }));
+                return;
+              }
+              const n = Number(raw);
+              if (!Number.isNaN(n)) setParty((p) => ({ ...p, guests: n }));
+            }}
+            onBlur={() => setParty((p) => ({ ...p, guests: p.guests === "" || p.guests < 1 ? 1 : p.guests }))}
+            className="w-14 bg-transparent text-center text-lg font-bold"
+            style={{ color: colors.plum, border: "none" }}
+          />
+          <button onClick={() => setGuests(guestsNum + 5)} aria-label="Fler gäster" className="flex h-11 w-11 items-center justify-center rounded-full text-xl" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.cream, color: colors.plum }}>
+            +
+          </button>
+        </span>
+      </div>
+
+      <fieldset className="mt-8">
+        <legend className="text-[15px] font-bold" style={{ color: colors.plum }}>Vad behöver ni?</legend>
+        <p className="mb-3 mt-1 text-[13px]" style={{ color: colors.plumSoft }}>Välj så många du vill – du kan ändra sen.</p>
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {CATEGORIES.map((c) => {
+            const Icon = c.icon;
+            const on = party.categories.includes(c.id);
+            return (
+              <button
+                key={c.id}
+                onClick={() => toggleCategory(c.id)}
+                aria-pressed={on}
+                className="relative flex h-24 flex-col items-center justify-center gap-2 text-[13px]"
+                style={{ borderRadius: 18, border: on ? `2px solid ${colors.coral}` : `1px solid ${colors.beige}`, backgroundColor: on ? colors.lilacSoft : colors.white, color: colors.plum, fontWeight: on ? 700 : 500 }}
+              >
+                <Icon size={24} color={on ? colors.coral : colors.plumSoft} />
+                {c.label}
+                {on && (
+                  <span className="absolute right-1.5 top-1.5 flex h-[18px] w-[18px] items-center justify-center rounded-full" style={{ backgroundColor: colors.coral }}>
+                    <Check size={11} color={colors.white} strokeWidth={3} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <div className="fixed inset-x-0 bottom-0 z-40 px-5 pb-5 pt-3 sm:px-8" style={{ backgroundColor: colors.white, borderTop: `1px solid ${colors.beige}` }}>
+        <div className="mx-auto max-w-2xl">
+          <p className="mb-2 text-center text-[13px]" style={{ color: colors.plumSoft }}>
+            {canSubmit
+              ? [occ?.label, `${party.guests || 1} gäster`, `${party.categories.length} ${party.categories.length === 1 ? "kategori" : "kategorier"}`].filter(Boolean).join(" · ")
+              : "Välj datum och minst en kategori för att komma igång."}
+          </p>
+          <button
+            disabled={!canSubmit}
+            onClick={onSubmit}
+            className="flex h-[52px] w-full items-center justify-center gap-2 rounded-full text-base font-bold transition-opacity"
+            style={{ backgroundColor: colors.coral, color: colors.white, opacity: canSubmit ? 1 : 0.45, cursor: canSubmit ? "pointer" : "not-allowed" }}
+          >
+            Visa lediga leverantörer <ArrowRight size={18} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BottomTabBar({ active, unread, onHome, onExplore, onMinFest, onMessages, onMinSida }) {
+  const items = [
+    { id: "home", label: "Hem", icon: Home, onClick: onHome },
+    { id: "explore", label: "Utforska", icon: Search, onClick: onExplore },
+    { id: "minfest", label: "Min fest", icon: PartyPopper, onClick: onMinFest },
+    { id: "messages", label: "Meddelanden", icon: MessageCircle, onClick: onMessages, badge: unread },
+    { id: "minsida", label: "Min sida", icon: User, onClick: onMinSida },
+  ];
+  return (
+    <nav aria-label="Huvudmeny" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 lg:hidden" style={{ backgroundColor: colors.white, borderTop: `1px solid ${colors.beige}`, paddingBottom: "env(safe-area-inset-bottom)" }}>
+      {items.map(({ id, label, icon: Icon, onClick, badge }) => {
+        const on = active === id;
+        return (
+          <button key={id} onClick={onClick} aria-current={on ? "page" : undefined} className="relative flex flex-col items-center gap-1 pb-2.5 pt-2 text-[11px]" style={{ color: on ? colors.coral : colors.plumSoft, fontWeight: on ? 700 : 500 }}>
+            <Icon size={23} strokeWidth={on ? 2.2 : 1.8} />
+            {label}
+            {badge > 0 && (
+              <span className="absolute top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold" style={{ left: "calc(50% + 6px)", backgroundColor: colors.korall, color: colors.white }}>
+                {badge}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function MinFestBoard({ cart, categories, total, onOpenCart, onExploreCategory }) {
+  const filled = new Set(cart.map((p) => p.category));
+  const empty = categories.filter((c) => !filled.has(c));
+  if (cart.length === 0 && empty.length === 0) {
+    return (
+      <div className="mt-5 p-6 text-center" style={{ backgroundColor: colors.white, border: `1px dashed ${colors.lilac}`, borderRadius: 20 }}>
+        <p className="text-[15px] font-semibold" style={{ color: colors.plum }}>Inga leverantörer valda än</p>
+        <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>Hitta lediga leverantörer och lägg till dem här.</p>
+        <button onClick={() => onExploreCategory(null)} className="mt-4 rounded-full px-5 py-2.5 text-sm font-bold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+          Utforska leverantörer
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {cart.map((p) => (
+          <button key={p.id} onClick={onOpenCart} className="flex flex-col overflow-hidden text-left" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 18 }}>
+            <span className="relative block h-28 w-full" style={{ backgroundColor: colors.coralSoft }}>
+              <img src={p.image || `https://picsum.photos/seed/${p.seed}/400/300`} alt="" className="h-full w-full object-cover" />
+              <span className="absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.92)", color: colors.plum }}>
+                {catMap[p.category]?.label}
+              </span>
+            </span>
+            <span className="flex flex-col gap-0.5 px-3 pb-3 pt-2">
+              <span className="truncate" style={{ fontFamily: serif, fontWeight: 700, fontSize: 16, color: colors.plum }}>{p.name}</span>
+              <span className="text-xs font-semibold" style={{ color: colors.coral }}>Byt eller ändra</span>
+            </span>
+          </button>
+        ))}
+        {empty.map((id) => (
+          <button key={id} onClick={() => onExploreCategory(id)} className="flex min-h-[176px] flex-col items-center justify-center gap-2 p-3 text-center" style={{ border: `2px dashed ${colors.lilac}`, borderRadius: 18, color: colors.plum }}>
+            <span className="flex h-11 w-11 items-center justify-center rounded-full" style={{ backgroundColor: colors.lilacSoft }}>
+              <Plus size={20} color={colors.coral} />
+            </span>
+            <span className="text-[15px] font-bold">{catMap[id]?.label}</span>
+            <span className="text-xs" style={{ color: colors.plumSoft }}>Hitta lediga</span>
+          </button>
+        ))}
+      </div>
+      {cart.length > 0 && (
+        <div className="mt-4 flex flex-col gap-2 p-4" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 18 }}>
+          <span className="flex justify-between text-sm" style={{ color: colors.plum }}>
+            <span style={{ color: colors.plumSoft }}>Uppskattat totalt ({cart.length} {cart.length === 1 ? "leverantör" : "leverantörer"})</span>
+            <span className="font-bold">{formatKr(total)}</span>
+          </span>
+          <button onClick={onOpenCart} className="mt-1 h-12 rounded-full text-[15px] font-bold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+            Gå vidare till bokning
+          </button>
+        </div>
       )}
     </div>
   );
@@ -2082,93 +2261,73 @@ function ResultsView({
       categories: p.categories.includes(id) ? p.categories.filter((c) => c !== id) : [...p.categories, id],
     }));
   };
-  const fieldStyle = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+  const fieldStyle = { border: `1px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
+  const all = groups.flatMap((g) => g.providers);
+  const dateLabel = party.date ? new Date(`${party.date}T00:00:00`).toLocaleDateString("sv-SE", { day: "numeric", month: "short" }) : "";
+  const filterSummary = [dateLabel || "Inget datum", `${party.guests || 1} gäster`].join(", ");
+  const grid = "grid grid-cols-2 gap-x-3 gap-y-6 sm:gap-x-5 md:grid-cols-3 lg:grid-cols-4";
 
   return (
-    <div className="mx-auto max-w-6xl px-6 pb-32 pt-8 sm:px-10">
+    <div className="mx-auto max-w-6xl px-5 pb-32 pt-6 sm:px-8 sm:pt-8">
       {swapContext ? (
-        <div
-          className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-5 py-4"
-          style={{ backgroundColor: colors.lilacSoft }}
-        >
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-5 py-4" style={{ backgroundColor: colors.lilacSoft }}>
           <p className="text-sm" style={{ color: colors.plum }}>
             Byter ut <strong>{swapContext.oldName}</strong> — här är andra alternativ inom {catMap[swapContext.category].label.toLowerCase()}.
           </p>
-          <button onClick={onCancelSwap} className="text-sm font-semibold underline" style={{ color: colors.lilacDeep }}>
+          <button onClick={onCancelSwap} className="text-sm font-semibold underline" style={{ color: colors.coral }}>
             Avbryt byte
           </button>
         </div>
       ) : (
         <>
-          <h1 style={{ fontFamily: serif, fontWeight: 700, fontSize: 36, letterSpacing: "-0.01em", color: colors.plum }}>Bygg ditt event 🎉</h1>
-          <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
-            Här är leverantörer som passar dina val.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-3 text-sm" style={{ color: colors.plumSoft }}>
-            {party.date && (
-              <span className="flex items-center gap-1">
-                <Calendar size={14} /> {party.date}
-              </span>
-            )}
-            <span className="flex items-center gap-1">
-              <Clock size={14} /> {party.startTime}–{party.endTime}
-            </span>
-            <span className="flex items-center gap-1">
-              <Users size={14} /> {party.guests} gäster
-            </span>
-            {party.occasion && occasionMap[party.occasion] && (
-              <span className="flex items-center gap-1">
-                {occasionMap[party.occasion].emoji} {occasionMap[party.occasion].label}
-              </span>
-            )}
-            <button onClick={() => setEditOpen((v) => !v)} className="flex items-center gap-1 font-semibold underline" style={{ color: colors.lilacDeep }}>
-              Ändra
+          <h1 className="text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, letterSpacing: "-0.01em", color: colors.plum }}>Utforska</h1>
+          <label className="mt-4 flex h-12 items-center gap-2.5 rounded-full px-4" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}` }}>
+            <Search size={19} color={colors.plumSoft} />
+            <span className="sr-only">Sök</span>
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Sök leverantör, tjänst eller område"
+              className="flex-1 bg-transparent text-[15px] outline-none"
+              style={{ color: colors.plum, border: "none" }}
+            />
+          </label>
+          <div className="-mx-5 mt-4 flex gap-2 overflow-x-auto px-5 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
+            <PillChip active={party.categories.length === 0} onClick={() => setParty((p) => ({ ...p, categories: [] }))}>
+              Alla
+            </PillChip>
+            {CATEGORIES.map((c) => (
+              <PillChip key={c.id} active={party.categories.includes(c.id)} onClick={() => toggleCategory(c.id)}>
+                {c.label}
+              </PillChip>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3 text-sm" style={{ color: colors.plumSoft }}>
+            <span>{all.length} {all.length === 1 ? "leverantör" : "leverantörer"} i Göteborg</span>
+            <button onClick={() => setEditOpen((v) => !v)} aria-expanded={editOpen} className="flex h-11 items-center gap-1.5 font-semibold" style={{ color: colors.plum }}>
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
+              <span className="hidden sm:inline">Filter · </span>{filterSummary}
             </button>
           </div>
 
           {editOpen && (
-            <div className="mt-4 rounded-2xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}` }}>
+            <div className="mt-2 p-4 sm:p-5" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 20 }}>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <label className="col-span-2 flex flex-col gap-1 text-sm sm:col-span-1" style={{ color: colors.plumSoft }}>
-                  <span className="flex items-center gap-1">
-                    <Calendar size={14} /> Datum
-                  </span>
-                  <input
-                    type="date"
-                    value={party.date}
-                    onChange={(e) => setParty((p) => ({ ...p, date: e.target.value }))}
-                    className="rounded-xl px-3 py-2 text-sm"
-                    style={fieldStyle}
-                  />
+                <label className="col-span-2 flex flex-col gap-1 text-[13px] font-semibold sm:col-span-1" style={{ color: colors.plumSoft }}>
+                  Datum
+                  <input type="date" value={party.date} onChange={(e) => setParty((p) => ({ ...p, date: e.target.value }))} className="h-11 rounded-xl px-3 text-sm" style={fieldStyle} />
                 </label>
-                <label className="flex flex-col gap-1 text-sm" style={{ color: colors.plumSoft }}>
-                  <span className="flex items-center gap-1">
-                    <Clock size={14} /> Start
-                  </span>
-                  <input
-                    type="time"
-                    value={party.startTime}
-                    onChange={(e) => setParty((p) => ({ ...p, startTime: e.target.value }))}
-                    className="rounded-xl px-3 py-2 text-sm"
-                    style={fieldStyle}
-                  />
+                <label className="flex flex-col gap-1 text-[13px] font-semibold" style={{ color: colors.plumSoft }}>
+                  Start
+                  <input type="time" value={party.startTime} onChange={(e) => setParty((p) => ({ ...p, startTime: e.target.value }))} className="h-11 rounded-xl px-3 text-sm" style={fieldStyle} />
                 </label>
-                <label className="flex flex-col gap-1 text-sm" style={{ color: colors.plumSoft }}>
-                  <span className="flex items-center gap-1">
-                    <Clock size={14} /> Slut
-                  </span>
-                  <input
-                    type="time"
-                    value={party.endTime}
-                    onChange={(e) => setParty((p) => ({ ...p, endTime: e.target.value }))}
-                    className="rounded-xl px-3 py-2 text-sm"
-                    style={fieldStyle}
-                  />
+                <label className="flex flex-col gap-1 text-[13px] font-semibold" style={{ color: colors.plumSoft }}>
+                  Slut
+                  <input type="time" value={party.endTime} onChange={(e) => setParty((p) => ({ ...p, endTime: e.target.value }))} className="h-11 rounded-xl px-3 text-sm" style={fieldStyle} />
                 </label>
-                <label className="col-span-2 flex flex-col gap-1 text-sm sm:col-span-1" style={{ color: colors.plumSoft }}>
-                  <span className="flex items-center gap-1">
-                    <Users size={14} /> Gäster
-                  </span>
+                <label className="col-span-2 flex flex-col gap-1 text-[13px] font-semibold sm:col-span-1" style={{ color: colors.plumSoft }}>
+                  Gäster
                   <input
                     type="number"
                     min={1}
@@ -2183,97 +2342,45 @@ function ResultsView({
                       if (!Number.isNaN(n)) setParty((p) => ({ ...p, guests: n }));
                     }}
                     onBlur={() => setParty((p) => ({ ...p, guests: p.guests === "" || p.guests < 1 ? 1 : p.guests }))}
-                    className="rounded-xl px-3 py-2 text-sm"
+                    className="h-11 rounded-xl px-3 text-sm"
                     style={fieldStyle}
                   />
                 </label>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {OCCASIONS.map((o) => (
-                  <CategoryChip
-                    key={o.id}
-                    size="sm"
-                    active={party.occasion === o.id}
-                    onClick={() => setParty((p) => ({ ...p, occasion: p.occasion === o.id ? "" : o.id }))}
-                    icon={null}
-                    label={`${o.emoji} ${o.label}`}
-                  />
-                ))}
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1 text-[13px] font-semibold" style={{ color: colors.plumSoft }}>
+                  Avstånd
+                  <select value={distanceFilter} onChange={(e) => setDistanceFilter(e.target.value === "all" ? "all" : Number(e.target.value))} className="h-11 rounded-xl px-3 text-sm" style={fieldStyle}>
+                    <option value="all">Alla avstånd</option>
+                    <option value="5">Inom 5 km</option>
+                    <option value="10">Inom 10 km</option>
+                    <option value="25">Inom 25 km</option>
+                    <option value="50">Inom 50 km</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-[13px] font-semibold" style={{ color: colors.plumSoft }}>
+                  Sortera
+                  <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="h-11 rounded-xl px-3 text-sm" style={fieldStyle}>
+                    <option value="recommended">Rekommenderade</option>
+                    <option value="rating">Högst betyg</option>
+                    <option value="reviews">Flest omdömen</option>
+                    <option value="price">Pris</option>
+                    <option value="distance">Närmast först</option>
+                  </select>
+                </label>
               </div>
-              <button
-                onClick={() => setEditOpen(false)}
-                className="mt-4 rounded-full px-4 py-2 text-sm font-semibold"
-                style={{ backgroundColor: colors.coral, color: colors.white }}
-              >
-                Klart
+              <button onClick={() => setEditOpen(false)} className="mt-4 h-11 w-full rounded-full text-sm font-bold sm:w-auto sm:px-8" style={{ backgroundColor: colors.coral, color: colors.white }}>
+                Visa resultat
               </button>
             </div>
           )}
         </>
       )}
 
-      {!swapContext && (
-        <div className="relative mt-5 max-w-sm">
-          <Search size={15} color={colors.plumSoft} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Sök leverantör..."
-            className="w-full rounded-full py-2 pl-9 pr-4 text-sm"
-            style={{ border: `1px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}
-          />
-        </div>
-      )}
-
-      {!swapContext && (
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2">
-            {CATEGORIES.map((c) => (
-              <CategoryChip key={c.id} size="sm" active={party.categories.includes(c.id)} onClick={() => toggleCategory(c.id)} icon={c.icon} label={c.label} />
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={distanceFilter}
-              onChange={(e) => setDistanceFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
-              className="rounded-full px-3 py-1.5 text-xs font-medium"
-              style={{ border: `1px solid ${colors.beige}`, color: colors.plumSoft, backgroundColor: colors.white }}
-            >
-              <option value="all">Alla avstånd</option>
-              <option value="5">Nära dig · inom 5 km</option>
-              <option value="10">Inom 10 km</option>
-              <option value="25">Inom 25 km</option>
-              <option value="50">Inom 50 km</option>
-            </select>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="rounded-full bg-transparent px-2 py-1 text-xs font-medium"
-              style={{ border: "none", color: colors.plumSoft }}
-            >
-              <option value="recommended">Rekommenderade</option>
-              <option value="rating">Högst betyg</option>
-              <option value="reviews">Flest recensioner</option>
-              <option value="price">Pris</option>
-              <option value="distance">Närmast först</option>
-            </select>
-          </div>
-        </div>
-      )}
-
       {swapContext ? (
-        <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+        <div className={`mt-2 ${grid}`}>
           {swapProviders.map((p) => (
-            <VendorCard
-              key={p.id}
-              provider={p}
-              party={party}
-              inCart={cart.includes(p.id)}
-              onView={onView}
-              onAdd={onAdd}
-              onRemove={onRemove}
-              swapMode
-            />
+            <VendorCard key={p.id} provider={p} party={party} inCart={cart.includes(p.id)} onView={onView} onAdd={onAdd} onRemove={onRemove} swapMode />
           ))}
           {swapProviders.length === 0 && (
             <p className="col-span-full py-16 text-center text-sm" style={{ color: colors.plumSoft }}>
@@ -2281,54 +2388,16 @@ function ResultsView({
             </p>
           )}
         </div>
-      ) : (
-        <div className="mt-8 space-y-8">
-          {groups.map((g) => {
-            const Icon = g.category.icon;
-            return (
-              <section key={g.category.id} className="p-5 sm:p-7" style={{ backgroundColor: colors[g.category.tint], borderRadius: 40 }}>
-                <div className="mb-5 flex items-center gap-3">
-                  <div
-                    className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full shadow-sm"
-                    style={{ backgroundColor: colors.white }}
-                  >
-                    <Icon size={20} color={colors.coral} />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 style={{ fontFamily: serif, fontWeight: 700, fontSize: 24, color: colors.plum }}>{g.category.label}</h2>
-                      <span className="text-sm" style={{ color: colors.plumSoft }}>
-                        ({g.providers.length})
-                      </span>
-                    </div>
-                    <p className="text-sm" style={{ color: colors.plumSoft }}>
-                      {g.category.tagline}
-                    </p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-                  {g.providers.map((p) => (
-                    <VendorCard
-                      key={p.id}
-                      provider={p}
-                      party={party}
-                      inCart={cart.includes(p.id)}
-                      onView={onView}
-                      onAdd={onAdd}
-                      onRemove={onRemove}
-                      swapMode={false}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-          {groups.length === 0 && (
-            <p className="py-16 text-center text-sm" style={{ color: colors.plumSoft }}>
-              Vi bygger just nu upp utbudet i Göteborg — inga leverantörer matchar just nu. Prova en annan kategori eller sökning, eller kom tillbaka snart!
-            </p>
-          )}
+      ) : all.length > 0 ? (
+        <div className={`mt-4 ${grid}`}>
+          {all.map((p) => (
+            <VendorCard key={p.id} provider={p} party={party} inCart={cart.includes(p.id)} onView={onView} onAdd={onAdd} onRemove={onRemove} swapMode={false} />
+          ))}
         </div>
+      ) : (
+        <p className="py-16 text-center text-sm" style={{ color: colors.plumSoft }}>
+          Vi bygger just nu upp utbudet i Göteborg — inga leverantörer matchar just nu. Prova en annan kategori eller sökning, eller kom tillbaka snart!
+        </p>
       )}
     </div>
   );
@@ -2338,6 +2407,8 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
   const cat = catMap[provider.category];
   const [requestOpen, setRequestOpen] = useState(false);
   const [pendingAddons, setPendingAddons] = useState([]);
+  const [tab, setTab] = useState("posts");
+  const [lightbox, setLightbox] = useState(null);
   const initialCalDate = party.date ? new Date(party.date) : new Date();
   const [calYear, setCalYear] = useState(initialCalDate.getFullYear());
   const [calMonthIdx, setCalMonthIdx] = useState(initialCalDate.getMonth());
@@ -2373,313 +2444,295 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
   const busyNow = !closedNow && isBusyAt(provider, party);
   const unavailableNow = closedNow || busyNow;
   const daySlots = party.date ? busyOnDate(provider, party.date) : [];
+
+  const images = (provider.images && provider.images.length ? provider.images : [provider.image]).filter(Boolean);
+  const avatar = images[0] || `https://picsum.photos/seed/${provider.seed}/300/300`;
+  const reviewsList = provider.reviewsList || [];
+  const priceLabel = provider.requestOnly
+    ? provider.fromPrice > 0
+      ? `Från ${formatKr(provider.fromPrice)}`
+      : "Pris på förfrågan"
+    : `Från ${formatKr(provider.pricing.amount)}${getUnitLabel(provider.pricing)}`;
+  const dateLabel = party.date ? new Date(`${party.date}T00:00:00`).toLocaleDateString("sv-SE", { day: "numeric", month: "long" }) : "";
+  const handle = provider.name.toLowerCase().replace(/[^a-z0-9åäö]+/g, "");
+  const dist = [5, 4, 3, 2, 1].map((n) => ({ n, count: reviewsList.filter((r) => Math.round(Number(r.stars)) === n).length }));
+  const maxCount = Math.max(1, ...dist.map((d) => d.count));
+  const statNum = { fontFamily: sans, fontWeight: 700, fontSize: 18, color: colors.plum };
+  const btnBase = "flex h-11 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-semibold";
+
+  const primaryButton = provider.requestOnly ? (
+    <button onClick={() => setRequestOpen(true)} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.coral, color: colors.white }}>
+      Skicka förfrågan
+    </button>
+  ) : inCart ? (
+    <button onClick={() => onRemove(provider.id)} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.greenSoft, color: colors.green }}>
+      <Check size={16} /> I din fest
+    </button>
+  ) : (
+    <button
+      onClick={() => !unavailableNow && onAdd(provider.id, pendingAddons)}
+      disabled={unavailableNow}
+      className={`${btnBase} flex-1`}
+      style={{ backgroundColor: unavailableNow ? colors.beige : colors.coral, color: unavailableNow ? colors.plumSoft : colors.white, cursor: unavailableNow ? "not-allowed" : "pointer" }}
+    >
+      {unavailableNow ? "Upptagen din tid" : "Lägg till i Min fest"}
+    </button>
+  );
+
+  const tabBtn = (id, label, Icon) => (
+    <button
+      role="tab"
+      aria-selected={tab === id}
+      onClick={() => setTab(id)}
+      className="flex h-12 items-center justify-center gap-1.5 text-sm"
+      style={{ color: tab === id ? colors.plum : colors.plumSoft, fontWeight: tab === id ? 700 : 500, borderBottom: `2px solid ${tab === id ? colors.plum : "transparent"}` }}
+    >
+      <Icon size={17} /> {label}
+    </button>
+  );
+
   return (
-    <div className="mx-auto max-w-3xl px-6 pb-40 pt-8 sm:px-10">
-      <div className="mb-5 flex items-center justify-between">
-        <button onClick={onBack} className="-ml-2 flex items-center gap-1 px-2 py-1.5 text-sm font-medium" style={{ color: colors.plumSoft }}>
-          <ChevronLeft size={16} /> Tillbaka
+    <div className="mx-auto max-w-3xl pb-28">
+      <div className="grid items-center px-2 py-2 sm:px-4" style={{ gridTemplateColumns: "44px 1fr 44px", borderBottom: `1px solid ${colors.beige}` }}>
+        <button onClick={onBack} aria-label="Tillbaka" className="flex h-11 w-11 items-center justify-center" style={{ color: colors.plum }}>
+          <ChevronLeft size={22} />
         </button>
-        <HeartButton vendorId={provider.vendorDbId} />
+        <span className="truncate text-center text-base font-semibold" style={{ color: colors.plum }}>{handle || provider.name}</span>
+        <span className="flex justify-end">
+          <HeartButton vendorId={provider.vendorDbId} />
+        </span>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-3">
-        <img
-          src={(provider.images && provider.images[0]) || `https://picsum.photos/seed/${provider.seed}/700/500`}
-          className="col-span-2 rounded-3xl object-cover"
-          style={{ height: 280 }}
-          alt={provider.name}
-        />
-        <img
-          src={(provider.images && provider.images[1]) || `https://picsum.photos/seed/${provider.seed}-b/400/500`}
-          className="hidden rounded-3xl object-cover sm:block"
-          style={{ height: 280 }}
-          alt={provider.name}
-        />
-      </div>
-
-      <div className="mt-5 flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <span
-            className="rounded-full px-3 py-1 text-xs font-semibold"
-            style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}
-          >
-            {cat.label}
+      <div className="px-5 pt-5 sm:px-8">
+        <div className="flex items-center gap-5">
+          <span className="flex h-[92px] w-[92px] flex-shrink-0 rounded-full p-[3px]" style={{ background: `conic-gradient(${colors.korall}, ${colors.coral}, ${colors.lilac}, ${colors.korall})` }}>
+            <span className="h-full w-full overflow-hidden rounded-full" style={{ border: `3px solid ${colors.cream}` }}>
+              <img src={avatar} alt={`${provider.name}s profilbild`} className="h-full w-full object-cover" />
+            </span>
           </span>
-          <h1 className="mt-2" style={{ fontFamily: serif, fontSize: 30, color: colors.plum }}>
+          <div className="grid flex-1 grid-cols-3 text-center">
+            <span className="flex flex-col">
+              <span style={statNum}>{images.length}</span>
+              <span className="text-xs" style={{ color: colors.plumSoft }}>{images.length === 1 ? "bild" : "bilder"}</span>
+            </span>
+            <button onClick={() => setTab("reviews")} className="flex flex-col">
+              <span style={statNum} className="flex items-center justify-center gap-1">
+                {provider.reviews > 0 ? (
+                  <>
+                    <Star size={15} fill={colors.coral} color={colors.coral} /> {provider.rating}
+                  </>
+                ) : (
+                  "Ny"
+                )}
+              </span>
+              <span className="text-xs" style={{ color: colors.plumSoft }}>{provider.reviews > 0 ? "betyg" : "leverantör"}</span>
+            </button>
+            <button onClick={() => setTab("reviews")} className="flex flex-col">
+              <span style={statNum}>{provider.reviews || 0}</span>
+              <span className="text-xs" style={{ color: colors.plumSoft }}>omdömen</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <h1 className="flex items-center gap-1.5" style={{ fontFamily: serif, fontWeight: 700, fontSize: 26, color: colors.plum, lineHeight: 1.15 }}>
             {provider.name}
+            <span title="Granskad av Planifest" className="flex h-[18px] w-[18px] items-center justify-center rounded-full" style={{ backgroundColor: colors.coral }}>
+              <Check size={11} color={colors.white} strokeWidth={3} />
+            </span>
           </h1>
-          <p className="mt-1 flex items-center gap-1 text-sm" style={{ color: colors.plumSoft }}>
-            <MapPin size={14} /> {provider.location}
+          <p className="mt-0.5 text-sm" style={{ color: colors.plumSoft }}>
+            {[cat?.label, ...(provider.alsoOffers || []).map((id) => catMap[id]?.label)].filter(Boolean).join(" · ")}
           </p>
-          {(provider.alsoOffers || []).length > 0 && (
-            <p className="mt-1 text-sm font-semibold" style={{ color: colors.lilacDeep }}>
-              Erbjuder även: {provider.alsoOffers.map((id) => catMap[id]?.label).filter(Boolean).join(", ")}
+          {provider.blurb && (
+            <p className="mt-2 whitespace-pre-line text-[15px] leading-relaxed" style={{ color: colors.plum }}>
+              {provider.blurb}
             </p>
           )}
+          <p className="mt-2 flex items-center gap-1.5 text-sm" style={{ color: colors.plumSoft }}>
+            <MapPin size={15} /> {[provider.location, priceLabel].filter(Boolean).join(" · ")}
+          </p>
+          {party.date && (
+            <span
+              className="mt-3 inline-block rounded-full px-3 py-1.5 text-[13px] font-semibold"
+              style={{ backgroundColor: unavailableNow ? colors.beige : colors.lilacSoft, color: unavailableNow ? colors.plumSoft : colors.coral }}
+            >
+              {closedNow ? `Stängd ${dateLabel}` : busyNow ? `Upptagen ${dateLabel}, ${party.startTime}–${party.endTime}` : `Ledig ${dateLabel}`}
+            </span>
+          )}
         </div>
-        {provider.reviews > 0 ? (
-          <StarRating rating={provider.rating} reviews={provider.reviews} size={16} />
-        ) : (
-          <span className="flex items-center gap-1 text-sm font-semibold" style={{ color: colors.coralDeep }}>
-            <Sparkles size={13} /> Ny leverantör
-          </span>
+
+        <div className="mt-4 flex gap-2">
+          {primaryButton}
+          {provider.request && provider.vendorDbId && !provider.requestOnly ? (
+            <button onClick={() => setRequestOpen(true)} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+              Begär offert
+            </button>
+          ) : (
+            <button onClick={() => onOpenChat(provider)} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+              Meddelande
+            </button>
+          )}
+          {provider.request && provider.vendorDbId && !provider.requestOnly && (
+            <button onClick={() => onOpenChat(provider)} aria-label="Skicka meddelande" className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+              <MessageCircle size={19} />
+            </button>
+          )}
+        </div>
+
+        {siblings.length > 0 && (
+          <div className="mt-5">
+            <p className="mb-2 text-xs font-semibold uppercase" style={{ letterSpacing: "0.08em", color: colors.plumSoft }}>Boka även hos {provider.name}</p>
+            <div className="flex gap-4 overflow-x-auto pb-1">
+              {siblings.map((sib) => {
+                const sibCat = catMap[sib.category];
+                const Icon = sibCat?.icon || Sparkles;
+                const sibIn = cartIds.includes(sib.id);
+                return (
+                  <button key={sib.id} onClick={() => onViewOther && onViewOther(sib.id)} className="flex w-[68px] flex-shrink-0 flex-col items-center gap-1.5">
+                    <span className="relative flex h-16 w-16 items-center justify-center rounded-full" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.white }}>
+                      <Icon size={24} color={colors.coral} />
+                      {sibIn && (
+                        <span className="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full" style={{ backgroundColor: colors.green }}>
+                          <Check size={12} color={colors.white} strokeWidth={3} />
+                        </span>
+                      )}
+                    </span>
+                    <span className="truncate text-xs" style={{ color: colors.plum, maxWidth: 68 }}>{sibCat?.label || "Tjänst"}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
 
-      <div className="mt-8 grid gap-8 sm:grid-cols-3">
-        <div className="space-y-8 sm:col-span-2">
-          {!party.date && (
-            <section>
-              <h2 className="mb-2 font-semibold" style={{ color: colors.plum }}>
-                Tillgänglighet
-              </h2>
-              <p className="mb-2 text-xs" style={{ color: colors.plumSoft }}>
-                Klicka på en ledig dag för att välja den och boka direkt.
-              </p>
-              <MonthCalendar
-                year={calYear}
-                month={calMonthIdx}
-                onPrevMonth={prevMonth}
-                onNextMonth={nextMonth}
-                getDayStatus={getDayStatus}
-                onDayClick={(ds, status) => status === "open" && onSelectDate(ds)}
-                interactive
-                highlightDate={null}
-                compact
-              />
-              <CalendarLegend compact />
-            </section>
-          )}
-          <section>
-            <h2 className="mb-2 font-semibold" style={{ color: colors.plum }}>
-              Om oss
-            </h2>
-            <p className="text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
-              {provider.blurb}
-            </p>
-          </section>
-          <section>
-            <h2 className="mb-2 font-semibold" style={{ color: colors.plum }}>
-              Tjänst
-            </h2>
-            <p className="text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
-              {provider.service}
-            </p>
-          </section>
-          {siblings.length > 0 && (
-            <section>
-              <h2 className="mb-1 font-semibold" style={{ color: colors.plum }}>
-                Boka även hos {provider.name}
-              </h2>
-              <p className="mb-3 text-sm" style={{ color: colors.plumSoft }}>
-                Samma leverantör erbjuder mer. Öppna för att se allt, eller lägg till direkt.
-              </p>
-              <div className="space-y-2">
-                {siblings.map((sib) => {
-                  const sibCat = catMap[sib.category];
-                  const sibLabel = sib.requestOnly
-                    ? sib.fromPrice > 0
-                      ? `från ${formatKr(sib.fromPrice)}`
-                      : "Pris på förfrågan"
-                    : `${formatKr(sib.pricing.amount)}${getUnitLabel(sib.pricing)}`;
-                  const sibBusy = !!party?.date && (isBusyAt(sib, party) || !!sib.closedDates?.includes(party.date));
-                  const sibIn = cartIds.includes(sib.id);
-                  return (
-                    <div
-                      key={sib.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => onViewOther && onViewOther(sib.id)}
-                      onKeyDown={(e) => e.key === "Enter" && onViewOther && onViewOther(sib.id)}
-                      className="flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-2xl p-3"
-                      style={{ backgroundColor: colors.cream, border: `1px solid ${colors.beige}` }}
-                    >
-                      <div className="min-w-0 flex-1" style={{ flexBasis: 200 }}>
-                        <p className="text-sm font-semibold" style={{ color: colors.plum }}>
-                          {sibCat?.label || "Tjänst"}
-                        </p>
-                        <p className="line-clamp-3 text-xs" style={{ color: colors.plumSoft }}>
-                          {sib.service || sib.tagline}
-                        </p>
-                        <p className="mt-0.5 text-sm font-bold" style={{ color: colors.plum }}>
-                          {sibLabel}
-                        </p>
-                      </div>
-                      {sibBusy ? (
-                        <span className="flex-shrink-0 text-xs font-semibold" style={{ color: colors.coralDeep }}>
-                          Upptagen din tid
-                        </span>
-                      ) : (
-                        <div className="flex flex-shrink-0 items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onViewOther && onViewOther(sib.id);
-                            }}
-                            className="rounded-full px-4 py-2 text-xs font-semibold"
-                            style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}
-                          >
-                            Visa allt
-                          </button>
-                          {!sib.requestOnly && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                sibIn ? onRemove(sib.id) : onAdd(sib.id);
-                              }}
-                              className="rounded-full px-4 py-2 text-xs font-semibold"
-                              style={sibIn ? { backgroundColor: colors.greenSoft, color: colors.green } : { backgroundColor: colors.coral, color: colors.white }}
-                            >
-                              {sibIn ? "Tillagd ✓" : "Lägg till"}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-          <section>
-            <h2 className="mb-3 font-semibold" style={{ color: colors.plum }}>
-              Recensioner
-            </h2>
-            {provider.reviewsList.length > 0 ? (
-              <div className="space-y-3">
-                {provider.reviewsList.map((r, i) => (
-                  <div key={i} className="rounded-2xl p-4" style={{ backgroundColor: colors.cream }}>
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="text-sm font-semibold" style={{ color: colors.plum }}>
-                        {r.name}
-                      </span>
-                      <StarRating rating={r.stars} />
-                    </div>
-                    <p className="text-sm" style={{ color: colors.plumSoft }}>
-                      {r.text}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm" style={{ color: colors.plumSoft }}>
-                Inga recensioner än – en av de första att boka får gärna dela sina intryck efteråt.
-              </p>
-            )}
-          </section>
-        </div>
+      <div role="tablist" className="mt-5 grid grid-cols-3" style={{ borderBottom: `1px solid ${colors.beige}` }}>
+        {tabBtn("posts", "Bilder", Camera)}
+        {tabBtn("reviews", `Omdömen${provider.reviews ? ` (${provider.reviews})` : ""}`, Star)}
+        {tabBtn("info", "Pris & info", ClipboardList)}
+      </div>
 
-        <div className="sm:col-span-1">
-          {provider.requestOnly ? (
-            <div className="rounded-3xl p-5 sm:sticky sm:top-6" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}` }}>
-              <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>{provider.fromPrice > 0 ? `Från ${formatKr(provider.fromPrice)}` : "Pris på förfrågan"}</p>
+      {tab === "posts" && (
+        images.length > 0 ? (
+          <div className="grid grid-cols-3 gap-0.5">
+            {images.map((src, i) => (
+              <button key={i} onClick={() => setLightbox(src)} className="block aspect-square overflow-hidden" style={{ backgroundColor: colors.coralSoft }} aria-label={`Visa bild ${i + 1}`}>
+                <img src={src} alt="" className="h-full w-full object-cover" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="px-5 py-10 text-center text-sm" style={{ color: colors.plumSoft }}>Inga bilder än.</p>
+        )
+      )}
+
+      {tab === "reviews" && (
+        <div className="flex flex-col gap-3 px-5 pt-5 sm:px-8">
+          {reviewsList.length > 0 ? (
+            <>
+              <div className="flex items-center gap-5 p-4" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 20 }}>
+                <div className="flex min-w-[88px] flex-col items-center gap-1">
+                  <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 42, lineHeight: 1, color: colors.plum }}>{provider.rating}</span>
+                  <span className="flex gap-0.5" aria-label={`${provider.rating} av 5 stjärnor`}>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <Star key={n} size={13} fill={n <= Math.round(Number(provider.rating)) ? colors.coral : colors.beige} color={n <= Math.round(Number(provider.rating)) ? colors.coral : colors.beige} />
+                    ))}
+                  </span>
+                  <span className="text-xs" style={{ color: colors.plumSoft }}>{provider.reviews} omdömen</span>
+                </div>
+                <div className="flex flex-1 flex-col gap-1.5">
+                  {dist.map((d) => (
+                    <span key={d.n} className="flex items-center gap-2 text-xs" style={{ color: colors.plumSoft }}>
+                      <span className="w-2">{d.n}</span>
+                      <span className="flex h-1.5 flex-1 overflow-hidden rounded-full" style={{ backgroundColor: colors.lilacSoft }}>
+                        <span className="rounded-full" style={{ width: `${(d.count / maxCount) * 100}%`, backgroundColor: colors.coral }} />
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {reviewsList.map((r, i) => (
+                <article key={i} className="flex flex-col gap-2 p-4" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 20 }}>
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold" style={{ backgroundColor: colors.lilacSoft, color: colors.coral }}>
+                      {(r.name || "?").charAt(0).toUpperCase()}
+                    </span>
+                    <span className="flex-1 text-sm font-semibold" style={{ color: colors.plum }}>{r.name}</span>
+                    <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: colors.coralSoft, color: colors.plum }}>Verifierad bokning</span>
+                  </div>
+                  <span className="flex gap-0.5" aria-label={`${r.stars} av 5 stjärnor`}>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <Star key={n} size={14} fill={n <= Number(r.stars) ? colors.coral : colors.beige} color={n <= Number(r.stars) ? colors.coral : colors.beige} />
+                    ))}
+                  </span>
+                  {r.text && <p className="text-sm leading-relaxed" style={{ color: colors.plum }}>{r.text}</p>}
+                </article>
+              ))}
+            </>
+          ) : (
+            <p className="py-8 text-center text-sm" style={{ color: colors.plumSoft }}>
+              Inga omdömen än – en av de första att boka får gärna dela sina intryck efteråt.
+            </p>
+          )}
+        </div>
+      )}
+
+      {tab === "info" && (
+        <div className="flex flex-col gap-6 px-5 pt-5 sm:px-8">
+          {provider.service && (
+            <section>
+              <h2 className="mb-1.5 text-[15px] font-bold" style={{ color: colors.plum }}>Tjänst</h2>
+              <p className="whitespace-pre-line text-sm leading-relaxed" style={{ color: colors.plumSoft }}>{provider.service}</p>
+            </section>
+          )}
+
+          {!provider.requestOnly && (
+            <section className="p-4" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 20 }}>
+              <p style={{ fontFamily: serif, fontWeight: 700, fontSize: 21, color: colors.plum }}>{priceLabel}</p>
+              <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>{getBreakdownText(provider, party)}</p>
+              {provider.addons.length > 0 && (
+                <div className="mt-4 space-y-2 border-t pt-4" style={{ borderColor: colors.beige }}>
+                  <p className="text-xs font-semibold" style={{ color: colors.plum }}>Tillägg (valfritt)</p>
+                  {provider.addons.map((a) => (
+                    <label key={a.id} className="flex items-center justify-between gap-2 text-sm" style={{ color: colors.plum }}>
+                      <span className="flex items-center gap-2">
+                        <input type="checkbox" checked={activeAddons.includes(a.id)} onChange={() => toggleAddon(a.id)} />
+                        {a.name}
+                      </span>
+                      <span style={{ color: colors.plumSoft }}>+{formatKr(a.price)}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <div className="mt-4 flex items-center justify-between border-t pt-4" style={{ borderColor: colors.beige }}>
+                <span className="text-sm font-semibold" style={{ color: colors.plum }}>Uppskattat pris</span>
+                <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 20, color: colors.plum }}>{formatKr(estimate)}</span>
+              </div>
+            </section>
+          )}
+
+          {provider.requestOnly && (
+            <section className="p-4" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 20 }}>
+              <p style={{ fontFamily: serif, fontWeight: 700, fontSize: 21, color: colors.plum }}>{priceLabel}</p>
               <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
                 Berätta vad du behöver, så svarar leverantören i chatten och skickar en offert med slutpris.
               </p>
-              <button
-                onClick={() => setRequestOpen(true)}
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold"
-                style={{ backgroundColor: colors.coral, color: colors.white }}
-              >
-                <ClipboardList size={16} /> Skicka förfrågan
-              </button>
-              <button
-                onClick={() => onOpenChat(provider)}
-                className="mt-2 flex w-full items-center justify-center gap-2 rounded-full py-2.5 text-sm font-medium"
-                style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}
-              >
-                <MessageCircle size={15} /> Fråga leverantören
-              </button>
-            </div>
-          ) : (
-          <div className="rounded-3xl p-5 sm:sticky sm:top-6" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}` }}>
-            <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>
-              Från {formatKr(provider.pricing.amount)}
-              {getUnitLabel(provider.pricing)}
-            </p>
-            <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>
-              {getBreakdownText(provider, party)}
-            </p>
+            </section>
+          )}
 
-            {provider.addons.length > 0 && (
-              <div className="mt-4 space-y-2 border-t pt-4" style={{ borderColor: colors.beige }}>
-                <p className="text-xs font-semibold" style={{ color: colors.plum }}>
-                  Tillägg (valfritt)
-                </p>
-                {provider.addons.map((a) => (
-                  <label key={a.id} className="flex items-center justify-between gap-2 text-sm" style={{ color: colors.plum }}>
-                    <span className="flex items-center gap-2">
-                      <input type="checkbox" checked={activeAddons.includes(a.id)} onChange={() => toggleAddon(a.id)} />
-                      {a.name}
-                    </span>
-                    <span style={{ color: colors.plumSoft }}>+{formatKr(a.price)}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-
-            <div className="mt-4 flex items-center justify-between border-t pt-4" style={{ borderColor: colors.beige }}>
-              <span className="text-sm font-semibold" style={{ color: colors.plum }}>
-                Uppskattat pris
-              </span>
-              <span style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>{formatKr(estimate)}</span>
-            </div>
-
-            <div
-              className="mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
-              style={{
-                backgroundColor: unavailableNow ? "#F3E8DB" : colors.greenSoft,
-                color: unavailableNow ? colors.plumSoft : colors.green,
-              }}
-            >
-              <span
-                className="inline-block rounded-full"
-                style={{
-                  width: 6,
-                  height: 6,
-                  backgroundColor: unavailableNow ? colors.plumSoft : colors.green,
-                }}
-              />
-              {party.date
-                ? closedNow
-                  ? `Stängd ${party.date}`
-                  : busyNow
-                  ? `Upptagen ${party.date}, ${party.startTime}–${party.endTime}`
-                  : `Tillgänglig ${party.date}, ${party.startTime}–${party.endTime}`
-                : "Se hela kalendern ovan för tillgänglighet"}
-            </div>
-            {daySlots.length > 0 && (
-              <p className="mt-1.5 text-xs" style={{ color: colors.plumSoft }}>
-                Redan bokad den dagen: {daySlots.map((sl) => `${hhmm(sl.start)}–${hhmm(sl.end)}`).join(", ")}.{busyNow ? " Välj en annan tid eller ett annat datum." : ""}
-              </p>
-            )}
-
-            {party.date && (
-              <div className="mt-3 space-y-2 rounded-xl p-3" style={{ backgroundColor: colors.cream }}>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="flex flex-col gap-0.5 text-xs" style={{ color: colors.plumSoft }}>
-                    Start
-                    <input
-                      type="time"
-                      value={party.startTime}
-                      onChange={(e) => onUpdateParty({ startTime: e.target.value })}
-                      className="rounded-lg px-2 py-1.5 text-sm"
-                      style={{ border: `1px solid ${colors.beige}`, color: colors.plum }}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-0.5 text-xs" style={{ color: colors.plumSoft }}>
-                    Slut
-                    <input
-                      type="time"
-                      value={party.endTime}
-                      onChange={(e) => onUpdateParty({ endTime: e.target.value })}
-                      className="rounded-lg px-2 py-1.5 text-sm"
-                      style={{ border: `1px solid ${colors.beige}`, color: colors.plum }}
-                    />
-                  </label>
-                </div>
+          {party.date ? (
+            <section className="space-y-2 p-4" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 20 }}>
+              <h2 className="text-[15px] font-bold" style={{ color: colors.plum }}>Din tid</h2>
+              <div className="grid grid-cols-3 gap-2">
+                <label className="flex flex-col gap-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                  Start
+                  <input type="time" value={party.startTime} onChange={(e) => onUpdateParty({ startTime: e.target.value })} className="rounded-xl px-2 py-2 text-sm" style={{ border: `1px solid ${colors.beige}`, color: colors.plum }} />
+                </label>
+                <label className="flex flex-col gap-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                  Slut
+                  <input type="time" value={party.endTime} onChange={(e) => onUpdateParty({ endTime: e.target.value })} className="rounded-xl px-2 py-2 text-sm" style={{ border: `1px solid ${colors.beige}`, color: colors.plum }} />
+                </label>
                 <label className="flex flex-col gap-0.5 text-xs" style={{ color: colors.plumSoft }}>
                   Gäster
                   <input
@@ -2696,56 +2749,52 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                       if (!Number.isNaN(n)) onUpdateParty({ guests: n });
                     }}
                     onBlur={() => onUpdateParty({ guests: party.guests === "" || party.guests < 1 ? 1 : party.guests })}
-                    className="rounded-lg px-2 py-1.5 text-sm"
+                    className="rounded-xl px-2 py-2 text-sm"
                     style={{ border: `1px solid ${colors.beige}`, color: colors.plum }}
                   />
                 </label>
-                <button onClick={() => onUpdateParty({ date: "" })} className="text-xs font-medium underline" style={{ color: colors.lilacDeep }}>
-                  Byt datum
-                </button>
               </div>
-            )}
-            {inCart ? (
-              <button
-                onClick={() => onRemove(provider.id)}
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold"
-                style={{ backgroundColor: colors.lilacSoft, color: colors.lilacDeep }}
-              >
-                <Check size={16} /> I din fest
+              {daySlots.length > 0 && (
+                <p className="text-xs" style={{ color: colors.plumSoft }}>
+                  Redan bokad den dagen: {daySlots.map((sl) => `${hhmm(sl.start)}–${hhmm(sl.end)}`).join(", ")}.{busyNow ? " Välj en annan tid eller ett annat datum." : ""}
+                </p>
+              )}
+              <button onClick={() => onUpdateParty({ date: "" })} className="text-xs font-semibold underline" style={{ color: colors.coral }}>
+                Byt datum
               </button>
-            ) : (
-              <button
-                onClick={() => !unavailableNow && onAdd(provider.id, pendingAddons)}
-                disabled={unavailableNow}
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold"
-                style={{ backgroundColor: unavailableNow ? colors.beige : colors.coral, color: unavailableNow ? colors.plumSoft : colors.white, cursor: unavailableNow ? "not-allowed" : "pointer" }}
-              >
-                {unavailableNow ? "Inte tillgänglig din tid" : (<><Plus size={16} /> Lägg till i min fest</>)}
-              </button>
-            )}
-            {provider.request && provider.vendorDbId && (
-              <button
-                onClick={() => setRequestOpen(true)}
-                className="mt-2 flex w-full items-center justify-center gap-2 rounded-full py-2.5 text-sm font-semibold"
-                style={{ border: `1.5px solid ${colors.coral}`, color: colors.coral, backgroundColor: colors.white }}
-              >
-                <ClipboardList size={15} /> Skicka förfrågan
-              </button>
-            )}
-            <button
-              onClick={() => onOpenChat(provider)}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-full py-2.5 text-sm font-medium"
-              style={{ border: `1.5px solid ${colors.lilac}`, color: colors.lilacDeep, backgroundColor: colors.white }}
-            >
-              <MessageCircle size={15} /> Fråga leverantören
-            </button>
-          </div>
-          )}
-          {requestOpen && (
-            <RequestFormModal provider={provider} party={party} onUpdateParty={onUpdateParty} onSend={(brief) => onSendRequest(provider, brief)} onClose={() => setRequestOpen(false)} />
+            </section>
+          ) : (
+            <section>
+              <h2 className="mb-1 text-[15px] font-bold" style={{ color: colors.plum }}>Tillgänglighet</h2>
+              <p className="mb-2 text-xs" style={{ color: colors.plumSoft }}>Tryck på en ledig dag för att välja den.</p>
+              <MonthCalendar
+                year={calYear}
+                month={calMonthIdx}
+                onPrevMonth={prevMonth}
+                onNextMonth={nextMonth}
+                getDayStatus={getDayStatus}
+                onDayClick={(ds, status) => status === "open" && onSelectDate(ds)}
+                interactive
+                highlightDate={null}
+              />
+              <CalendarLegend />
+            </section>
           )}
         </div>
-      </div>
+      )}
+
+      {lightbox && (
+        <div role="dialog" aria-label="Bild" onClick={() => setLightbox(null)} className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(30,8,22,0.85)" }}>
+          <button aria-label="Stäng" className="absolute right-4 top-4 flex h-11 w-11 items-center justify-center rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.15)", color: colors.white }}>
+            <X size={22} />
+          </button>
+          <img src={lightbox} alt="" className="max-h-full max-w-full rounded-2xl object-contain" />
+        </div>
+      )}
+
+      {requestOpen && (
+        <RequestFormModal provider={provider} party={party} onUpdateParty={onUpdateParty} onSend={(brief) => onSendRequest(provider, brief)} onClose={() => setRequestOpen(false)} />
+      )}
     </div>
   );
 }
@@ -6980,8 +7029,43 @@ function RsvpView({ state, onSubmit, onHome }) {
   );
 }
 
-function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateEvent, onUpdateEvent, onDeleteEvent, taskApi, budgetApi, guestApi, bookings, savedProviders, onViewProvider, party, onLogin, onSignup }) {
-  const [tab, setTab] = useState("checklist");
+function MinSidaHeader({ name, email, isAdmin, hasVendor, onAccount, onSaved, onSupport, onVendor, onAdmin, onSignOut }) {
+  const first = (name || "").trim().split(/\s+/)[0];
+  const links = [
+    { label: "Mina uppgifter", onClick: onAccount },
+    { label: "Sparade leverantörer", onClick: onSaved },
+    { label: "Hjälp & kontakt", onClick: onSupport },
+    { label: hasVendor ? "Min leverantörsportal" : "Bli leverantör", onClick: onVendor },
+    ...(isAdmin ? [{ label: "Admin", onClick: onAdmin }] : []),
+  ];
+  return (
+    <div className="mx-auto max-w-3xl px-6 pt-8 sm:px-10">
+      <div className="flex items-center gap-4">
+        <span className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full text-xl" style={{ fontFamily: serif, fontWeight: 700, backgroundColor: colors.lilacSoft, border: `1px solid ${colors.lilac}`, color: colors.coral }}>
+          {(first || email || "?").charAt(0).toUpperCase()}
+        </span>
+        <span className="min-w-0">
+          <h1 className="truncate text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Hej{first ? ` ${first}` : ""}!</h1>
+          <span className="block truncate text-sm" style={{ color: colors.plumSoft }}>{email}</span>
+        </span>
+      </div>
+      <div className="mt-5 overflow-hidden" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 20 }}>
+        {links.map((l, i) => (
+          <button key={l.label} onClick={l.onClick} className="flex w-full items-center justify-between px-4 text-left text-[15px]" style={{ minHeight: 52, color: colors.plum, borderTop: i ? `1px solid ${colors.cream}` : "none" }}>
+            {l.label}
+            <ChevronRight size={18} color={colors.plumSoft} />
+          </button>
+        ))}
+        <button onClick={onSignOut} className="flex w-full items-center px-4 text-left text-[15px] font-semibold" style={{ minHeight: 52, color: colors.coral, borderTop: `1px solid ${colors.cream}` }}>
+          Logga ut
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateEvent, onUpdateEvent, onDeleteEvent, taskApi, budgetApi, guestApi, bookings, savedProviders, onViewProvider, party, onLogin, onSignup, cart = [], cartTotal = 0, onOpenCart, onExploreCategory }) {
+  const [tab, setTab] = useState("vendors");
   const [modal, setModal] = useState(null); // null | "create" | "edit"
   const [newTask, setNewTask] = useState("");
   const [newDue, setNewDue] = useState("");
@@ -7008,11 +7092,14 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doneCount, totalCount, ev?.id]);
 
+  const board = <MinFestBoard cart={cart} categories={party.categories || []} total={cartTotal} onOpenCart={onOpenCart} onExploreCategory={onExploreCategory} />;
   if (!session) {
     return (
-      <div className="mx-auto max-w-xl px-6 pb-24 pt-14 text-center sm:px-10">
-        <p style={{ fontFamily: hand, fontSize: 28, color: colors.lilacDeep }}>din fest, på ett ställe</p>
-        <h1 style={{ fontFamily: serif, fontSize: 32, color: colors.plum }}>Min planering</h1>
+      <div className="mx-auto max-w-3xl px-5 pb-24 pt-8 sm:px-8">
+        <h1 className="text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Min fest</h1>
+        {board}
+      <div className="mx-auto mt-10 max-w-xl text-center">
+        <h2 style={{ fontFamily: serif, fontSize: 26, color: colors.plum }}>Planera hela festen</h2>
         <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
           Spara dina fester, bocka av en checklista, håll koll på budgeten, skriv anteckningar och samla leverantörerna du gillar. Allt med ett gratis konto.
         </p>
@@ -7024,6 +7111,7 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
             Logga in
           </button>
         </div>
+      </div>
       </div>
     );
   }
@@ -7045,9 +7133,11 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
 
   if (!ev) {
     return (
-      <div className="mx-auto max-w-xl px-6 pb-24 pt-14 text-center sm:px-10">
-        <p style={{ fontFamily: hand, fontSize: 28, color: colors.lilacDeep }}>nu börjar det roliga</p>
-        <h1 style={{ fontFamily: serif, fontSize: 32, color: colors.plum }}>Min planering</h1>
+      <div className="mx-auto max-w-3xl px-5 pb-24 pt-8 sm:px-8">
+        <h1 className="text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Min fest</h1>
+        {board}
+      <div className="mx-auto mt-10 max-w-xl text-center">
+        <h2 style={{ fontFamily: serif, fontSize: 26, color: colors.plum }}>Skapa din fest</h2>
         <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
           Skapa din första fest, så får du checklista, budget och anteckningsblock på ett ställe.
         </p>
@@ -7060,6 +7150,7 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
           </p>
         )}
         {createModal}
+      </div>
       </div>
     );
   }
@@ -7137,6 +7228,7 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
   };
 
   const tabs = [
+    { id: "vendors", label: "Leverantörer", icon: PartyPopper, count: cart.length },
     { id: "checklist", label: "Checklista", icon: ListChecks, count: open.length },
     { id: "budget", label: "Budget", icon: Wallet },
     { id: "guests", label: "Gäster", icon: Users, count: ev.guestList.length },
@@ -7146,7 +7238,7 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
 
   return (
     <div className="mx-auto max-w-3xl px-6 pb-28 pt-8 sm:px-10">
-      <p style={{ fontFamily: hand, fontSize: 24, color: colors.lilacDeep }}>min planering</p>
+      <h1 className="mb-3 text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Min fest</h1>
 
       {events.length > 1 && (
         <div className="mb-3 flex flex-wrap gap-2">
@@ -7216,6 +7308,8 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
           );
         })}
       </div>
+
+      {tab === "vendors" && board}
 
       {tab === "checklist" && (
         <div className="mt-5">
@@ -10263,6 +10357,33 @@ export default function App() {
       })
       .slice(0, 4);
   }, [customerProviders]);
+  const goBuilder = () => {
+    setView("builder");
+    setSwapContext(null);
+    setMobileMenuOpen(false);
+    window.scrollTo(0, 0);
+  };
+  const goExplore = (categoryId) => {
+    setParty((p) => ({ ...p, categories: categoryId ? [categoryId] : [] }));
+    setSwapContext(null);
+    setView("results");
+    setMobileMenuOpen(false);
+    window.scrollTo(0, 0);
+  };
+  const openMessages = () => {
+    if (!session) {
+      openAuthModal("signin");
+      return;
+    }
+    setPanelOpen((o) => !o);
+  };
+  const goMinSida = () => {
+    if (!session) {
+      openAuthModal("signin");
+      return;
+    }
+    goMinaBokningar();
+  };
   const goPlanning = () => {
     setView("planning");
     setMobileMenuOpen(false);
@@ -10949,59 +11070,47 @@ export default function App() {
     vendorMode || ["vendorPending", "vendorDashboard", "vendorProfileEditor", "vendorProfilePreview", "vendorBookings", "vendorInbox"].includes(view);
   const leavePage = () => (vendorMode ? goVendorDashboard() : goHome());
   useEffect(() => {
-    if (vendorMode && ["home", "results", "profile", "checkout", "confirmation", "planning", "minaBokningar", "vendorIntro"].includes(view)) setView("vendorDashboard");
+    if (vendorMode && ["home", "builder", "results", "profile", "checkout", "confirmation", "planning", "minaBokningar", "vendorIntro"].includes(view)) setView("vendorDashboard");
   }, [vendorMode, view]);
 
+  const activeTab = panelOpen
+    ? "messages"
+    : view === "home" || view === "builder"
+    ? "home"
+    : view === "results" || view === "profile"
+    ? "explore"
+    : view === "planning"
+    ? "minfest"
+    : view === "minaBokningar" || view === "myAccount"
+    ? "minsida"
+    : null;
+  const navItem = (id, label, onClick, badge) => (
+    <button
+      onClick={() => {
+        if (id !== "messages") setPanelOpen(false);
+        onClick();
+      }}
+      className="relative flex items-center gap-1.5 py-1"
+      style={{ color: activeTab === id ? colors.coral : colors.plum, fontWeight: activeTab === id ? 700 : 500, borderBottom: `2px solid ${activeTab === id ? colors.coral : "transparent"}` }}
+    >
+      {label}
+      {badge > 0 && (
+        <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold" style={{ backgroundColor: colors.korall, color: colors.white }}>
+          {badge}
+        </span>
+      )}
+    </button>
+  );
   const centerNavLinks = (
     <>
-      <button
-        onClick={() => {
-          goHome();
-          setMobileMenuOpen(false);
-        }}
-      >
-        Bygg din fest
-      </button>
-      <button
-        onClick={() => {
-          setParty((p) => ({ ...p, categories: [] }));
-          setSwapContext(null);
-          setView("results");
-          setMobileMenuOpen(false);
-        }}
-      >
-        Leverantörer
-      </button>
-      <button
-        onClick={() => {
-          goMinaBokningar();
-        }}
-      >
-        Mina bokningar
-      </button>
-      <button onClick={goPlanning} className="flex items-center gap-1.5">
-        Min planering
-        {favoriteIds.size > 0 && <Heart size={12} fill={BADGE_RED} color={BADGE_RED} />}
-      </button>
-      <button
-        onClick={() => {
-          if (view !== "home") goHome();
-          setMobileMenuOpen(false);
-          setTimeout(() => howItWorksRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-        }}
-      >
-        Så fungerar det
-      </button>
-      <button
-        onClick={() => {
-          setSupportOpen(true);
-          setMobileMenuOpen(false);
-        }}
-      >
-        Support
-      </button>
+      {navItem("home", "Hem", goHome)}
+      {navItem("explore", "Utforska", () => goExplore(null))}
+      {navItem("minfest", "Min fest", goPlanning, cartItems.length)}
+      {navItem("messages", "Meddelanden", openMessages, unreadTotal)}
+      {navItem("minsida", "Min sida", goMinSida)}
     </>
   );
+  const showTabBar = !isVendorPortalView && !isAdminView && !["builder", "checkout", "confirmation", "vendorSignup", "vendorAwaitingConfirmation", "resetPassword", "rsvp", "rsvpOptout"].includes(view);
 
   const minFestButton = (
     <button
@@ -11097,7 +11206,7 @@ export default function App() {
 
   return (
     <FavoritesContext.Provider value={{ ids: favoriteIds, toggle: toggleFavorite }}>
-    <div style={{ fontFamily: sans, backgroundColor: colors.cream, minHeight: "100%", color: colors.plum }}>
+    <div className={showTabBar ? "pb-20 lg:pb-0" : ""} style={{ fontFamily: sans, backgroundColor: colors.cream, minHeight: "100%", color: colors.plum }}>
       <style>{`
         input[type="checkbox"], input[type="radio"] { accent-color: #7D2248; }
         input[type="date"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator { cursor: pointer; }
@@ -11145,7 +11254,6 @@ export default function App() {
                     Logga in
                   </button>
                 )}
-                {minFestButton}
                 {profile?.role === "admin" && (
                   <button onClick={goAdminDashboard} className="flex items-center gap-1 text-xs" style={{ color: colors.plumSoft, opacity: 0.6 }}>
                     <Shield size={12} /> Admin
@@ -11155,10 +11263,15 @@ export default function App() {
             )}
           </div>
           <div className="flex items-center gap-2 lg:hidden">
-            {!isVendorPortalView && !isAdminView && minFestButton}
-            <button className="-m-2 p-2" onClick={() => setMobileMenuOpen((v) => !v)} aria-label="Meny">
-              {mobileMenuOpen ? <X size={22} color={colors.plum} /> : <Menu size={22} color={colors.plum} />}
-            </button>
+            {isVendorPortalView || isAdminView ? (
+              <button className="-m-2 p-2" onClick={() => setMobileMenuOpen((v) => !v)} aria-label="Meny">
+                {mobileMenuOpen ? <X size={22} color={colors.plum} /> : <Menu size={22} color={colors.plum} />}
+              </button>
+            ) : !session ? (
+              <button onClick={() => openAuthModal("signin")} className="rounded-full px-4 py-2 text-sm font-semibold" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.white, color: colors.plum }}>
+                Logga in
+              </button>
+            ) : null}
           </div>
         </div>
         {mobileMenuOpen && (
@@ -11252,16 +11365,22 @@ export default function App() {
         <HomeView
           party={party}
           setParty={setParty}
-          onSubmit={startBuilder}
+          onBuild={goBuilder}
+          onExplore={() => goExplore(null)}
+          onExploreCategory={goExplore}
           howItWorksRef={howItWorksRef}
           onVendorIntro={vendorMode ? null : goVendorIntro}
           session={session}
+          profile={profile}
           upcomingEvent={upcomingEvent}
           onPlanning={goPlanning}
+          onToggleTask={(eventId, taskId) => taskApi.toggle(eventId, taskId)}
           popular={popularProviders}
           onViewProvider={viewProfile}
         />
       )}
+
+      {view === "builder" && <BuilderView party={party} setParty={setParty} onSubmit={startBuilder} onClose={goHome} />}
 
       {view === "results" && (
         <ResultsView
@@ -11364,11 +11483,31 @@ export default function App() {
           party={party}
           onLogin={() => openAuthModal("signin")}
           onSignup={() => openAuthModal("signup")}
+          cart={cart}
+          cartTotal={total}
+          onOpenCart={() => setCartOpen(true)}
+          onExploreCategory={goExplore}
         />
       )}
 
       {view === "minaBokningar" && (
-        <MinaBokningarView bookings={bookings} onCancelBooking={cancelBooking} onReviewItem={openReview} onChatItem={openBookingChat} />
+        <>
+          {session && (
+            <MinSidaHeader
+              name={profile?.full_name || ""}
+              email={session.user?.email || ""}
+              isAdmin={profile?.role === "admin"}
+              hasVendor={!!submittedVendor}
+              onAccount={goMyAccount}
+              onSaved={goPlanning}
+              onSupport={() => setSupportOpen(true)}
+              onVendor={goVendorIntro}
+              onAdmin={goAdminDashboard}
+              onSignOut={signOut}
+            />
+          )}
+          <MinaBokningarView bookings={bookings} onCancelBooking={cancelBooking} onReviewItem={openReview} onChatItem={openBookingChat} />
+        </>
       )}
 
       {view === "vendorIntro" && <VendorIntroView onStart={startVendorSignup} />}
@@ -11504,7 +11643,7 @@ export default function App() {
 
       {vendorMode && <VendorFooter onOpenTerms={goTerms} onOpenPrivacy={goPrivacyPolicy} onOpenCookies={goCookiePolicy} onSupport={() => setSupportOpen(true)} />}
 
-      {!isVendorPortalView && !isAdminView && !["checkout", "confirmation", "vendorSignup", "vendorAwaitingConfirmation", "resetPassword", "privacyPolicy", "terms", "cookiePolicy"].includes(view) && (
+      {!isVendorPortalView && !isAdminView && !["builder", "checkout", "confirmation", "vendorSignup", "vendorAwaitingConfirmation", "resetPassword", "privacyPolicy", "terms", "cookiePolicy"].includes(view) && (
         <Footer
           onGoHome={goHome}
           onBrowse={() => {
@@ -11526,13 +11665,13 @@ export default function App() {
 
       {/* Floating cart button */}
       {cartItems.length > 0 &&
-        !["confirmation", "vendorIntro", "vendorSignup"].includes(view) &&
+        !["confirmation", "vendorIntro", "vendorSignup", "builder", "planning"].includes(view) &&
         !isVendorPortalView &&
         !isAdminView &&
         !cartOpen && (
         <button
           onClick={() => setCartOpen(true)}
-          className="fixed bottom-6 right-6 z-30 flex items-center gap-2 rounded-full px-5 py-3 shadow-lg"
+          className="fixed bottom-24 right-4 z-30 flex items-center gap-2 rounded-full px-5 py-3 shadow-lg lg:bottom-6 lg:right-6"
           style={{ backgroundColor: colors.coral, color: colors.white }}
         >
           <ShoppingBag size={18} />
@@ -11588,6 +11727,7 @@ export default function App() {
             onOpen={openConversationFromPanel}
             onClose={() => setPanelOpen(false)}
           />
+          <div className={isVendorPortalView ? "" : "hidden lg:block"}>
           <ChatBubble
             count={unreadTotal}
             onClick={() => {
@@ -11599,7 +11739,31 @@ export default function App() {
               }
             }}
           />
+          </div>
         </>
+      )}
+      {showTabBar && (
+        <BottomTabBar
+          active={activeTab}
+          unread={unreadTotal}
+          onHome={() => {
+            setPanelOpen(false);
+            goHome();
+          }}
+          onExplore={() => {
+            setPanelOpen(false);
+            goExplore(null);
+          }}
+          onMinFest={() => {
+            setPanelOpen(false);
+            goPlanning();
+          }}
+          onMessages={openMessages}
+          onMinSida={() => {
+            setPanelOpen(false);
+            goMinSida();
+          }}
+        />
       )}
       <AuthModal
         open={authModalOpen}
