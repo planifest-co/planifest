@@ -41,6 +41,9 @@ import {
   Pencil,
   Home,
   User,
+  Projector,
+  Mic,
+  Trophy,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -1298,6 +1301,9 @@ const CATEGORIES = [
   { id: "tarta", label: "Tårta", icon: Cake, tagline: "Den söta höjdpunkten", tint: "peachSoft" },
   { id: "blommor", label: "Blommor", icon: Flower2, tagline: "Naturliga detaljer som lyfter känslan", tint: "pinkSoft" },
   { id: "uthyrning", label: "Uthyrning", icon: PackageOpen, tagline: "Allt praktiskt på plats", tint: "coralSoft" },
+  { id: "av", label: "AV & teknik", icon: Projector, tagline: "Ljud, bild och teknik som bara fungerar", tint: "lilacSoft" },
+  { id: "talare", label: "Talare & moderator", icon: Mic, tagline: "Någon som leder, inspirerar och håller tiden", tint: "peachSoft" },
+  { id: "teambuilding", label: "Teambuilding", icon: Trophy, tagline: "Aktiviteter som samlar gruppen", tint: "pinkSoft" },
 ];
 
 const catMap = Object.fromEntries(CATEGORIES.map((c) => [c.id, c]));
@@ -1309,7 +1315,7 @@ const OCCASIONS = [
   { id: "baptism", label: "Dop", emoji: "👶", boardLabel: "Dop" },
   { id: "graduation", label: "Student", emoji: "🎓", boardLabel: "Studentfest" },
   { id: "party", label: "Fest", emoji: "🎉", boardLabel: "Fest" },
-  { id: "corporate", label: "Företagsevent", emoji: "🏢", boardLabel: "Företagsevent" },
+  { id: "corporate", label: "Företagsevent & konferens", emoji: "🏢", boardLabel: "Företagsevent" },
   { id: "other", label: "Annat", emoji: "✨", boardLabel: "Din fest" },
 ];
 const occasionMap = Object.fromEntries(OCCASIONS.map((o) => [o.id, o]));
@@ -2463,10 +2469,10 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
               Vad ska ni fira?
             </h1>
             <p className="mt-3 max-w-lg text-base sm:text-lg" style={{ color: colors.plumSoft, lineHeight: 1.55 }}>
-              Hitta, jämför och boka allt till festen – på ett ställe. Just nu i Göteborg.
+              Från babyshower och dop till kickoff och konferens – hitta, jämför och boka allt på ett ställe. Just nu i Göteborg.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
-              {["babyshower", "baptism", "birthday", "other"].map((id) => occasionMap[id]).map((o) => (
+              {["babyshower", "baptism", "birthday", "corporate", "other"].map((id) => occasionMap[id]).map((o) => (
                 <PillChip key={o.id} active={party.occasion === o.id} onClick={() => setParty((p) => ({ ...p, occasion: p.occasion === o.id ? null : o.id }))}>
                   {o.label}
                 </PillChip>
@@ -2527,7 +2533,7 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
             <div className="sm:flex-1">
               <h2 className="text-2xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Hela festen på ett ställe</h2>
               <p className="mt-1 text-sm leading-relaxed sm:text-base" style={{ color: colors.plumSoft }}>
-                När du bygger din fest får du en egen planeringssida – gratis.
+                Oavsett om det är en fest eller ett företagsevent får du en egen planeringssida – gratis.
               </p>
               <button onClick={onPlanning} className="mt-4 inline-flex items-center gap-1.5 text-sm font-bold" style={{ color: colors.coral }}>
                 Se hur det fungerar <ArrowRight size={15} />
@@ -2573,7 +2579,7 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
           <SectionTitle>Så funkar det</SectionTitle>
           <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
             {[
-              { n: 1, title: "Bygg din fest", text: "Välj datum, antal gäster och vad du behöver – vi visar vilka som är lediga." },
+              { n: 1, title: "Bygg ditt event", text: "Fest, kickoff eller konferens – välj datum, antal gäster och vad du behöver, så visar vi vilka som är lediga." },
               { n: 2, title: "Jämför & fråga", text: "Kika på bilder och omdömen, chatta med leverantören eller begär offert." },
               { n: 3, title: "Boka & fira", text: "Godkänn offerten, fira din dag och lämna ett omdöme efteråt." },
             ].map((st) => (
@@ -2594,8 +2600,8 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
           <div className="flex flex-col items-start gap-3 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-10" style={{ backgroundColor: colors.lilacSoft, border: `1px solid ${colors.lilac}`, borderRadius: 24 }}>
             <div className="max-w-lg">
               <p className="text-xs font-bold uppercase" style={{ letterSpacing: "0.12em", color: colors.coral }}>För leverantörer</p>
-              <h2 className="mt-1 text-2xl sm:text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum, lineHeight: 1.2 }}>Visa upp ditt arbete där festplanerarna letar</h2>
-              <p className="mt-2 text-sm sm:text-base" style={{ color: colors.plumSoft }}>Samla bilder, omdömen och bokningar på en egen profil – och låt kunderna boka dig direkt.</p>
+              <h2 className="mt-1 text-2xl sm:text-3xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum, lineHeight: 1.2 }}>Visa upp ditt arbete där kunderna letar</h2>
+              <p className="mt-2 text-sm sm:text-base" style={{ color: colors.plumSoft }}>Privatpersoner och företag hittar dig här. Samla bilder, omdömen och förfrågningar på en egen profil.</p>
             </div>
             <button onClick={onVendorIntro} className="mt-2 flex-shrink-0 rounded-full px-6 py-3 text-sm font-bold sm:mt-0" style={{ backgroundColor: colors.plum, color: colors.white }}>
               Bli leverantör
@@ -2627,14 +2633,14 @@ function BuilderView({ party, setParty, onSubmit, onClose, events = [], activeEv
         </div>
       )}
       <h1 className="mt-4 text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum, lineHeight: 1.15 }}>
-        Berätta om festen
+        Berätta om ert event
       </h1>
       <p className="mt-2 text-base" style={{ color: colors.plumSoft }}>
         Så visar vi bara leverantörer som är lediga och passar.
       </p>
 
       <fieldset className="mt-7">
-        <legend className="mb-3 text-[15px] font-bold" style={{ color: colors.plum }}>Vad firar ni?</legend>
+        <legend className="mb-3 text-[15px] font-bold" style={{ color: colors.plum }}>Vad är det för tillfälle?</legend>
         <div className="flex flex-wrap gap-2">
           {OCCASIONS.map((o) => (
             <PillChip key={o.id} active={party.occasion === o.id} onClick={() => setParty((p) => ({ ...p, occasion: p.occasion === o.id ? null : o.id }))}>
@@ -3562,6 +3568,15 @@ function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddo
 }
 
 function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConfirm, onLogin, guestError, guestSubmitting, guestBlockReason, onOpenTerms, events = [], eventChoice, onEventChoice }) {
+  const [forCompany, setForCompany] = useState(party.occasion === "corporate");
+  const [company, setCompany] = useState({ name: "", org: "", address: "", reference: "" });
+  const orgOk = /^[0-9]{6}-?[0-9]{4}$/.test(company.org.trim());
+  const companyOk = !forCompany || (company.name.trim() && orgOk && company.address.trim());
+  const companyPayload = forCompany
+    ? { company_name: company.name.trim(), org_number: company.org.trim(), invoice_address: company.address.trim(), invoice_reference: company.reference.trim() || null }
+    : null;
+  const setC = (k) => (e) => setCompany((c) => ({ ...c, [k]: e.target.value }));
+  const cField = { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white };
   const [accepted, setAccepted] = useState(false);
   const [gName, setGName] = useState("");
   const [gEmail, setGEmail] = useState("");
@@ -3664,6 +3679,36 @@ function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConf
         </label>
       )}
 
+      {!isGuest && (
+        <div className="mt-4 rounded-2xl p-4" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}` }}>
+          <label className="flex items-center gap-3 text-sm font-semibold" style={{ color: colors.plum }}>
+            <input type="checkbox" checked={forCompany} onChange={(e) => setForCompany(e.target.checked)} />
+            Jag bokar för ett företag
+          </label>
+          {forCompany && (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+                Företagsnamn
+                <input value={company.name} onChange={setC("name")} maxLength={120} autoComplete="organization" className="rounded-xl px-3 py-2 text-sm font-normal" style={cField} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
+                Organisationsnummer
+                <input value={company.org} onChange={setC("org")} maxLength={11} inputMode="numeric" placeholder="556677-8899" className="rounded-xl px-3 py-2 text-sm font-normal" style={cField} />
+                {company.org.trim() && !orgOk && <span className="font-normal" style={{ color: colors.coralDeep }}>Skriv 10 siffror, t.ex. 556677-8899</span>}
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold sm:col-span-2" style={{ color: colors.plum }}>
+                Fakturaadress
+                <input value={company.address} onChange={setC("address")} maxLength={300} placeholder="Gata, postnummer och ort – eller e-post för faktura" className="rounded-xl px-3 py-2 text-sm font-normal" style={cField} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold sm:col-span-2" style={{ color: colors.plum }}>
+                Er referens (valfritt)
+                <input value={company.reference} onChange={setC("reference")} maxLength={120} placeholder="Namn eller referenskod" className="rounded-xl px-3 py-2 text-sm font-normal" style={cField} />
+              </label>
+            </div>
+          )}
+        </div>
+      )}
+
       <label className="mt-4 flex items-start gap-3 text-sm" style={{ color: colors.plum }}>
         <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} className="mt-1" />
         Jag har läst och godkänner Planifests{" "}
@@ -3694,10 +3739,10 @@ function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConf
         </>
       ) : (
         <button
-          disabled={!accepted || cart.length === 0}
-          onClick={onConfirm}
+          disabled={!accepted || cart.length === 0 || !companyOk}
+          onClick={() => onConfirm(companyPayload)}
           className="mt-5 flex w-full items-center justify-center gap-2 rounded-full py-3 text-base font-semibold"
-          style={{ backgroundColor: colors.coral, color: colors.white, opacity: accepted && cart.length > 0 ? 1 : 0.45 }}
+          style={{ backgroundColor: colors.coral, color: colors.white, opacity: accepted && cart.length > 0 && companyOk ? 1 : 0.45 }}
         >
           Boka &amp; betala
         </button>
@@ -5588,6 +5633,7 @@ function getVendorBookingItems(vendor, bookings) {
           endTime: b.endTime,
           guests: b.guests,
           occasion: b.occasion,
+          company: b.company || null,
         }))
     );
 }
@@ -5670,7 +5716,7 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
   const card = { backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 22 };
   const banner = {
     pending: { bg: colors.lilacSoft, title: "Din ansökan granskas", text: "Vi går igenom din ansökan och mejlar dig så fort den är klar. Du kan fylla i din profil under tiden." },
-    rejected: { bg: colors.coralSoft, title: "Din ansökan godkändes inte den här gången", text: "Du är välkommen att höra av dig om du vill veta mer eller komplettera dina uppgifter." },
+    rejected: { bg: colors.coralSoft, title: "Tyvärr nekades din ansökan", text: "Vill du ändra din ansökan? Gå igenom din profil, gör dina ändringar och skicka in den igen – så tittar vi på den på nytt." },
   }[vendor.status];
 
   const links = [
@@ -5734,9 +5780,14 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
           <p className="font-semibold" style={{ color: colors.plum }}>{banner.title}</p>
           <p className="mt-1 text-sm" style={{ color: colors.plum }}>{banner.text}</p>
           {vendor.status === "rejected" && (
-            <a href="mailto:info@planifest.se" className="mt-3 inline-block rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
-              Kontakta oss
-            </a>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button onClick={onEditProfile} className="rounded-full px-4 py-2.5 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+                Ändra ansökan
+              </button>
+              <a href="mailto:info@planifest.se" className="rounded-full px-4 py-2.5 text-sm font-semibold" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.white, color: colors.plum }}>
+                Kontakta oss
+              </a>
+            </div>
           )}
         </div>
       )}
@@ -5768,6 +5819,11 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
                     <span className="mt-0.5 block text-sm" style={{ color: colors.plumSoft }}>
                       {fmtDate(i.date)} · {hhmm(i.startTime)}–{hhmm(i.endTime)} · {i.guests} gäster
                     </span>
+                    {i.company && (
+                      <span className="mt-1.5 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+                        <Briefcase size={12} /> Företag: {i.company.name} · {i.company.org}
+                      </span>
+                    )}
                   </span>
                   <span className="flex-shrink-0 font-bold" style={{ color: colors.plum }}>{formatKr(i.price)}</span>
                 </div>
@@ -5959,6 +6015,7 @@ function VendorProfileEditorView({
   onDashboard,
   onShowToast,
   onRequestForm,
+  onResubmit,
 }) {
   const [imageUrl, setImageUrl] = useState("");
   const [uploading, setUploading] = useState(0);
@@ -6366,9 +6423,15 @@ function VendorProfileEditorView({
         >
           Förhandsvisa profil
         </button>
-        <button onClick={onDashboard} className="flex-1 rounded-full px-5 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
-          Klart, till min profil
-        </button>
+        {vendor.status === "rejected" ? (
+          <button onClick={onResubmit} className="flex-1 rounded-full px-5 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+            Spara ändringar och skicka om ansökan
+          </button>
+        ) : (
+          <button onClick={onDashboard} className="flex-1 rounded-full px-5 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+            Klart, till min profil
+          </button>
+        )}
       </div>
     </div>
   );
@@ -10166,7 +10229,7 @@ export default function App() {
     if (!vendorId || vendorId.startsWith("VND-") || !session?.access_token) return;
     if (!["vendorDashboard", "vendorBookings"].includes(view)) return;
     supabaseRestRequest(
-      `/booking_items?vendor_id=eq.${vendorId}&select=*,bookings(id,booking_number,date,start_time,end_time,guests,occasion,cancelled,customer_id)`,
+      `/booking_items?vendor_id=eq.${vendorId}&select=*,bookings(id,booking_number,date,start_time,end_time,guests,occasion,cancelled,customer_id,company_name,org_number,invoice_address,invoice_reference)`,
       session.access_token
     ).then(({ data, error }) => {
       if (error || !data) return;
@@ -10191,7 +10254,7 @@ export default function App() {
             const newItems = [...next[idx].items];
             if (itemIdx >= 0) newItems[itemIdx] = localItem;
             else newItems.push(localItem);
-            next[idx] = { ...next[idx], items: newItems, cancelled: b.cancelled, bookingId: b.id, isGuest: !b.customer_id };
+            next[idx] = { ...next[idx], items: newItems, cancelled: b.cancelled, bookingId: b.id, isGuest: !b.customer_id, company: b.company_name ? { name: b.company_name, org: b.org_number, address: b.invoice_address, reference: b.invoice_reference } : null };
           } else {
             next.push({
               bookingId: b.id,
@@ -10204,6 +10267,7 @@ export default function App() {
               occasion: b.occasion,
               cancelled: b.cancelled,
               completed: false,
+              company: b.company_name ? { name: b.company_name, org: b.org_number, address: b.invoice_address, reference: b.invoice_reference } : null,
               items: [localItem],
             });
           }
@@ -10649,7 +10713,8 @@ export default function App() {
     setView("checkout");
   };
 
-  const confirmBooking = async () => {
+  const confirmBooking = async (company = null) => {
+    const companyFields = company && typeof company === "object" && company.company_name ? company : {};
     if (!session?.access_token) {
       openAuthModal("signin");
       showToast("Logga in för att slutföra bokningen");
@@ -10666,6 +10731,7 @@ export default function App() {
         end_time: party.endTime || null,
         guests: party.guests,
         occasion: party.occasion,
+        ...companyFields,
       }),
     });
     if (bookingError || !bookingRows?.[0]) {
@@ -11883,6 +11949,19 @@ export default function App() {
     setView(nextView);
   };
   const saveAndGoDashboard = () => saveVendorProfileAndGo("vendorDashboard");
+  // A rejected vendor saves the changes and sends the application in again (rejected -> pending).
+  const resubmitVendorApplication = async () => {
+    if (!submittedVendor || !session?.access_token) return;
+    await saveVendorProfile(submittedVendor, session.access_token);
+    const { error } = await supabaseRestRequest(`/vendors?id=eq.${submittedVendor.id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ status: "pending" }) });
+    if (error) {
+      showToast("Ändringarna är sparade, men ansökan kunde inte skickas om. Försök igen.");
+      return;
+    }
+    setVendorApplications((list) => list.map((v) => (v.id === submittedVendor.id ? { ...v, status: "pending" } : v)));
+    showToast("Din ansökan är skickad igen ✓");
+    setView("vendorDashboard");
+  };
   const saveAndGoPreview = () => saveVendorProfileAndGo("vendorProfilePreview");
 
   const respondToBookingItem = async (bookingNumber, itemId, status) => {
@@ -12615,6 +12694,7 @@ export default function App() {
           onRemoveAddon={removeVendorAddon}
           onPreview={saveAndGoPreview}
           onDashboard={saveAndGoDashboard}
+          onResubmit={resubmitVendorApplication}
           onShowToast={showToast}
         />
       )}
