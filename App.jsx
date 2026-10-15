@@ -1080,6 +1080,8 @@ function mapDbVendorToLocal(dbVendor) {
     serviceArea: dbVendor.service_area_type ? { type: dbVendor.service_area_type, value: dbVendor.service_area_value } : null,
     categories: (dbVendor.vendor_categories || []).map((vc) => vc.category_id),
     status: dbVendor.status,
+    rejectionReason: dbVendor.rejection_reason || "",
+    resubmittedAt: dbVendor.resubmitted_at || null,
     blockedTimes: (dbVendor.blocked_times || []).map((bt) => ({
       id: bt.id,
       date: bt.date,
@@ -1098,6 +1100,7 @@ function mapDbVendorToLocal(dbVendor) {
         priceType: Number(s.price) > 0 ? s.price_type : "quote", // no price = price by agreement (shown to customers as a request)
         price: s.price,
         priceNote: s.price_note || "",
+        fromPrice: Number(s.from_price) > 0 ? Number(s.from_price) : "",
         category: s.category_id || "",
       })),
       addons: (dbVendor.addons || []).map((a) => ({ id: a.id, name: a.name || "", price: a.price })),
@@ -1237,6 +1240,7 @@ async function saveVendorProfile(vendor, accessToken) {
           description: s.description,
           price_type: s.priceType === "quote" ? "fixed" : s.priceType,
           price: s.priceType === "quote" ? 0 : Number(s.price) || 0,
+          from_price: s.priceType === "quote" && Number(s.fromPrice) > 0 ? Math.round(Number(s.fromPrice)) : null,
           price_note: s.priceNote,
         }))
       ),
@@ -1316,7 +1320,7 @@ const OCCASIONS = [
   { id: "graduation", label: "Student", emoji: "🎓", boardLabel: "Studentfest" },
   { id: "party", label: "Fest", emoji: "🎉", boardLabel: "Fest" },
   { id: "corporate", label: "Företagsevent & konferens", emoji: "🏢", boardLabel: "Företagsevent" },
-  { id: "other", label: "Annat", emoji: "✨", boardLabel: "Din fest" },
+  { id: "other", label: "Annat", emoji: "✨", boardLabel: "Mitt event" },
 ];
 const occasionMap = Object.fromEntries(OCCASIONS.map((o) => [o.id, o]));
 
@@ -1705,6 +1709,8 @@ function mapVendorToProviders(vendor, bookings, busyByVendor = {}) {
       .join(" ");
 
     const hasPrice = pricing.amount > 0;
+    const quoteFroms = (categoryServices.length ? categoryServices : services.filter((s) => !s.category)).map((s) => Number(s.fromPrice) || 0).filter((n) => n > 0);
+    const quoteFrom = quoteFroms.length ? Math.min(...quoteFroms) : 0;
     const request = getRequestConfig(vendor.requestForms, categoryId, hasPrice);
     // "from" price when there is no fixed price: the cheapest option of each required choice, added up
     const fieldsFrom = request.fields
@@ -1729,7 +1735,7 @@ function mapVendorToProviders(vendor, bookings, busyByVendor = {}) {
       serviceId: primaryService?.id || null,
       request,
       requestOnly: !request.direct,
-      fromPrice: hasPrice ? pricing.amount : fieldsFrom,
+      fromPrice: hasPrice ? pricing.amount : quoteFrom || fieldsFrom,
       seed: vendor.id,
       image: images[0],
       images,
@@ -2259,7 +2265,7 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
         ) : null}
         {inCart && !swapMode && (
           <span className="absolute bottom-2.5 right-2.5 flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ backgroundColor: colors.greenSoft, color: colors.green }}>
-            <Check size={12} /> I din fest
+            <Check size={12} /> Offert godkänd
           </span>
         )}
       </div>
@@ -2345,7 +2351,7 @@ function SectionTitle({ children, action }) {
 }
 
 // Chips for switching between the customer's parties, plus "Ny fest".
-function EventSwitcher({ events, activeId, onSelect, onNew, label = "Dina fester" }) {
+function EventSwitcher({ events, activeId, onSelect, onNew, label = "Dina event" }) {
   if (!events.length && !onNew) return null;
   return (
     <div>
@@ -2359,7 +2365,7 @@ function EventSwitcher({ events, activeId, onSelect, onNew, label = "Dina fester
         ))}
         {onNew && (
           <button onClick={onNew} className="flex flex-shrink-0 items-center gap-1.5 rounded-full px-4 py-2.5 text-sm font-semibold" style={{ border: `1.5px dashed ${colors.lilac}`, color: colors.coral, backgroundColor: "transparent" }}>
-            <Plus size={15} /> Ny fest
+            <Plus size={15} /> Nytt event
           </button>
         )}
       </div>
@@ -2394,13 +2400,13 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
             </h1>
           </div>
           <div className="mb-4">
-            <EventSwitcher events={events} activeId={ev.id} onSelect={onSelectEvent} onNew={onNewEvent} label={events.length > 1 ? "Dina fester" : null} />
+            <EventSwitcher events={events} activeId={ev.id} onSelect={onSelectEvent} onNew={onNewEvent} label={events.length > 1 ? "Dina event" : null} />
           </div>
           <button onClick={onPlanning} className="flex w-full flex-col gap-4 p-5 text-left sm:p-7" style={{ backgroundColor: colors.plum, color: colors.white, borderRadius: 26 }}>
             <span className="flex w-full items-start justify-between gap-4">
               <span className="flex min-w-0 flex-col gap-1">
-                <span className="text-xs font-semibold uppercase" style={{ letterSpacing: "0.12em", color: colors.lilacSoft }}>Din fest</span>
-                <span className="truncate" style={{ fontFamily: serif, fontWeight: 700, fontSize: 24, lineHeight: 1.15 }}>{ev.title || "Din fest"}</span>
+                <span className="text-xs font-semibold uppercase" style={{ letterSpacing: "0.12em", color: colors.lilacSoft }}>Ditt event</span>
+                <span className="truncate" style={{ fontFamily: serif, fontWeight: 700, fontSize: 24, lineHeight: 1.15 }}>{ev.title || "Ditt event"}</span>
                 <span className="text-sm" style={{ color: colors.lilacSoft }}>
                   {[formatEventDate(ev.date), ev.guests ? `${ev.guests} gäster` : null].filter(Boolean).join(" · ") || "Inget datum satt än"}
                 </span>
@@ -2415,7 +2421,7 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
             <span className="flex w-full flex-col gap-1.5">
               <span className="flex justify-between text-[13px]">
                 <span>{tasks.length ? `${done} av ${tasks.length} klara i checklistan` : "Din planering väntar"}</span>
-                <span className="font-semibold">Öppna Min fest →</span>
+                <span className="font-semibold">Öppna Mina event →</span>
               </span>
               {tasks.length > 0 && (
                 <span className="flex h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.18)" }}>
@@ -2426,7 +2432,7 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
           </button>
 
           <button onClick={onBuild} className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-full text-[15px] font-bold" style={{ backgroundColor: colors.coral, color: colors.white }}>
-            Hitta leverantörer till {ev.title || "festen"} <ArrowRight size={17} />
+            Hitta leverantörer till {ev.title || "eventet"} <ArrowRight size={17} />
           </button>
 
           {nextTasks.length > 0 && (
@@ -2483,7 +2489,7 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
               className="mt-6 flex w-full items-center justify-center gap-2 rounded-full py-4 text-base font-bold sm:w-auto sm:px-10"
               style={{ backgroundColor: colors.coral, color: colors.white }}
             >
-              Bygg din fest <ArrowRight size={18} />
+              Planera ditt event <ArrowRight size={18} />
             </button>
           </div>
         </section>
@@ -2564,7 +2570,7 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
               </button>
             }
           >
-            {ev ? "Förslag till din fest" : "Populära just nu"}
+            {ev ? "Förslag till ditt event" : "Populära just nu"}
           </SectionTitle>
           <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:gap-x-5 lg:grid-cols-4">
             {popular.map((p) => (
@@ -2751,7 +2757,7 @@ function BottomTabBar({ active, unread, onHome, onExplore, onMinFest, onMessages
   const items = [
     { id: "home", label: "Hem", icon: Home, onClick: onHome },
     { id: "explore", label: "Utforska", icon: Search, onClick: onExplore },
-    { id: "minfest", label: "Min fest", icon: PartyPopper, onClick: onMinFest },
+    { id: "minfest", label: "Mina event", icon: PartyPopper, onClick: onMinFest },
     { id: "messages", label: "Meddelanden", icon: MessageCircle, onClick: onMessages, badge: unread },
     { id: "minsida", label: "Min sida", icon: User, onClick: onMinSida },
   ];
@@ -2827,6 +2833,191 @@ function MinFestBoard({ cart, categories, total, onOpenCart, onExploreCategory }
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mina event → Leverantörer: one row per vendor with where things stand in plain words and the one thing
+// to do next, so nobody has to hunt between chats, quotes, the booking and Mina bokningar.
+// ---------------------------------------------------------------------------
+const VENDOR_STEP = {
+  quote_ready: { label: "Offert klar", bg: colors.peach, fg: colors.coralDeep, cta: "Se offerten", action: true, order: 1 },
+  replied_new: { label: "Nytt svar", bg: colors.peach, fg: colors.coralDeep, cta: "Läs svaret", action: true, order: 2 },
+  ready_to_book: { label: "Redo att boka", bg: colors.greenSoft, fg: colors.green, cta: "Boka nu", action: true, order: 3 },
+  declined: { label: "Kunde inte", bg: colors.coralSoft, fg: colors.coralDeep, cta: "Hitta ett alternativ", action: true, order: 4 },
+  waiting: { label: "Väntar på svar", bg: colors.lilacSoft, fg: colors.lilacDeep, cta: "Öppna chatten", order: 5 },
+  replied: { label: "Har svarat", bg: colors.lilacSoft, fg: colors.lilacDeep, cta: "Öppna chatten", order: 6 },
+  awaiting_confirm: { label: "Väntar på bekräftelse", bg: colors.lilacSoft, fg: colors.lilacDeep, cta: "Visa bokningen", order: 7 },
+  quote_accepted: { label: "Offert godkänd", bg: colors.greenSoft, fg: colors.green, cta: "Öppna chatten", order: 8 },
+  booked: { label: "Bokad ✓", bg: colors.greenSoft, fg: colors.green, cta: "Skriv till dem", order: 9 },
+  declined_quote: { label: "Du tackade nej", bg: colors.beige, fg: colors.plumSoft, cta: "Öppna chatten", order: 10 },
+};
+
+function sinceText(iso) {
+  if (!iso) return "";
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  return days <= 0 ? "idag" : days === 1 ? "igår" : `för ${days} dagar sedan`;
+}
+
+function buildVendorRows({ ev, statuses, bookings, cart, multipleEvents }) {
+  const rows = new Map();
+  const put = (key, row) => rows.set(key, { ...(rows.get(key) || {}), ...row });
+  const evBookings = (bookings || []).filter((b) => !b.cancelled && (!ev || b.eventId === ev.id || (!b.eventId && ev.date && b.date === ev.date)));
+  evBookings.forEach((b) =>
+    b.items.forEach((i) => {
+      if (i.status === "cancelled" || !i.vendorId) return;
+      const step = i.status === "confirmed" || i.status === "completed" ? "booked" : i.status === "declined" ? "declined" : "awaiting_confirm";
+      put(`${i.vendorId}-${i.category}`, { vendorId: i.vendorId, category: i.category, name: i.name, step, amount: Number(i.price) || 0, bookingNumber: b.bookingNumber });
+    })
+  );
+  (cart || []).forEach((p) => {
+    if (!p.vendorDbId) return;
+    const key = `${p.vendorDbId}-${p.category}`;
+    if (rows.has(key)) return;
+    put(key, { vendorId: p.vendorDbId, category: p.category, name: p.name, step: "ready_to_book", amount: p.pricing?.amount || 0 });
+  });
+  (statuses || []).forEach((s) => {
+    const forThisEvent = !ev || !multipleEvents || !s.brief_date || !ev.date || s.brief_date === ev.date;
+    if (!forThisEvent) return;
+    const key = `${s.vendor_id}-${s.category_id}`;
+    const base = { vendorId: s.vendor_id, category: s.category_id, name: s.vendor_name, conversationId: s.conversation_id, unread: s.unread, lastAt: s.last_at };
+    if (rows.has(key)) {
+      put(key, base);
+      return;
+    }
+    let step = "waiting";
+    let amount = 0;
+    if (s.open_quote_id) {
+      step = "quote_ready";
+      amount = Number(s.open_quote_amount) || 0;
+    } else if (s.accepted_quote_id) {
+      step = "quote_accepted";
+      amount = Number(s.accepted_quote_amount) || 0;
+    } else if (s.last_quote_status === "declined") step = "declined_quote";
+    else if (s.last_sender === "vendor") step = s.unread > 0 ? "replied_new" : "replied";
+    else if (!s.has_brief && !s.last_sender) return; // an empty chat that was opened but never used
+    put(key, { ...base, step, amount });
+  });
+  return [...rows.values()].sort((a, b) => VENDOR_STEP[a.step].order - VENDOR_STEP[b.step].order);
+}
+
+function VendorStatusBoard({ ev, statuses, bookings, cart, cartTotal, multipleEvents, providers, categories, onOpenConversation, onOpenCart, onExploreCategory, onGoBookings }) {
+  const rows = buildVendorRows({ ev, statuses, bookings, cart, multipleEvents });
+  const todo = rows.filter((r) => VENDOR_STEP[r.step].action).length;
+  const covered = new Set(rows.filter((r) => !["declined", "declined_quote"].includes(r.step)).map((r) => r.category));
+  const missing = (categories || []).filter((c) => !covered.has(c));
+  const ready = rows.filter((r) => r.step === "ready_to_book");
+
+  const detail = (r) => {
+    switch (r.step) {
+      case "quote_ready":
+        return `${formatKr(r.amount)} · titta på vad som ingår och godkänn`;
+      case "replied_new":
+        return `${r.unread} ${r.unread === 1 ? "nytt meddelande" : "nya meddelanden"}`;
+      case "ready_to_book":
+        return `Offerten på ${formatKr(r.amount)} är godkänd. Boka för att säkra datumet.`;
+      case "declined":
+        return `Kunde inte ta uppdraget. Välj en annan ${(catMap[r.category]?.label || "leverantör").toLowerCase()}.`;
+      case "waiting":
+        return `Förfrågan skickad ${sinceText(r.lastAt)}. De flesta svarar inom ett dygn.`;
+      case "replied":
+        return "Har svarat i chatten. Offerten kommer där.";
+      case "awaiting_confirm":
+        return `Bokning ${r.bookingNumber} skickad. Leverantören bekräftar inom 24 timmar.`;
+      case "quote_accepted":
+        return `Du har godkänt offerten på ${formatKr(r.amount)}.`;
+      case "booked":
+        return r.amount ? `${formatKr(r.amount)} · bokning ${r.bookingNumber}` : `Bokning ${r.bookingNumber}`;
+      default:
+        return "";
+    }
+  };
+  const act = (r) => {
+    if (r.step === "ready_to_book") return onOpenCart();
+    if (r.step === "declined") return onExploreCategory(r.category);
+    if (r.step === "awaiting_confirm" || (r.step === "booked" && !r.conversationId)) return onGoBookings();
+    if (r.conversationId) return onOpenConversation(r);
+    return onGoBookings();
+  };
+
+  if (rows.length === 0) {
+    return (
+      <div className="mt-5 p-6 text-center" style={{ backgroundColor: colors.white, border: `1px dashed ${colors.lilac}`, borderRadius: 20 }}>
+        <p className="text-[15px] font-semibold" style={{ color: colors.plum }}>Inga leverantörer än</p>
+        <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>Hitta lediga leverantörer och skicka en förfrågan. Här ser du sedan vem som har svarat och vad som är bokat.</p>
+        <button onClick={() => onExploreCategory(null)} className="mt-4 rounded-full px-5 py-2.5 text-sm font-bold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+          Hitta leverantörer
+        </button>
+        {missing.length > 0 && (
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {missing.map((id) => (
+              <button key={id} onClick={() => onExploreCategory(id)} className="rounded-full px-3 py-1.5 text-xs font-semibold" style={{ border: `1.5px dashed ${colors.lilac}`, color: colors.plum }}>
+                + {catMap[id]?.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5">
+      <p className="text-sm font-semibold" style={{ color: todo ? colors.coralDeep : colors.plumSoft }}>
+        {todo ? `${todo} ${todo === 1 ? "sak väntar" : "saker väntar"} på dig` : "Inget du behöver göra just nu"}
+      </p>
+      <div className="mt-3 space-y-2.5">
+        {rows.map((r) => {
+          const meta = VENDOR_STEP[r.step];
+          const prov = (providers || []).find((p) => p.vendorDbId === r.vendorId && p.category === r.category) || (providers || []).find((p) => p.vendorDbId === r.vendorId);
+          return (
+            <div
+              key={`${r.vendorId}-${r.category}`}
+              className="flex items-center gap-3 p-3"
+              style={{ backgroundColor: colors.white, border: `1.5px solid ${meta.action ? colors.korall : colors.beige}`, borderRadius: 20 }}
+            >
+              {prov?.image ? (
+                <img src={prov.image} alt="" className="h-12 w-12 flex-shrink-0 rounded-full object-cover" />
+              ) : (
+                <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full text-lg" style={{ backgroundColor: colors.coralSoft, fontFamily: serif, fontWeight: 700, color: colors.coral }}>
+                  {(r.name || "?").charAt(0).toUpperCase()}
+                </span>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="truncate text-[15px] font-semibold" style={{ color: colors.plum }}>{r.name}</span>
+                  <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ backgroundColor: meta.bg, color: meta.fg }}>{meta.label}</span>
+                </div>
+                <p className="text-xs" style={{ color: colors.plumSoft }}>{catMap[r.category]?.label}</p>
+                <p className="mt-0.5 text-[13px] leading-snug" style={{ color: colors.plum }}>{detail(r)}</p>
+                <button
+                  onClick={() => act(r)}
+                  className="mt-2 rounded-full px-4 py-2 text-xs font-bold"
+                  style={meta.action ? { backgroundColor: colors.coral, color: colors.white } : { border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}
+                >
+                  {meta.cta}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {ready.length > 1 && (
+        <button onClick={onOpenCart} className="mt-4 h-12 w-full rounded-full text-[15px] font-bold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+          Boka alla {ready.length} · {formatKr(cartTotal)}
+        </button>
+      )}
+      <div className="mt-4 flex flex-wrap gap-2">
+        {missing.map((id) => (
+          <button key={id} onClick={() => onExploreCategory(id)} className="rounded-full px-3 py-1.5 text-xs font-semibold" style={{ border: `1.5px dashed ${colors.lilac}`, color: colors.plum }}>
+            + {catMap[id]?.label}
+          </button>
+        ))}
+        <button onClick={() => onExploreCategory(null)} className="rounded-full px-3 py-1.5 text-xs font-semibold" style={{ border: `1.5px dashed ${colors.lilac}`, color: colors.plum }}>
+          + Hitta fler leverantörer
+        </button>
+      </div>
     </div>
   );
 }
@@ -3059,11 +3250,11 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
   const askForQuote = () => (provider.request && provider.vendorDbId ? setRequestOpen(true) : onOpenChat(provider));
   const primaryButton = inCart ? (
     <span className={`${btnBase} flex-1`} style={{ backgroundColor: colors.greenSoft, color: colors.green }}>
-      <Check size={16} /> Offert accepterad
+      <Check size={16} /> Offert godkänd
     </span>
   ) : (
     <button onClick={askForQuote} className={`${btnBase} flex-1`} style={{ backgroundColor: colors.coral, color: colors.white }}>
-      Begär offert
+      Skicka förfrågan
     </button>
   );
 
@@ -3311,7 +3502,7 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                 <span className="text-sm font-semibold" style={{ color: colors.plum }}>Riktpris</span>
                 <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 20, color: colors.plum }}>{formatKr(estimate)}</span>
               </div>
-              <p className="mt-2 text-xs" style={{ color: colors.plumSoft }}>Slutpriset får du i leverantörens offert. Först när du accepterar den läggs leverantören till i Min fest.</p>
+              <p className="mt-2 text-xs" style={{ color: colors.plumSoft }}>Slutpriset får du i leverantörens offert. När du har godkänt den kan du boka.</p>
             </section>
           )}
 
@@ -3423,7 +3614,7 @@ function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddo
         <div className="flex items-center justify-between px-6 py-5" style={{ borderBottom: `1.5px solid ${colors.lilac}` }}>
           <div className="flex items-center gap-2">
             <PartyPopper size={20} color={colors.coral} />
-            <h2 style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>Min fest</h2>
+            <h2 style={{ fontFamily: serif, fontSize: 20, color: colors.plum }}>Att boka</h2>
           </div>
           <button onClick={onClose} className="-m-2 p-2">
             <X size={20} color={colors.plumSoft} />
@@ -3452,7 +3643,7 @@ function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddo
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {isEmpty ? (
             <p className="py-10 text-center text-sm" style={{ color: colors.plumSoft }}>
-              Din fest är tom än så länge. Börja bygga för att fylla på brädet.
+              Inget att boka än. Skicka en förfrågan till en leverantör, så hamnar offerten här när du har godkänt den.
             </p>
           ) : (
             <div className="space-y-3">
@@ -3559,7 +3750,7 @@ function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddo
             Gå till checkout <ArrowRight size={16} />
           </button>
           <button onClick={onKeepBrowsing} className="mt-2 w-full py-2 text-sm font-medium underline" style={{ color: colors.plumSoft }}>
-            Fortsätt bygga festen →
+            Hitta fler leverantörer →
           </button>
         </div>
       </div>
@@ -3601,7 +3792,7 @@ function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConf
 
   return (
     <div className="mx-auto max-w-2xl px-6 pb-24 pt-10 sm:px-10">
-      <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Din fest</h1>
+      <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Din bokning</h1>
       <div className="mt-6 rounded-2xl p-4 text-sm leading-relaxed" style={{ backgroundColor: colors.cream, color: colors.plumSoft }}>
         <p className="mb-1 font-semibold" style={{ color: colors.plum }}>
           Bokningsvillkor & avbokningsregler
@@ -3655,7 +3846,7 @@ function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConf
                 </p>
               )}
               <p className="mt-3 text-xs" style={{ color: colors.plumSoft }}>
-                Dina uppgifter delas med en leverantör först när hen har accepterat din bokning. Med ett konto kan du också chatta med leverantörer, spara favoriter och planera din fest.{" "}
+                Dina uppgifter delas med en leverantör först när hen har bekräftat din bokning. Med ett konto kan du också chatta med leverantörer, spara favoriter och planera dina event.{" "}
                 <button type="button" onClick={onLogin} className="font-semibold underline" style={{ color: colors.lilacDeep }}>
                   Logga in
                 </button>
@@ -3749,8 +3940,8 @@ function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConf
       )}
       <p className="mt-2 text-center text-xs" style={{ color: colors.plumSoft }}>
         {PAYMENTS_LIVE
-          ? "Detta skickar en bokningsförfrågan till leverantörerna. Du betalar först när leverantören har bekräftat."
-          : "Detta skickar en bokningsförfrågan till leverantörerna. Ingen betalning sker än."}
+          ? "Leverantörerna bekräftar bokningen inom 24 timmar. Du betalar först när de har bekräftat."
+          : "Leverantörerna bekräftar bokningen inom 24 timmar. Ingen betalning sker än."}
       </p>
     </div>
   );
@@ -3887,7 +4078,7 @@ function GuestBookingView({ state, onCancel, onHome, onCreateAccount }) {
 
       <div className="mt-8 rounded-2xl p-5" style={{ backgroundColor: colors.lilacSoft }}>
         <p className="font-semibold" style={{ color: colors.plum }}>
-          Vill du chatta, spara favoriter och planera din fest?
+          Vill du chatta, spara favoriter och planera dina event?
         </p>
         <p className="mt-1 text-sm" style={{ color: colors.plum }}>
           Med ett gratis konto kan du prata med leverantörerna, spara dem och använda checklistor och budget.
@@ -3989,7 +4180,7 @@ function ConfirmationView({ booking, onRestart, onMinaBokningar }) {
         Visa Mina bokningar
       </button>
       <button onClick={onRestart} className="mt-3 w-full py-2 text-sm font-medium underline" style={{ color: colors.plumSoft }}>
-        Boka en till fest
+        Boka till ett nytt event
       </button>
     </div>
   );
@@ -4044,7 +4235,7 @@ function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <p style={{ fontFamily: serif, fontSize: 18, color: colors.plum }}>
-                    {events.find((e) => e.id === b.eventId)?.title || (occasionInfo ? `${occasionInfo.emoji} ${occasionInfo.boardLabel}` : "Din fest")}
+                    {events.find((e) => e.id === b.eventId)?.title || (occasionInfo ? `${occasionInfo.emoji} ${occasionInfo.boardLabel}` : "Ditt event")}
                   </p>
                   <p className="mt-1 flex flex-wrap gap-3 text-sm" style={{ color: colors.plumSoft }}>
                     <span className="flex items-center gap-1">
@@ -4229,6 +4420,47 @@ function containsContactInfo(text) {
   return CONTACT_INFO_PATTERNS.some((re) => re.test(text));
 }
 
+// Every quote looks the same, whoever sent it: price, what is included, and the payment and cancellation terms,
+// so two quotes can be compared at a glance. The terms are Planifest's shared rules (see the terms, sections 4–5).
+const QUOTE_DEPOSIT_PCT = 15;
+const QUOTE_BALANCE_DAYS = 14;
+const QUOTE_FREE_CANCEL_DAYS = 14;
+function QuoteCard({ amount, description, vendorName, mine = false, children }) {
+  const deposit = Math.round((Number(amount) || 0) * (QUOTE_DEPOSIT_PCT / 100));
+  const rows = [
+    ["Det här ingår", description?.trim() || "Leverantören har inte skrivit vad som ingår. Fråga i chatten innan du godkänner."],
+    ["Deposition", `${QUOTE_DEPOSIT_PCT} % (${formatKr(deposit)}) när ${vendorName || "leverantören"} har bekräftat bokningen`],
+    ["Resten", `Senast ${QUOTE_BALANCE_DAYS} dagar före eventet`],
+    ["Avbokning", `Gratis mer än ${QUOTE_FREE_CANCEL_DAYS} dagar före. Därefter enligt Planifests avbokningsregler.`],
+  ];
+  return (
+    <div className="w-full max-w-[92%] overflow-hidden text-sm" style={{ backgroundColor: colors.white, border: `2px solid ${mine ? colors.lilac : colors.korall}`, borderRadius: 22, boxShadow: "0 8px 24px rgba(74,21,56,0.08)" }}>
+      <div className="px-4 pb-3 pt-3.5" style={{ backgroundColor: mine ? colors.lilacSoft : colors.peachSoft }}>
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase" style={{ color: colors.lilacDeep, letterSpacing: "0.06em" }}>
+          <Sparkles size={13} /> {mine ? "Din offert" : `Offert${vendorName ? ` från ${vendorName}` : ""}`}
+        </p>
+        <p className="mt-1" style={{ fontFamily: serif, fontWeight: 700, fontSize: 28, lineHeight: 1.1, color: colors.plum }}>
+          {formatKr(Number(amount) || 0)}
+        </p>
+      </div>
+      <dl className="px-4 py-3">
+        {rows.map(([k, v]) => (
+          <div key={k} className="grid grid-cols-[92px_1fr] gap-2 py-1.5" style={{ borderTop: k === rows[0][0] ? "none" : `1px solid ${colors.beige}` }}>
+            <dt className="text-xs font-semibold" style={{ color: colors.plumSoft }}>{k}</dt>
+            <dd className="whitespace-pre-line text-[13px] leading-snug" style={{ color: colors.plum }}>{v}</dd>
+          </div>
+        ))}
+        {!PAYMENTS_LIVE && (
+          <p className="mt-1 text-[11px]" style={{ color: colors.plumSoft }}>
+            Betalning via Planifest öppnar snart. Tills dess betalas ingenting här.
+          </p>
+        )}
+      </dl>
+      {children && <div className="px-4 pb-4">{children}</div>}
+    </div>
+  );
+}
+
 function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQuote, onDeclineQuote, onOpenCart }) {
   const [text, setText] = useState("");
   const [blocked, setBlocked] = useState(false);
@@ -4295,20 +4527,9 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
               </div>
             ) : m.message_type === "quote" ? (
               <div key={m.id} className="flex" style={{ justifyContent: "flex-start" }}>
-                <div className="max-w-[85%] p-4 text-sm" style={{ backgroundColor: colors.white, border: `2px solid ${colors.korall}`, borderRadius: 24, boxShadow: "0 8px 24px rgba(74,21,56,0.08)" }}>
-                  <p className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: colors.lilacDeep }}>
-                    <Sparkles size={13} /> Offert
-                  </p>
-                  <p className="mt-1" style={{ fontFamily: serif, fontWeight: 700, fontSize: 26, color: colors.plum }}>
-                    {formatKr(m.quote_amount)}
-                  </p>
-                  {m.quote_description && (
-                    <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
-                      {m.quote_description}
-                    </p>
-                  )}
+                <QuoteCard amount={m.quote_amount} description={m.quote_description} vendorName={vendorName}>
                   {m.quote_status === "pending" ? (
-                    <div className="mt-3 flex gap-2">
+                    <div className="flex gap-2">
                       <button
                         onClick={() => onDeclineQuote(m)}
                         className="flex-1 rounded-full px-3 py-2 text-xs font-medium"
@@ -4321,11 +4542,11 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
                         className="flex-1 rounded-full px-3 py-2 text-xs font-bold"
                         style={{ backgroundColor: colors.coral, color: colors.cream, boxShadow: `0 3px 0 ${colors.coralDeep}` }}
                       >
-                        Acceptera
+                        Godkänn offerten
                       </button>
                     </div>
                   ) : (
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span
                         className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
                         style={{
@@ -4334,16 +4555,16 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
                         }}
                       >
                         {m.quote_status === "accepted" ? <Check size={12} /> : <X size={12} />}
-                        {m.quote_status === "accepted" ? "Accepterad — tillagd i Min fest" : "Tackade nej"}
+                        {m.quote_status === "accepted" ? "Godkänd – redo att boka" : "Du tackade nej"}
                       </span>
                       {m.quote_status === "accepted" && onOpenCart && (
                         <button onClick={onOpenCart} className="text-xs font-semibold underline" style={{ color: colors.lilacDeep }}>
-                          Öppna Min fest
+                          Gå till bokning
                         </button>
                       )}
                     </div>
                   )}
-                </div>
+                </QuoteCard>
               </div>
             ) : (
               <div key={m.id} className="flex" style={{ justifyContent: m.sender === "customer" ? "flex-end" : "flex-start" }}>
@@ -4399,9 +4620,13 @@ function ChatModal({ target, messages, vendorTyping, onSend, onClose, onAcceptQu
             <ArrowRight size={16} />
           </button>
         </div>
-        <p className="px-5 pb-4 pt-2 text-center text-xs" style={{ color: colors.plumSoft }}>
-          Prototyp — meddelanden sparas inte mellan sessioner, och svaret ovan är simulerat.
-        </p>
+        {target.real ? (
+          <div className="pb-4" />
+        ) : (
+          <p className="px-5 pb-4 pt-2 text-center text-xs" style={{ color: colors.plumSoft }}>
+            Exempelleverantör – svaren här är simulerade och sparas inte.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -5595,6 +5820,18 @@ function VendorPendingView({ vendor, onHome, onGoDashboard }) {
   );
 }
 
+// Categories where a customer would see "Pris på förfrågan": no fixed price, no "from" price and no priced choices in the form.
+function vendorMissingPriceCategories(vendor) {
+  const services = vendor?.profile?.services || [];
+  return (vendor?.categories || []).filter((cat) => {
+    const own = services.filter((s) => s.category === cat);
+    const list = own.length ? own : services.filter((s) => !s.category);
+    if (list.some((s) => (s.priceType !== "quote" && Number(s.price) > 0) || Number(s.fromPrice) > 0)) return false;
+    const form = sanitizeRequestForms(vendor?.requestForms)[cat];
+    return !(form?.fields || []).some((f) => f.required && f.type === "single" && f.options.some((o) => o.price));
+  });
+}
+
 function getVendorCompleteness(vendor) {
   const profile = vendor?.profile || {};
   const checks = [
@@ -5603,6 +5840,7 @@ function getVendorCompleteness(vendor) {
     { key: "images", label: "Minst en bild", done: (profile.images || []).length > 0 },
     { key: "services", label: "Minst en tjänst/pris eller ett förfrågningsformulär", done: (profile.services || []).length > 0 || Object.values(sanitizeRequestForms(vendor?.requestForms)).some((c) => c.fields.length > 0) },
     { key: "categories", label: "Minst en kategori", done: (vendor?.categories || []).length > 0 },
+    { key: "price", label: "Från-pris", done: vendorMissingPriceCategories(vendor).length === 0 },
     { key: "geo", label: "Geografi", done: !!vendor?.baseLocation && !!vendor?.serviceArea },
   ];
   const doneCount = checks.filter((c) => c.done).length;
@@ -5778,7 +6016,13 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
       {banner && (
         <div className="mt-5 p-5" style={{ backgroundColor: banner.bg, borderRadius: 22 }}>
           <p className="font-semibold" style={{ color: colors.plum }}>{banner.title}</p>
-          <p className="mt-1 text-sm" style={{ color: colors.plum }}>{banner.text}</p>
+          {vendor.status === "rejected" && vendor.rejectionReason && (
+            <div className="mt-3 rounded-2xl px-4 py-3" style={{ backgroundColor: colors.white }}>
+              <p className="text-xs font-semibold uppercase" style={{ color: colors.plumSoft, letterSpacing: "0.08em" }}>Anledning</p>
+              <p className="mt-1 whitespace-pre-line text-sm" style={{ color: colors.plum }}>{vendor.rejectionReason}</p>
+            </div>
+          )}
+          <p className="mt-3 text-sm" style={{ color: colors.plum }}>{banner.text}</p>
           {vendor.status === "rejected" && (
             <div className="mt-3 flex flex-wrap gap-2">
               <button onClick={onEditProfile} className="rounded-full px-4 py-2.5 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
@@ -5829,7 +6073,7 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <button onClick={() => onRespond(i.bookingNumber, i.id, "confirmed")} className="h-11 rounded-full text-sm font-semibold" style={{ backgroundColor: colors.plum, color: colors.white }}>
-                    Acceptera
+                    Bekräfta
                   </button>
                   <button onClick={() => onRespond(i.bookingNumber, i.id, "declined")} className="h-11 rounded-full text-sm font-medium" style={{ border: `1px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}>
                     Neka
@@ -6304,9 +6548,16 @@ function VendorProfileEditorView({
                   <option value="quote">Pris enligt överenskommelse</option>
                 </select>
                 {s.priceType === "quote" ? (
-                  <div className="flex items-center rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: colors.white, color: colors.plumSoft, border: `1.5px dashed ${colors.beige}` }}>
-                    Ni sätter priset i offerten
-                  </div>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    value={s.fromPrice ?? ""}
+                    onChange={(e) => onUpdateService(s.id, "fromPrice", e.target.value)}
+                    placeholder="Från-pris (kr) *"
+                    aria-label="Ungefärligt från-pris i kronor"
+                    className="rounded-lg px-3 py-2 text-sm"
+                    style={{ ...fieldInputStyle, border: `1.5px solid ${Number(s.fromPrice) > 0 ? colors.beige : colors.coral}` }}
+                  />
                 ) : (
                   <input
                     type="number"
@@ -6320,11 +6571,16 @@ function VendorProfileEditorView({
                 <input
                   value={s.priceNote}
                   onChange={(e) => onUpdateService(s.id, "priceNote", e.target.value)}
-                  placeholder={s.priceType === "quote" ? "T.ex. \"från 1 500 kr, beroende på omfattning\"" : "Extra info om priset (valfritt)"}
+                  placeholder={s.priceType === "quote" ? "T.ex. \"beroende på antal gäster\"" : "Extra info om priset (valfritt)"}
                   className="rounded-lg px-3 py-2 text-sm"
                   style={fieldInputStyle}
                 />
               </div>
+              {s.priceType === "quote" && !(Number(s.fromPrice) > 0) && (
+                <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
+                  Skriv ett ungefärligt från-pris. Kunderna ser "från ... kr" och vet direkt om ni passar budgeten. Det slutliga priset sätter ni i offerten.
+                </p>
+              )}
               {!s.category && vendor.categories.length > 1 && (
                 <p className="mt-2 text-xs" style={{ color: colors.coralDeep }}>
                   Välj vilken kategori tjänsten hör till.
@@ -6600,9 +6856,10 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
     setText("");
   };
 
+  const quoteReady = Number(quoteAmount) > 0 && quoteDescription.trim().length >= 3;
   const submitQuote = () => {
     const amount = Number(quoteAmount);
-    if (!amount || amount <= 0) return;
+    if (!amount || amount <= 0 || !quoteReady) return;
     onSendQuote(amount, quoteDescription.trim());
     setQuoteAmount("");
     setQuoteDescription("");
@@ -6637,28 +6894,17 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
               </div>
             ) : m.message_type === "quote" ? (
               <div key={m.id} className="flex" style={{ justifyContent: m.sender === "vendor" ? "flex-end" : "flex-start" }}>
-                <div className="max-w-[80%] rounded-2xl p-3.5 text-sm" style={{ backgroundColor: colors.lilacSoft }}>
-                  <p className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: colors.lilacDeep }}>
-                    <Sparkles size={13} /> Din offert
-                  </p>
-                  <p className="mt-1" style={{ fontFamily: serif, fontSize: 18, color: colors.plum }}>
-                    {formatKr(m.quote_amount)}
-                  </p>
-                  {m.quote_description && (
-                    <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
-                      {m.quote_description}
-                    </p>
-                  )}
+                <QuoteCard amount={m.quote_amount} description={m.quote_description} mine>
                   <span
-                    className="mt-2 inline-block rounded-full px-2 py-0.5 text-xs font-medium"
+                    className="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
                     style={{
                       backgroundColor: m.quote_status === "accepted" ? colors.greenSoft : m.quote_status === "declined" ? colors.beige : colors.white,
                       color: m.quote_status === "accepted" ? colors.green : colors.plumSoft,
                     }}
                   >
-                    {m.quote_status === "accepted" ? "Accepterad" : m.quote_status === "declined" ? "Nekad" : "Väntar på svar"}
+                    {m.quote_status === "accepted" ? "Godkänd av kunden" : m.quote_status === "declined" ? "Kunden tackade nej" : "Väntar på kundens svar"}
                   </span>
-                </div>
+                </QuoteCard>
               </div>
             ) : (
               <div key={m.id} className="flex" style={{ justifyContent: m.sender === "vendor" ? "flex-end" : "flex-start" }}>
@@ -6686,23 +6932,35 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
                 Utifrån kundens val och era priser blir riktpriset {formatKr(prefill.amount)}. Justera för design och extra önskemål.
               </p>
             )}
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="number"
-                value={quoteAmount}
-                onChange={(e) => setQuoteAmount(e.target.value)}
-                placeholder="Pris (kr)"
-                className="col-span-2 rounded-lg px-3 py-2 text-sm sm:col-span-1"
-                style={fieldStyle}
-              />
-              <input
-                value={quoteDescription}
-                onChange={(e) => setQuoteDescription(e.target.value)}
-                placeholder="Vad ingår? (valfritt)"
-                className="col-span-2 rounded-lg px-3 py-2 text-sm sm:col-span-1"
-                style={fieldStyle}
-              />
-            </div>
+            <label className="block text-xs font-semibold" style={{ color: colors.plum }} htmlFor="quote-amount">
+              Totalpris (kr)
+            </label>
+            <input
+              id="quote-amount"
+              type="number"
+              inputMode="numeric"
+              value={quoteAmount}
+              onChange={(e) => setQuoteAmount(e.target.value)}
+              placeholder="T.ex. 4500"
+              className="mt-1 w-full rounded-lg px-3 py-2 text-sm"
+              style={fieldStyle}
+            />
+            <label className="mt-3 block text-xs font-semibold" style={{ color: colors.plum }} htmlFor="quote-includes">
+              Det här ingår
+            </label>
+            <textarea
+              id="quote-includes"
+              value={quoteDescription}
+              onChange={(e) => setQuoteDescription(e.target.value.slice(0, 600))}
+              rows={3}
+              placeholder="T.ex. Tårta för 30 personer, tre våningar, leverans och uppställning."
+              className="mt-1 w-full rounded-lg px-3 py-2 text-sm"
+              style={fieldStyle}
+            />
+            <p className="mt-2 text-xs leading-relaxed" style={{ color: colors.plumSoft }}>
+              Kunden ser också Planifests villkor i offerten: {QUOTE_DEPOSIT_PCT} % deposition
+              {Number(quoteAmount) > 0 ? ` (${formatKr(Math.round(Number(quoteAmount) * QUOTE_DEPOSIT_PCT / 100))})` : ""} när ni bekräftat, resten senast {QUOTE_BALANCE_DAYS} dagar före och gratis avbokning mer än {QUOTE_FREE_CANCEL_DAYS} dagar före.
+            </p>
             <div className="mt-3 flex gap-2">
               <button
                 onClick={() => setQuoteMode(false)}
@@ -6711,7 +6969,12 @@ function VendorInboxView({ conversations, activeConversationId, messages, onOpen
               >
                 Avbryt
               </button>
-              <button onClick={submitQuote} className="flex-1 rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+              <button
+                onClick={submitQuote}
+                disabled={!quoteReady}
+                className="flex-1 rounded-full px-4 py-2 text-sm font-semibold"
+                style={{ backgroundColor: colors.coral, color: colors.white, opacity: quoteReady ? 1 : 0.5 }}
+              >
                 Skicka offert
               </button>
             </div>
@@ -6899,9 +7162,9 @@ function EventFormModal({ open, mode, initial, onClose, onSubmit, onDelete }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" style={{ backgroundColor: "rgba(74,21,56,0.45)" }} onClick={onClose}>
       <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl p-6 sm:rounded-3xl" style={{ backgroundColor: colors.cream }} onClick={(e) => e.stopPropagation()}>
-        <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>{mode === "create" ? "Ny planering" : "Redigera din fest"}</p>
+        <p style={{ fontFamily: serif, fontSize: 22, color: colors.plum }}>{mode === "create" ? "Nytt event" : "Redigera eventet"}</p>
         <label className="mt-4 flex flex-col gap-1 text-xs font-semibold" style={{ color: colors.plum }}>
-          Namn på festen
+          Namn på eventet
           <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={80} placeholder="Till exempel: Elsas 5-årsdag" className="rounded-xl px-3 py-2 text-sm font-normal" style={fieldStyle} />
         </label>
         <p className="mt-4 text-xs font-semibold" style={{ color: colors.plum }}>
@@ -6946,7 +7209,7 @@ function EventFormModal({ open, mode, initial, onClose, onSubmit, onDelete }) {
           <div className="mt-4 text-center">
             {confirmDelete ? (
               <p className="text-sm" style={{ color: colors.plum }}>
-                Ta bort hela festen, med checklista, budget och anteckningar?{" "}
+                Ta bort hela eventet, med checklista, budget och anteckningar?{" "}
                 <button
                   onClick={async () => {
                     await onDelete();
@@ -6960,7 +7223,7 @@ function EventFormModal({ open, mode, initial, onClose, onSubmit, onDelete }) {
               </p>
             ) : (
               <button onClick={() => setConfirmDelete(true)} className="text-xs font-medium underline" style={{ color: colors.coralDeep }}>
-                Ta bort festen
+                Ta bort eventet
               </button>
             )}
           </div>
@@ -7185,7 +7448,7 @@ function GuestsTab({ ev, guestApi, onUpdateEvent, onRefresh }) {
       </div>
       {yesHeads > 0 && yesHeads !== ev.guests && (
         <button onClick={() => onUpdateEvent(ev.id, { guests: yesHeads })} className="mt-2 text-xs font-medium underline" style={{ color: colors.lilacDeep }}>
-          Sätt antal gäster i festen till {yesHeads}
+          Sätt antal gäster i eventet till {yesHeads}
         </button>
       )}
 
@@ -7753,7 +8016,7 @@ function RsvpView({ state, onSubmit, onHome }) {
         Ditt svar delas bara med {e.host || "den som bjudit in dig"}.
       </p>
       <p className="mt-4 text-center text-xs" style={{ color: colors.plumSoft }}>
-        Ska du själv ha en fest?{" "}
+        Ska du själv planera ett event?{" "}
         <button onClick={onHome} className="font-semibold underline" style={{ color: colors.lilacDeep }}>
           Planera den på Planifest
         </button>
@@ -7826,7 +8089,7 @@ function MinSidaHeader({ name, email, isAdmin, hasVendor, onAccount, onSaved, on
   );
 }
 
-function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateEvent, onUpdateEvent, onDeleteEvent, taskApi, budgetApi, guestApi, bookings, savedProviders, onViewProvider, party, onLogin, onSignup, cart = [], cartTotal = 0, onOpenCart, onExploreCategory, createRequest = 0 }) {
+function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateEvent, onUpdateEvent, onDeleteEvent, taskApi, budgetApi, guestApi, bookings, savedProviders, onViewProvider, party, onLogin, onSignup, cart = [], cartTotal = 0, onOpenCart, onExploreCategory, createRequest = 0, vendorStatus = [], providers = [], onOpenConversation, onGoBookings }) {
   const [tab, setTab] = useState("vendors");
   const [modal, setModal] = useState(null); // null | "create" | "edit"
   const [newTask, setNewTask] = useState("");
@@ -7857,16 +8120,33 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doneCount, totalCount, ev?.id]);
 
-  const board = <MinFestBoard cart={cart} categories={party.categories || []} total={cartTotal} onOpenCart={onOpenCart} onExploreCategory={onExploreCategory} />;
+  const board = session ? (
+    <VendorStatusBoard
+      ev={ev}
+      statuses={vendorStatus}
+      bookings={bookings}
+      cart={cart}
+      cartTotal={cartTotal}
+      multipleEvents={events.length > 1}
+      providers={providers}
+      categories={party.categories || []}
+      onOpenConversation={onOpenConversation}
+      onOpenCart={onOpenCart}
+      onExploreCategory={onExploreCategory}
+      onGoBookings={onGoBookings}
+    />
+  ) : (
+    <MinFestBoard cart={cart} categories={party.categories || []} total={cartTotal} onOpenCart={onOpenCart} onExploreCategory={onExploreCategory} />
+  );
   if (!session) {
     return (
       <div className="mx-auto max-w-3xl px-5 pb-24 pt-8 sm:px-8">
-        <h1 className="text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Min fest</h1>
+        <h1 className="text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Mina event</h1>
         {board}
       <div className="mx-auto mt-10 max-w-xl text-center">
-        <h2 style={{ fontFamily: serif, fontSize: 26, color: colors.plum }}>Planera hela festen</h2>
+        <h2 style={{ fontFamily: serif, fontSize: 26, color: colors.plum }}>Planera hela eventet</h2>
         <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
-          Spara dina fester, bocka av en checklista, håll koll på budgeten, skriv anteckningar och samla leverantörerna du gillar. Allt med ett gratis konto.
+          Spara dina event, bocka av en checklista, håll koll på budgeten, skriv anteckningar och samla leverantörerna du gillar. Allt med ett gratis konto.
         </p>
         <div className="mt-6 flex justify-center gap-3">
           <button onClick={onSignup} className="rounded-full px-6 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
@@ -7899,19 +8179,19 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
   if (!ev) {
     return (
       <div className="mx-auto max-w-3xl px-5 pb-24 pt-8 sm:px-8">
-        <h1 className="text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Min fest</h1>
+        <h1 className="text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Mina event</h1>
         {board}
       <div className="mx-auto mt-10 max-w-xl text-center">
-        <h2 style={{ fontFamily: serif, fontSize: 26, color: colors.plum }}>Skapa din fest</h2>
+        <h2 style={{ fontFamily: serif, fontSize: 26, color: colors.plum }}>Skapa ditt event</h2>
         <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
-          Skapa din första fest, så får du checklista, budget och anteckningsblock på ett ställe.
+          Skapa ditt första event, så får du checklista, budget och anteckningsblock på ett ställe.
         </p>
         <button onClick={() => setModal("create")} className="mt-6 rounded-full px-6 py-3 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
-          Skapa min första fest
+          Skapa mitt första event
         </button>
         {savedProviders.length > 0 && (
           <p className="mt-4 text-xs" style={{ color: colors.plumSoft }}>
-            Du har {savedProviders.length} sparade leverantörer. De hittar du här när festen är skapad.
+            Du har {savedProviders.length} sparade leverantörer. De hittar du här när eventet är skapat.
           </p>
         )}
         {createModal}
@@ -7993,7 +8273,7 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
   };
 
   const tabs = [
-    { id: "vendors", label: "Leverantörer", icon: PartyPopper, count: cart.length },
+    { id: "vendors", label: "Leverantörer", icon: PartyPopper, count: buildVendorRows({ ev, statuses: vendorStatus, bookings, cart, multipleEvents: events.length > 1 }).length },
     { id: "checklist", label: "Checklista", icon: ListChecks, count: open.length },
     { id: "budget", label: "Budget", icon: Wallet },
     { id: "guests", label: "Gäster", icon: Users, count: ev.guestList.length },
@@ -8003,7 +8283,7 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
 
   return (
     <div className="mx-auto max-w-3xl px-6 pb-28 pt-8 sm:px-10">
-      <h1 className="mb-3 text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Min fest</h1>
+      <h1 className="mb-3 text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Mina event</h1>
 
       <div className="mb-4">
         <EventSwitcher events={events} activeId={ev.id} onSelect={onSelectEvent} onNew={() => setModal("create")} label={null} />
@@ -8027,7 +8307,7 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
                 <Pencil size={12} /> Redigera
               </button>
               <button onClick={() => setModal("create")} className="flex items-center gap-1 font-medium underline" style={{ color: colors.lilacDeep }}>
-                <Plus size={12} /> Ny fest
+                <Plus size={12} /> Nytt event
               </button>
             </div>
           </div>
@@ -8164,7 +8444,7 @@ function PlanningView({ session, events, activeEventId, onSelectEvent, onCreateE
           </p>
           {booked.length === 0 ? (
             <p className="text-xs" style={{ color: colors.plumSoft }}>
-              Leverantörer du bokar och kopplar till den här festen dyker upp här automatiskt, med pris och status.
+              Leverantörer du bokar till det här eventet dyker upp här automatiskt, med pris och status.
             </p>
           ) : (
             <div className="space-y-2">
@@ -8298,6 +8578,110 @@ function BriefCard({ brief }) {
 }
 
 // Customer side: the vendor's own questions in a pop-up. Sent as one request, then the talk continues in the chat.
+// Shown right after a request is sent: the same request can go to a few more vendors in one tap, so the customer
+// gets several quotes to compare without filling anything in again.
+function AskMoreSheet({ state, onSend, onOpenChat, onShowStatus, onClose }) {
+  const [picked, setPicked] = useState(() => new Set(state.suggestions.slice(0, 2).map((p) => p.id)));
+  const [sending, setSending] = useState(false);
+  const cat = catMap[state.provider.category]?.label?.toLowerCase() || "leverantörer";
+  const when = state.brief.party?.date ? formatEventDate(state.brief.party.date) : "";
+  const toggle = (id) =>
+    setPicked((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const send = async () => {
+    setSending(true);
+    await onSend(state.suggestions.filter((p) => picked.has(p.id)));
+    setSending(false);
+  };
+  const done = state.sent !== null && state.sent !== undefined;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" style={{ backgroundColor: "rgba(74,21,56,0.45)" }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-t-3xl px-5 pb-6 pt-5 sm:rounded-3xl" style={{ backgroundColor: colors.cream }} onClick={(e) => e.stopPropagation()}>
+        {done ? (
+          <>
+            <span className="flex h-12 w-12 items-center justify-center rounded-full" style={{ backgroundColor: colors.greenSoft }}>
+              <Check size={22} color={colors.green} />
+            </span>
+            <p className="mt-3" style={{ fontFamily: serif, fontWeight: 700, fontSize: 22, color: colors.plum }}>
+              Skickat till {state.sent + 1} {state.sent + 1 === 1 ? "leverantör" : "leverantörer"}
+            </p>
+            <p className="mt-1 text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
+              Du ser vem som har svarat och vilka offerter som är klara under Mina event → Leverantörer. Vi mejlar dig också när någon svarar.
+            </p>
+            <div className="mt-5 flex flex-col gap-2">
+              <button onClick={onShowStatus} className="h-12 rounded-full text-[15px] font-bold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+                Visa mina leverantörer
+              </button>
+              <button onClick={onOpenChat} className="h-12 rounded-full text-sm font-semibold" style={{ border: `1.5px solid ${colors.beige}`, backgroundColor: colors.white, color: colors.plum }}>
+                Öppna chatten med {state.provider.name}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="flex items-center gap-2 text-sm font-semibold" style={{ color: colors.green }}>
+              <Check size={16} /> Förfrågan skickad till {state.provider.name}
+            </p>
+            <p className="mt-2" style={{ fontFamily: serif, fontWeight: 700, fontSize: 22, lineHeight: 1.2, color: colors.plum }}>
+              Vill du jämföra offerter?
+            </p>
+            <p className="mt-1 text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
+              Skicka samma förfrågan till fler inom {cat}{when ? ` som är lediga ${when}` : ""}. Du behöver inte fylla i något igen.
+            </p>
+            <div className="mt-4 space-y-2">
+              {state.suggestions.map((p) => {
+                const on = picked.has(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => toggle(p.id)}
+                    aria-pressed={on}
+                    className="flex w-full items-center gap-3 rounded-2xl p-2.5 text-left"
+                    style={{ backgroundColor: colors.white, border: `1.5px solid ${on ? colors.coral : colors.beige}` }}
+                  >
+                    <img src={p.image} alt="" className="h-12 w-12 flex-shrink-0 rounded-full object-cover" style={{ backgroundColor: colors.coralSoft }} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold" style={{ color: colors.plum }}>{p.name}</span>
+                      <span className="block text-xs" style={{ color: colors.plumSoft }}>
+                        {p.fromPrice > 0 ? `från ${formatKr(p.fromPrice)}` : "Pris i offerten"}
+                        {p.location ? ` · ${p.location}` : ""}
+                      </span>
+                    </span>
+                    <span
+                      className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full"
+                      style={{ backgroundColor: on ? colors.coral : colors.white, border: `1.5px solid ${on ? colors.coral : colors.beige}` }}
+                    >
+                      {on && <Check size={14} color={colors.white} />}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-5 flex flex-col gap-2">
+              <button
+                onClick={send}
+                disabled={picked.size === 0 || sending}
+                className="h-12 rounded-full text-[15px] font-bold"
+                style={{ backgroundColor: colors.coral, color: colors.white, opacity: picked.size === 0 || sending ? 0.5 : 1 }}
+              >
+                {sending ? "Skickar..." : picked.size === 0 ? "Välj minst en" : `Skicka till ${picked.size} till`}
+              </button>
+              <button onClick={onOpenChat} className="h-11 rounded-full text-sm font-semibold" style={{ color: colors.plumSoft }}>
+                Nej tack, öppna chatten
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function RequestFormModal({ provider, party, onUpdateParty, onSend, onClose }) {
   const fields = provider.request.fields;
   const [answers, setAnswers] = useState({});
@@ -8864,7 +9248,7 @@ function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime,
                       className="flex-1 rounded-full px-4 py-2 text-sm font-semibold"
                       style={{ backgroundColor: colors.green, color: colors.white }}
                     >
-                      Acceptera
+                      Bekräfta
                     </button>
                   </div>
                 </div>
@@ -9243,7 +9627,15 @@ function AdminVendorsList({ vendorApplications, filter, onFilterChange, onOpenVe
 }
 
 function AdminVendorDetailView({ vendor, onBack, onApprove, onReject }) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+  useEffect(() => {
+    setRejecting(false);
+    setReason("");
+  }, [vendor?.id]);
   if (!vendor) return null;
+  const isSuspend = vendor.status === "approved";
+  const fmtStamp = (iso) => (iso ? new Date(iso).toLocaleString("sv-SE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
   const status = STATUS_META[vendor.status] || STATUS_META.pending;
   const categoryLabels = vendor.categories.map((id) => catMap[id]?.label).filter(Boolean);
   const locationName = locationMap[vendor.baseLocation]?.name || vendor.baseLocation;
@@ -9264,6 +9656,16 @@ function AdminVendorDetailView({ vendor, onBack, onApprove, onReject }) {
         <p className="-mt-3 mb-5 text-xs" style={{ color: colors.plumSoft }}>
           Ansökte {formatAppliedAt(vendor.createdAt)}
         </p>
+      )}
+      {vendor.rejectionReason && (
+        <div className="mb-5 rounded-3xl p-4" style={{ backgroundColor: vendor.status === "pending" ? colors.lilacSoft : colors.coralSoft }}>
+          <p className="text-sm font-semibold" style={{ color: colors.plum }}>
+            {vendor.status === "pending" && vendor.resubmittedAt
+              ? `Ändrad och skickad igen ${fmtStamp(vendor.resubmittedAt)}. Ditt förra avslag:`
+              : "Anledning som leverantören ser:"}
+          </p>
+          <p className="mt-1 whitespace-pre-line text-sm" style={{ color: colors.plum }}>{vendor.rejectionReason}</p>
+        </div>
       )}
 
       {vendor.profile.images.length > 0 && (
@@ -9385,20 +9787,60 @@ function AdminVendorDetailView({ vendor, onBack, onApprove, onReject }) {
         )}
       </div>
 
+      {rejecting && (
+        <div className="mt-6 rounded-3xl p-5" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.coral}` }}>
+          <label htmlFor="reject-reason" className="font-semibold" style={{ color: colors.plum }}>
+            {isSuspend ? "Varför stängs leverantören av?" : "Varför avslås ansökan?"}
+          </label>
+          <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
+            Visas för leverantören i portalen och i mejlet, så skriv vad de behöver ändra.
+            {isSuspend ? " Profilen försvinner direkt för kunder. Redan bekräftade bokningar påverkas inte." : ""}
+          </p>
+          <textarea
+            id="reject-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value.slice(0, 500))}
+            rows={4}
+            autoFocus
+            placeholder="T.ex. Lägg till minst tre bilder på era tjänster och fyll i priser, så tittar vi på ansökan igen."
+            className="mt-3 w-full rounded-2xl px-4 py-3 text-sm outline-none"
+            style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.cream }}
+          />
+          <p className="mt-1 text-right text-xs" style={{ color: colors.plumSoft }}>{reason.length}/500</p>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+            <button
+              onClick={() => {
+                setRejecting(false);
+                setReason("");
+              }}
+              className="flex-1 rounded-full px-5 py-3 text-sm font-semibold"
+              style={{ border: `1.5px solid ${colors.beige}`, color: colors.plum, backgroundColor: colors.white }}
+            >
+              Avbryt
+            </button>
+            <button
+              onClick={() => onReject(vendor.id, reason)}
+              disabled={!reason.trim()}
+              className="flex-1 rounded-full px-5 py-3 text-sm font-semibold"
+              style={{ backgroundColor: colors.coral, color: colors.white, opacity: reason.trim() ? 1 : 0.5 }}
+            >
+              {isSuspend ? "Stäng av och skicka besked" : "Avslå och skicka besked"}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-        {vendor.status !== "rejected" && (
+        {vendor.status !== "rejected" && !rejecting && (
           <button
-            onClick={() => {
-              if (vendor.status === "approved" && !window.confirm(`Stänga av ${vendor.companyName}? Profilen försvinner direkt för kunder. Redan bekräftade bokningar påverkas inte, så kontakta leverantören om något behöver lösas.`)) return;
-              onReject(vendor.id);
-            }}
+            onClick={() => setRejecting(true)}
             className="flex-1 rounded-full px-5 py-3 text-sm font-semibold"
             style={{ border: `1.5px solid ${colors.coral}`, color: colors.coralDeep, backgroundColor: colors.white }}
           >
-            {vendor.status === "approved" ? "Stäng av leverantör" : "Avslå ansökan"}
+            {isSuspend ? "Stäng av leverantör" : "Avslå ansökan"}
           </button>
         )}
-        {vendor.status !== "approved" && (
+        {vendor.status !== "approved" && !rejecting && (
           <button onClick={() => onApprove(vendor.id)} className="flex-1 rounded-full px-5 py-3 text-sm font-semibold" style={{ backgroundColor: colors.green, color: colors.white }}>
             {vendor.status === "rejected" ? "Godkänn igen" : "Godkänn leverantör"}
           </button>
@@ -9597,7 +10039,7 @@ const COOKIE_POLICY_SECTIONS = [
     heading: "2. Vilka cookies använder vi?",
     paragraphs: ["Just nu använder Planifest endast nödvändiga cookies. Om vi i framtiden lägger till analys- eller marknadsföringscookies uppdaterar vi denna policy och ber om ditt samtycke innan de aktiveras."],
     bullets: [
-      "Nödvändiga cookies: krävs för att webbplatsen ska fungera, t.ex. för att komma ihåg din \"Min fest\"-korg under besöket. Kan inte stängas av.",
+      "Nödvändiga cookies: krävs för att webbplatsen ska fungera, t.ex. för att komma ihåg vad du har valt att boka under besöket. Kan inte stängas av.",
       "Funktionella cookies: kommer ihåg dina inställningar, t.ex. ditt val i cookie-bannern.",
       "Analyscookies: hjälper oss förstå hur besökare använder webbplatsen. Används endast om du samtycker.",
       "Marknadsföringscookies: används för att visa relevanta annonser. Används endast om du samtycker.",
@@ -9726,7 +10168,7 @@ function Footer({ onGoHome, onBrowse, onHowItWorks, onBecomeVendor, onOpenTerms,
             </h3>
             <ul className="space-y-2 text-sm" style={{ color: colors.plumSoft }}>
               <li>
-                <button onClick={onGoHome}>Bygg din fest</button>
+                <button onClick={onGoHome}>Planera ditt event</button>
               </li>
               <li>
                 <button onClick={onBrowse}>Leverantörer</button>
@@ -9980,6 +10422,15 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null); // row from public.profiles for the logged-in user
 
+  // --- Where each vendor stands for the customer (Mina event → Leverantörer) ---
+  const [vendorStatus, setVendorStatus] = useState([]);
+  const [askMore, setAskMore] = useState(null); // { provider, brief, conversationId, suggestions, sent }
+  const loadVendorStatus = async () => {
+    if (!session?.access_token) return;
+    const { data } = await supabaseRestRequest("/rpc/my_vendor_status", session.access_token, { method: "POST", body: "{}" });
+    if (Array.isArray(data)) setVendorStatus(data);
+  };
+
   // --- Message bubble: every conversation I'm in, with unread counts ---
   const [inbox, setInbox] = useState([]);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -10019,6 +10470,17 @@ export default function App() {
       clearInterval(id);
     };
   }, [session]);
+
+  // Vendor status for Mina event: loaded with the session, and kept fresh while the planning page is open.
+  const inboxSig = inbox.map((c) => `${c.conversation_id}:${c.last_at}`).join(",");
+  useEffect(() => {
+    if (!session?.access_token) {
+      setVendorStatus([]);
+      return;
+    }
+    loadVendorStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, view, inboxSig]);
 
   // A new unread message: ping (if sound is on). The bubble wiggles on its own via its changing count.
   useEffect(() => {
@@ -10798,7 +11260,7 @@ export default function App() {
 
   // --- Guest booking ---
   const guestBlockReason = cart.some((p) => !p.vendorDbId || !isUuid(p.serviceId) || p.quoteMessageId || p.requestOnly)
-    ? "En eller flera leverantörer i din fest kräver ett konto (till exempel en offert eller en förfrågan). Logga in för att boka."
+    ? "En eller flera leverantörer i din bokning kräver ett konto (till exempel en offert eller en förfrågan). Logga in för att boka."
     : "";
 
   const submitGuestBooking = async ({ name, email, phone }) => {
@@ -10854,7 +11316,7 @@ export default function App() {
     });
     if (error) {
       setEvents((l) => l.filter((e) => e.id !== id));
-      failed("spara festen", error);
+      failed("spara eventet", error);
       return false;
     }
     if (tasks.length) {
@@ -10900,7 +11362,7 @@ export default function App() {
     const { error } = await planningDb(`/events?id=eq.${id}`, { method: "DELETE" });
     if (error) {
       setEvents(before);
-      failed("ta bort festen", error);
+      failed("ta bort eventet", error);
     }
   };
 
@@ -11318,7 +11780,7 @@ export default function App() {
     .flatMap((b) => b.items.filter((i) => !i.reviewed && (i.status === "confirmed" || i.status === "completed")).map((item) => ({ bookingNumber: b.bookingNumber, item })));
 
   // --- Several parties at once ---
-  // Each party has its own builder answers and its own Min fest list. Switching party saves the
+  // Each party has its own builder answers and its own list of vendors to book. Switching party saves the
   // current one and loads the other; a brand-new party starts from its own date, guests and type.
   const [planningCreateRequest, setPlanningCreateRequest] = useState(0);
   const partyStore = useRef({});
@@ -11334,7 +11796,10 @@ export default function App() {
       setParty(saved.party);
       setCartItems(saved.cartItems);
     } else if (prevKey === "none") {
-      // the first party gets whatever was picked before logging in or creating it
+      // the first party keeps whatever was picked before logging in or creating it, and fills in the
+      // event's own date and guests where nothing was picked, so a request never asks for them again
+      const evn = events.find((e) => e.id === activeEventId);
+      if (evn) setParty((p) => ({ ...p, date: p.date || evn.date || "", guests: evn.guests && !p.date ? evn.guests : p.guests, occasion: p.occasion || evn.eventType || null }));
     } else {
       const evn = events.find((e) => e.id === activeEventId);
       setParty({ ...emptyParty(), date: evn?.date || "", guests: evn?.guests || 50, occasion: evn?.eventType || null });
@@ -11559,18 +12024,8 @@ export default function App() {
 
   const closeChat = () => setChatTarget(null);
 
-  // A request: the customer answers the vendor's own questions, the vendor replies in the chat and
-  // sends a quote with the final price, and accepting that quote is what puts it in Min fest.
-  const sendRequest = async (provider, brief) => {
-    if (!provider.vendorDbId) {
-      showToast("Den här leverantören går inte att kontakta än.");
-      return false;
-    }
-    if (!session?.access_token) {
-      openAuthModal("signin");
-      showToast("Logga in för att skicka en förfrågan");
-      return false;
-    }
+  // Posts one request to one vendor. Returns the conversation id, or null (with an error already shown unless quiet).
+  const postBrief = async (provider, brief, quiet = false) => {
     const { data: convo, error } = await findOrCreateConversation({
       vendorId: provider.vendorDbId,
       customerId: session.user.id,
@@ -11578,8 +12033,8 @@ export default function App() {
       accessToken: session.access_token,
     });
     if (error || !convo) {
-      showToast("Kunde inte skicka förfrågan just nu");
-      return false;
+      if (!quiet) showToast("Kunde inte skicka förfrågan just nu");
+      return null;
     }
     const summary = `${catMap[provider.category]?.label || "Förfrågan"}: ${brief.rows
       .slice(0, 2)
@@ -11591,14 +12046,73 @@ export default function App() {
       body: JSON.stringify({ conversation_id: convo.id, sender: "customer", text: summary, message_type: "brief", brief }),
     });
     if (msgError || !rows?.[0]) {
-      showToast("Kunde inte skicka förfrågan" + (msgError?.message ? `: ${msgError.message}` : ""));
+      if (!quiet) showToast("Kunde inte skicka förfrågan" + (msgError?.message ? `: ${msgError.message}` : ""));
+      return null;
+    }
+    return convo.id;
+  };
+
+  const openRequestChat = async (provider, conversationId) => {
+    const { data: msgs } = await supabaseRestRequest(`/messages?conversation_id=eq.${conversationId}&select=*&order=created_at.asc`, session.access_token);
+    setRealMessages((m) => ({ ...m, [conversationId]: msgs || [] }));
+    setChatTarget({ kind: "provider", provider, real: true, conversationId });
+  };
+
+  // Other vendors in the same category who are free at the same time and haven't been asked yet.
+  const similarProviders = (provider, brief) => {
+    const asked = new Set(vendorStatus.filter((c) => c.category_id === provider.category).map((c) => c.vendor_id));
+    const when = { date: brief.party?.date || "", startTime: brief.party?.start || "", endTime: brief.party?.end || "" };
+    return customerProviders
+      .filter(
+        (p) =>
+          p.category === provider.category &&
+          p.vendorDbId &&
+          p.vendorDbId !== provider.vendorDbId &&
+          !p.quoteMessageId &&
+          !asked.has(p.vendorDbId) &&
+          !(when.date && (p.closedDates?.includes(when.date) || isBusyAt(p, when)))
+      )
+      .sort((a, b) => (b.rating || 0) - (a.rating || 0) || (Number(b.fromPrice) > 0) - (Number(a.fromPrice) > 0))
+      .slice(0, 3);
+  };
+
+  // A request: the customer answers the vendor's own questions, the vendor replies in the chat and
+  // sends a quote with the final price, and accepting that quote is what puts it in Mina event.
+  const sendRequest = async (provider, brief) => {
+    if (!provider.vendorDbId) {
+      showToast("Den här leverantören går inte att kontakta än.");
       return false;
     }
-    const { data: msgs } = await supabaseRestRequest(`/messages?conversation_id=eq.${convo.id}&select=*&order=created_at.asc`, session.access_token);
-    setRealMessages((m) => ({ ...m, [convo.id]: msgs || [rows[0]] }));
-    setChatTarget({ kind: "provider", provider, real: true, conversationId: convo.id });
-    showToast("Förfrågan skickad ✓");
+    if (!session?.access_token) {
+      openAuthModal("signin");
+      showToast("Logga in för att skicka en förfrågan");
+      return false;
+    }
+    const conversationId = await postBrief(provider, brief);
+    if (!conversationId) return false;
+    loadVendorStatus();
+    const suggestions = similarProviders(provider, brief);
+    if (suggestions.length > 0) {
+      setAskMore({ provider, brief, conversationId, suggestions, sent: null });
+    } else {
+      await openRequestChat(provider, conversationId);
+      showToast("Förfrågan skickad ✓");
+    }
     return true;
+  };
+
+  // The same request to more vendors at once, so the customer can compare quotes. The first vendor's price
+  // estimate is left out: it was worked out from that vendor's prices, not the others'.
+  const sendRequestToMore = async (providers) => {
+    if (!askMore) return;
+    const { rows, party: when } = askMore.brief;
+    let sent = 0;
+    for (const p of providers) {
+      if (await postBrief(p, { rows, party: when }, true)) sent++;
+    }
+    loadVendorStatus();
+    setAskMore((a) => (a ? { ...a, sent } : a));
+    if (sent < providers.length) showToast(sent ? `Skickat till ${sent} av ${providers.length}` : "Kunde inte skicka just nu");
   };
 
   const sendChatMessage = async (text) => {
@@ -11658,7 +12172,7 @@ export default function App() {
       };
       setAcceptedQuotes((q) => [...q.filter((x) => x.id !== quoteId), synthetic]);
       setCartItems((c) => (c.some((x) => x.id === quoteId) ? c : [...c, { id: quoteId, addons: [] }]));
-      showToast("Offert accepterad — tillagd i Min fest ✓");
+      showToast("Offert godkänd – redo att boka ✓");
     }
   };
 
@@ -11781,8 +12295,13 @@ export default function App() {
     let base = provider.pricing.amount > 0 ? getBaseAmount(provider, partyLike) : 0;
     if (!Number.isFinite(base)) base = 0;
     const extra = priceFromAnswers(provider.request.fields, (f) => rows.find((r) => r.label === f.label)?.value);
-    const parts = rows.slice(0, 6).map((r) => `${r.label}: ${[].concat(r.value).join(", ")}`);
-    return { amount: Math.round(base + extra), description: `${catMap[categoryId]?.label || "Förfrågan"}. ${parts.join("; ")}`.slice(0, 300) };
+    // A starting point for "Det här ingår": the customer's own choices, one per line (questions are left out, answers kept)
+    const parts = rows.slice(0, 6).map((r) => {
+      const v = [].concat(r.value).join(", ");
+      return /\?\s*$/.test(r.label) ? v : `${r.label}: ${v}`;
+    });
+    const guests = Number(brief.party?.guests) || 0;
+    return { amount: Math.round(base + extra), description: [...parts, guests ? `För ${guests} gäster` : ""].filter(Boolean).join("\n").slice(0, 600) };
   };
 
   // --- Support — saved to the database; a trigger there emails info@planifest.se ---
@@ -12101,17 +12620,23 @@ export default function App() {
     setView("adminVendorDetail");
   };
   const approveVendor = async (id) => {
-    setVendorApplications((apps) => apps.map((v) => (v.id === id ? { ...v, status: "approved" } : v)));
+    setVendorApplications((apps) => apps.map((v) => (v.id === id ? { ...v, status: "approved", rejectionReason: "" } : v)));
     showToast("Leverantören är godkänd ✓");
     if (!id.startsWith("VND-") && session?.access_token) {
       await supabaseRestRequest(`/vendors?id=eq.${id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ status: "approved" }) });
     }
   };
-  const rejectVendor = async (id) => {
-    setVendorApplications((apps) => apps.map((v) => (v.id === id ? { ...v, status: "rejected" } : v)));
+  const rejectVendor = async (id, reason) => {
+    const clean = String(reason || "").trim().slice(0, 500);
+    setVendorApplications((apps) => apps.map((v) => (v.id === id ? { ...v, status: "rejected", rejectionReason: clean } : v)));
     showToast("Ansökan har avslagits");
     if (!id.startsWith("VND-") && session?.access_token) {
-      await supabaseRestRequest(`/vendors?id=eq.${id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ status: "rejected" }) });
+      // saved in the same update as the status, so the rejection email to the vendor includes the reason
+      const { error } = await supabaseRestRequest(`/vendors?id=eq.${id}`, session.access_token, {
+        method: "PATCH",
+        body: JSON.stringify({ rejection_reason: clean || null, status: "rejected" }),
+      });
+      if (error) showToast("Kunde inte spara avslaget. Försök igen.");
     }
   };
   const activeAdminVendor = vendorApplications.find((v) => v.id === activeAdminVendorId) || null;
@@ -12160,7 +12685,7 @@ export default function App() {
     <>
       {navItem("home", "Hem", goHome)}
       {navItem("explore", "Utforska", () => goExplore(null))}
-      {navItem("minfest", "Min fest", goPlanning, cartItems.length)}
+      {navItem("minfest", "Mina event", goPlanning, cartItems.length)}
       {navItem("messages", "Meddelanden", openMessages, unreadTotal)}
       {navItem("minsida", "Min sida", goMinSida)}
     </>
@@ -12176,8 +12701,8 @@ export default function App() {
       className="flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold"
       style={{ backgroundColor: colors.coral, color: colors.white }}
     >
-      <PartyPopper size={15} />
-      Min fest
+      <ShoppingBag size={15} />
+      Att boka
       {cartItems.length > 0 && (
         <span
           className="flex h-5 w-5 items-center justify-center rounded-full text-xs"
@@ -12557,6 +13082,10 @@ export default function App() {
           onOpenCart={() => setCartOpen(true)}
           onExploreCategory={goExplore}
           createRequest={planningCreateRequest}
+          vendorStatus={vendorStatus}
+          providers={customerProviders}
+          onOpenConversation={(r) => openConversationFromPanel({ conversation_id: r.conversationId, vendor_id: r.vendorId, category_id: r.category, other_name: r.name, i_am: "customer" })}
+          onGoBookings={goMinaBokningar}
         />
       )}
 
@@ -12724,8 +13253,8 @@ export default function App() {
             approveVendor(id);
             goAdminDashboard();
           }}
-          onReject={(id) => {
-            rejectVendor(id);
+          onReject={(id, reason) => {
+            rejectVendor(id, reason);
             goAdminDashboard();
           }}
         />
@@ -12770,7 +13299,7 @@ export default function App() {
         >
           <ShoppingBag size={18} />
           <span className="text-sm font-semibold">
-            <span className="hidden sm:inline">Min fest · </span>
+            <span className="hidden sm:inline">Att boka · </span>
             {cartItems.length} · {formatKr(total)}
           </span>
         </button>
@@ -12809,6 +13338,22 @@ export default function App() {
         />
       )}
       <ReviewModal target={reviewTarget} onSubmit={submitReview} onClose={closeReview} />
+      {askMore && (
+        <AskMoreSheet
+          state={askMore}
+          onSend={sendRequestToMore}
+          onOpenChat={() => {
+            const a = askMore;
+            setAskMore(null);
+            openRequestChat(a.provider, a.conversationId);
+          }}
+          onShowStatus={() => {
+            setAskMore(null);
+            goPlanning();
+          }}
+          onClose={() => setAskMore(null)}
+        />
+      )}
       <ChatModal
         target={chatTarget}
         messages={chatTarget?.real ? realMessages[chatTarget.conversationId] || [] : chatTarget ? chats[getChatKey(chatTarget)] || [] : []}
