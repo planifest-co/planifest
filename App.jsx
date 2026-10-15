@@ -1653,7 +1653,7 @@ function Toast({ message }) {
 // ---------------------------------------------------------------------------
 // Vendor card
 // ---------------------------------------------------------------------------
-function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode }) {
+function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode, compact = false }) {
   const priceLabel = provider.requestOnly
     ? provider.fromPrice > 0
       ? `från ${formatKr(provider.fromPrice)}`
@@ -1677,71 +1677,77 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
 
   const cat = catMap[provider.category];
   const added = inCart && !swapMode;
+  const where = provider.distanceKm != null ? formatDistance(provider.distanceKm) : provider.location;
+  const subtitle = [provider.tagline, where].filter(Boolean).join(" · ");
   return (
     <div
       onClick={() => onView(provider.id)}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === "Enter" && onView(provider.id)}
-      className="flex cursor-pointer flex-col p-2.5 transition-transform hover:-translate-y-0.5"
-      style={{ backgroundColor: colors.white, borderRadius: 28, boxShadow: "0 10px 30px rgba(74,21,56,0.09)" }}
+      className="group flex cursor-pointer flex-col gap-2.5"
     >
-      <div className="relative overflow-hidden" style={{ borderRadius: 20, backgroundColor: colors.coralSoft }}>
+      <div className="relative overflow-hidden" style={{ borderRadius: 22, backgroundColor: colors.coralSoft, aspectRatio: "1 / 1.08" }}>
         <img
-          src={provider.image || `https://picsum.photos/seed/${provider.seed}/400/300`}
+          src={provider.image || `https://picsum.photos/seed/${provider.seed}/500/540`}
           alt={provider.name}
-          className="h-32 w-full object-cover sm:h-36"
+          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
         />
+        {cat && (
+          <span className="absolute left-2.5 top-2.5 rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.92)", color: colors.plum }}>
+            {cat.label}
+          </span>
+        )}
         <HeartButton vendorId={provider.vendorDbId} className="absolute right-2 top-2 shadow-sm" />
         {busy && (
-          <span className="absolute bottom-2 left-2 rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ backgroundColor: colors.white, color: colors.coralDeep }}>
+          <span className="absolute bottom-2.5 left-2.5 rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ backgroundColor: colors.white, color: colors.coralDeep }}>
             Upptagen din tid
           </span>
         )}
-      </div>
-      <div className="flex flex-1 flex-col px-2 pb-1.5 pt-3">
-        {cat && (
-          <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1">
-            <span className="inline-block self-start rounded-full px-2.5 py-0.5 text-[11px] font-bold" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
-              {cat.label}
-            </span>
-            {(provider.alsoOffers || []).length > 0 && (
-              <span className="min-w-0 truncate text-[11px] font-semibold" style={{ color: colors.plumSoft }}>
-                + {provider.alsoOffers.map((id) => catMap[id]?.label).filter(Boolean).join(", ")}
-              </span>
-            )}
-          </div>
-        )}
-        <h3 className="truncate leading-tight" style={{ fontFamily: serif, fontWeight: 700, fontSize: 18, color: colors.plum }}>
-          {provider.name}
-        </h3>
-        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs" style={{ color: colors.plumSoft }}>
-          {provider.reviews > 0 ? (
-            <span className="flex flex-shrink-0 items-center gap-1 font-semibold">
-              <Star size={13} fill={colors.korall} color={colors.korall} /> {provider.rating}
-            </span>
-          ) : (
-            <span className="flex-shrink-0 font-semibold">Ny</span>
-          )}
-          <span className="truncate">· {provider.distanceKm != null ? formatDistance(provider.distanceKm) : provider.location}</span>
-        </div>
-        <div className="mt-3 flex items-center justify-between gap-2">
-          <p className="text-sm font-bold leading-tight" style={{ color: colors.plum }}>
-            {priceLabel}
-          </p>
+        {!compact && (
           <button
             onClick={handleAction}
-            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full"
+            className="absolute bottom-2.5 right-2.5 flex h-10 w-10 items-center justify-center rounded-full shadow-md"
             style={{
               backgroundColor: busy ? colors.beige : added ? colors.greenSoft : colors.coral,
-              color: busy ? colors.plumSoft : added ? colors.green : colors.cream,
-              boxShadow: added || busy ? "none" : `0 3px 0 ${colors.coralDeep}`,
-              opacity: busy ? 0.7 : 1,
+              color: busy ? colors.plumSoft : added ? colors.green : colors.white,
+              opacity: busy ? 0.8 : 1,
             }}
             aria-label={busy ? "Upptagen din tid, visa profilen" : provider.requestOnly ? "Skicka förfrågan" : swapMode ? "Välj denna" : inCart ? "Ta bort från Min fest" : "Lägg till i Min fest"}
           >
-            {swapMode || inCart ? <Check size={16} /> : <Plus size={16} />}
+            {swapMode || inCart ? <Check size={17} /> : <Plus size={17} />}
           </button>
+        )}
+      </div>
+      <div className="min-w-0 px-0.5">
+        <h3 className="truncate leading-tight" style={{ fontFamily: serif, fontWeight: 700, fontSize: 18, color: colors.plum }}>
+          {provider.name}
+        </h3>
+        {subtitle && (
+          <p className="mt-0.5 truncate text-[13px]" style={{ color: colors.plumSoft }}>
+            {subtitle}
+          </p>
+        )}
+        {(provider.alsoOffers || []).length > 0 && (
+          <p className="mt-0.5 truncate text-[11px] font-semibold" style={{ color: colors.plumSoft }}>
+            + {provider.alsoOffers.map((id) => catMap[id]?.label).filter(Boolean).join(", ")}
+          </p>
+        )}
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <span className="truncate text-sm font-semibold" style={{ color: colors.plum }}>
+            {priceLabel}
+          </span>
+          {provider.reviews > 0 ? (
+            <span className="flex flex-shrink-0 items-center gap-1 text-sm font-semibold" style={{ color: colors.plum }}>
+              <Star size={14} fill={colors.coral} color={colors.coral} />
+              {provider.rating}
+              <span className="font-normal" style={{ color: colors.plumSoft }}>({provider.reviews})</span>
+            </span>
+          ) : (
+            <span className="flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+              Ny
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -1751,7 +1757,32 @@ function VendorCard({ provider, party, inCart, onView, onAdd, onRemove, swapMode
 // ---------------------------------------------------------------------------
 // Views
 // ---------------------------------------------------------------------------
-function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
+function LightChip({ active, onClick, icon: Icon, emoji, label }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={!!active}
+      className="flex items-center gap-1.5 rounded-full px-4 py-2.5 text-sm transition-colors"
+      style={{
+        border: `1.5px solid ${active ? colors.plum : colors.beige}`,
+        backgroundColor: active ? colors.plum : colors.white,
+        color: active ? colors.white : colors.plum,
+        fontWeight: active ? 600 : 500,
+      }}
+    >
+      {Icon ? <Icon size={15} /> : emoji ? <span style={{ fontSize: 14, lineHeight: 1 }}>{emoji}</span> : null}
+      {label}
+    </button>
+  );
+}
+
+function formatEventDate(ds) {
+  if (!ds) return "";
+  const [y, m, d] = ds.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("sv-SE", { weekday: "short", day: "numeric", month: "long" });
+}
+
+function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro, session, upcomingEvent, onPlanning, popular = [], onViewProvider }) {
   const builderRef = useRef(null);
   const toggleCategory = (id) => {
     setParty((p) => ({
@@ -1763,98 +1794,141 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
     setParty((p) => ({ ...p, occasion: p.occasion === id ? null : id }));
   };
   const canSubmit = party.date && party.categories.length > 0;
-  const scrollToBuilder = () => builderRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBuilder = () => builderRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const fieldStyle = { border: `1.5px solid ${colors.beige}`, backgroundColor: colors.cream, color: colors.plum, fontWeight: 600 };
+  const sectionTitle = { fontFamily: serif, fontWeight: 700, letterSpacing: "-0.01em", color: colors.plum };
+
+  const ev = session ? upcomingEvent : null;
+  const evDays = ev ? daysUntil(ev.date) : null;
+  const evDone = ev ? (ev.tasks || []).filter((t) => t.done).length : 0;
+  const evTotal = ev ? (ev.tasks || []).length : 0;
 
   return (
     <div>
-      <section className="px-6 pb-12 pt-14 sm:px-10 sm:pb-16 sm:pt-20">
+      {ev && (
+        <section className="px-5 pt-6 sm:px-10 sm:pt-10">
+          <button
+            onClick={onPlanning}
+            className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-5 text-left sm:p-7"
+            style={{ backgroundColor: colors.plum, color: colors.white, borderRadius: 28 }}
+          >
+            <span className="flex w-full items-start justify-between gap-4">
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="text-xs font-semibold uppercase" style={{ letterSpacing: "0.12em", color: colors.lilacSoft }}>Din fest</span>
+                <span className="truncate" style={{ fontFamily: serif, fontWeight: 700, fontSize: 24, lineHeight: 1.15 }}>{ev.title || "Din fest"}</span>
+                <span className="text-sm" style={{ color: colors.lilacSoft }}>
+                  {[formatEventDate(ev.date), ev.guests ? `${ev.guests} gäster` : null].filter(Boolean).join(" · ")}
+                </span>
+              </span>
+              {evDays != null && evDays >= 0 && (
+                <span className="flex h-[72px] w-[72px] flex-shrink-0 flex-col items-center justify-center rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.25)" }}>
+                  <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 24, lineHeight: 1 }}>{evDays}</span>
+                  <span className="text-[11px]" style={{ color: colors.lilacSoft }}>{evDays === 1 ? "dag kvar" : "dagar kvar"}</span>
+                </span>
+              )}
+            </span>
+            {evTotal > 0 && (
+              <span className="flex w-full flex-col gap-1.5">
+                <span className="flex justify-between text-[13px]">
+                  <span>{evDone} av {evTotal} klara i checklistan</span>
+                  <span className="font-semibold">Öppna planeringen →</span>
+                </span>
+                <span className="flex h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.18)" }}>
+                  <span className="rounded-full" style={{ width: `${Math.round((evDone / evTotal) * 100)}%`, backgroundColor: colors.korall }} />
+                </span>
+              </span>
+            )}
+            {evTotal === 0 && <span className="text-[13px] font-semibold">Öppna planeringen →</span>}
+          </button>
+        </section>
+      )}
+
+      <section className="px-5 pb-6 pt-10 sm:px-10 sm:pb-10 sm:pt-16">
         <div className="mx-auto max-w-3xl text-center">
-          <div className="mb-6 flex items-center justify-center gap-4">
+          <div className="mb-5 flex items-center justify-center gap-4">
             <span className="w-5 sm:w-9" style={{ height: 2, borderRadius: 2, backgroundColor: colors.korall }} />
             <p className="text-xs font-bold sm:text-[13px]" style={{ letterSpacing: "0.24em", paddingLeft: "0.24em", color: colors.plumSoft }}>
-              PLAN · CREATE · CELEBRATE
+              PLANERA · BOKA · FIRA
             </p>
             <span className="w-5 sm:w-9" style={{ height: 2, borderRadius: 2, backgroundColor: colors.korall }} />
           </div>
           <h1 style={{ fontFamily: serif, fontWeight: 700, lineHeight: 1.08, letterSpacing: "-0.02em", color: colors.plum, textWrap: "balance" }} className="text-4xl sm:text-5xl lg:text-6xl">
-            För stunder värda att{" "}
-            <span style={{ boxShadow: `inset 0 -0.3em 0 ${colors.syren}` }}>planera.</span>
+            Vad ska ni fira?
           </h1>
-          <p className="mx-auto mt-5 max-w-md text-base sm:text-lg" style={{ color: colors.plumSoft, lineHeight: 1.55 }}>
-            Berätta om ditt event, jämför leverantörer och boka allt på ett ställe.
+          <p className="mx-auto mt-4 max-w-md text-base sm:text-lg" style={{ color: colors.plumSoft, lineHeight: 1.55 }}>
+            Hitta, jämför och boka allt till festen – på ett ställe.
           </p>
-          <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <div className="mt-7 flex flex-wrap justify-center gap-3">
             <button
               onClick={scrollToBuilder}
               className="inline-flex items-center gap-2 rounded-full px-7 py-3.5 text-base font-bold"
-              style={{ backgroundColor: colors.coral, color: colors.cream, boxShadow: `0 5px 0 ${colors.coralDeep}` }}
+              style={{ backgroundColor: colors.coral, color: colors.white }}
             >
-              Börja planera <ArrowRight size={18} />
+              Bygg din fest <ArrowRight size={18} />
             </button>
             <button
               onClick={() => howItWorksRef?.current?.scrollIntoView({ behavior: "smooth" })}
-              className="inline-flex items-center rounded-full px-7 py-3 text-base font-bold"
-              style={{ border: `2px solid ${colors.coral}`, color: colors.coral }}
+              className="inline-flex items-center rounded-full px-7 py-3.5 text-base font-semibold"
+              style={{ border: `1.5px solid ${colors.beige}`, backgroundColor: colors.white, color: colors.plum }}
             >
-              Så fungerar det
+              Så funkar det
             </button>
           </div>
         </div>
       </section>
 
-      <section ref={builderRef} className="px-6 pb-10 sm:px-10">
-        <div
-          className="relative mx-auto max-w-2xl overflow-hidden p-6 sm:p-10"
-          style={{ background: "linear-gradient(160deg, #8A2653, #5A1636)", color: colors.cream, borderRadius: 44, boxShadow: "0 24px 70px rgba(74,21,56,0.3)" }}
-        >
-          <span aria-hidden="true" className="absolute -right-8 -top-10 h-[96px] w-[96px] rounded-full sm:-top-[46px] sm:h-[150px] sm:w-[150px]" style={{ backgroundColor: colors.korall, opacity: 0.9 }} />
-          <span aria-hidden="true" className="absolute hidden rounded-full sm:block" style={{ right: 92, top: 62, width: 46, height: 46, backgroundColor: colors.syren }} />
-          <span aria-hidden="true" className="absolute hidden rounded-full sm:block" style={{ right: 30, top: 112, width: 22, height: 22, backgroundColor: colors.cream, opacity: 0.7 }} />
-          <h2 style={{ fontFamily: serif, fontWeight: 700, fontSize: 34, color: colors.cream }} className="relative mb-6">
-            Bygg din fest
-          </h2>
+      <section aria-label="Kategorier" className="pb-4 pt-2">
+        <div className="mx-auto flex max-w-4xl gap-4 overflow-x-auto px-5 pb-2 sm:flex-wrap sm:justify-center sm:gap-6 sm:px-10">
+          {CATEGORIES.map((c) => {
+            const Icon = c.icon;
+            const on = party.categories.includes(c.id);
+            return (
+              <button
+                key={c.id}
+                onClick={() => {
+                  toggleCategory(c.id);
+                  scrollToBuilder();
+                }}
+                aria-pressed={on}
+                className="flex flex-shrink-0 flex-col items-center gap-2"
+              >
+                <span
+                  className="flex h-[72px] w-[72px] rounded-full p-[3px]"
+                  style={{ background: on ? colors.coral : `conic-gradient(${colors.korall}, ${colors.coral}, ${colors.lilac}, ${colors.korall})` }}
+                >
+                  <span className="flex h-full w-full items-center justify-center rounded-full" style={{ border: `3px solid ${colors.cream}`, backgroundColor: on ? colors.coral : colors[c.tint] || colors.lilacSoft }}>
+                    {on ? <Check size={24} color={colors.white} /> : <Icon size={24} color={colors.coral} />}
+                  </span>
+                </span>
+                <span className="text-xs font-semibold" style={{ color: colors.plum }}>{c.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <label className="col-span-2 flex flex-col gap-1 text-sm sm:col-span-1" style={{ color: colors.cream, fontWeight: 700 }}>
-              <span className="flex items-center gap-1">
-                <Calendar size={14} /> Datum
-              </span>
-              <input
-                type="date"
-                value={party.date}
-                onChange={(e) => setParty((p) => ({ ...p, date: e.target.value }))}
-                className="rounded-full px-4 py-3 text-sm"
-                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum, fontWeight: 600 }}
-              />
+      <section ref={builderRef} className="px-5 pt-8 sm:px-10" style={{ scrollMarginTop: 80 }}>
+        <div className="mx-auto max-w-3xl p-5 sm:p-9" style={{ backgroundColor: colors.white, borderRadius: 28, border: `1px solid ${colors.beige}`, boxShadow: "0 18px 50px rgba(74,21,56,0.08)" }}>
+          <h2 style={sectionTitle} className="text-3xl">Bygg din fest</h2>
+          <p className="mb-6 mt-1 text-sm sm:text-base" style={{ color: colors.plumSoft }}>
+            Berätta om festen, så visar vi leverantörer som är lediga och passar.
+          </p>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <label className="col-span-2 flex flex-col gap-1.5 text-sm font-semibold sm:col-span-1" style={{ color: colors.plumSoft }}>
+              <span className="flex items-center gap-1"><Calendar size={14} /> Datum</span>
+              <input type="date" value={party.date} onChange={(e) => setParty((p) => ({ ...p, date: e.target.value }))} className="rounded-2xl px-4 py-3 text-sm" style={fieldStyle} />
             </label>
-            <label className="flex flex-col gap-1 text-sm" style={{ color: colors.cream, fontWeight: 700 }}>
-              <span className="flex items-center gap-1">
-                <Clock size={14} /> Start
-              </span>
-              <input
-                type="time"
-                value={party.startTime}
-                onChange={(e) => setParty((p) => ({ ...p, startTime: e.target.value }))}
-                className="rounded-full px-4 py-3 text-sm"
-                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum, fontWeight: 600 }}
-              />
+            <label className="flex flex-col gap-1.5 text-sm font-semibold" style={{ color: colors.plumSoft }}>
+              <span className="flex items-center gap-1"><Clock size={14} /> Start</span>
+              <input type="time" value={party.startTime} onChange={(e) => setParty((p) => ({ ...p, startTime: e.target.value }))} className="rounded-2xl px-4 py-3 text-sm" style={fieldStyle} />
             </label>
-            <label className="flex flex-col gap-1 text-sm" style={{ color: colors.cream, fontWeight: 700 }}>
-              <span className="flex items-center gap-1">
-                <Clock size={14} /> Slut
-              </span>
-              <input
-                type="time"
-                value={party.endTime}
-                onChange={(e) => setParty((p) => ({ ...p, endTime: e.target.value }))}
-                className="rounded-full px-4 py-3 text-sm"
-                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum, fontWeight: 600 }}
-              />
+            <label className="flex flex-col gap-1.5 text-sm font-semibold" style={{ color: colors.plumSoft }}>
+              <span className="flex items-center gap-1"><Clock size={14} /> Slut</span>
+              <input type="time" value={party.endTime} onChange={(e) => setParty((p) => ({ ...p, endTime: e.target.value }))} className="rounded-2xl px-4 py-3 text-sm" style={fieldStyle} />
             </label>
-            <label className="col-span-2 flex flex-col gap-1 text-sm sm:col-span-1" style={{ color: colors.cream, fontWeight: 700 }}>
-              <span className="flex items-center gap-1">
-                <Users size={14} /> Gäster
-              </span>
+            <label className="col-span-2 flex flex-col gap-1.5 text-sm font-semibold sm:col-span-1" style={{ color: colors.plumSoft }}>
+              <span className="flex items-center gap-1"><Users size={14} /> Gäster</span>
               <input
                 type="number"
                 min={1}
@@ -1869,27 +1943,27 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
                   if (!Number.isNaN(n)) setParty((p) => ({ ...p, guests: n }));
                 }}
                 onBlur={() => setParty((p) => ({ ...p, guests: p.guests === "" || p.guests < 1 ? 1 : p.guests }))}
-                className="rounded-full px-4 py-3 text-sm"
-                style={{ border: "none", backgroundColor: colors.cream, color: colors.plum, fontWeight: 600 }}
+                className="rounded-2xl px-4 py-3 text-sm"
+                style={fieldStyle}
               />
             </label>
           </div>
 
-          <p className="mb-3 mt-7 text-sm font-bold" style={{ color: colors.cream }}>
-            Vad ska du fira? <span style={{ opacity: 0.7, fontWeight: 500 }}>(valfritt)</span>
+          <p className="mb-3 mt-7 text-sm font-bold" style={{ color: colors.plum }}>
+            Vad ska du fira? <span style={{ color: colors.plumSoft, fontWeight: 500 }}>(valfritt)</span>
           </p>
-          <div className="flex flex-wrap gap-2.5">
+          <div className="flex flex-wrap gap-2">
             {OCCASIONS.map((o) => (
-              <CategoryChip key={o.id} active={party.occasion === o.id} onClick={() => toggleOccasion(o.id)} emoji={o.emoji} label={o.label} tone="dark" />
+              <LightChip key={o.id} active={party.occasion === o.id} onClick={() => toggleOccasion(o.id)} emoji={o.emoji} label={o.label} />
             ))}
           </div>
 
-          <p className="mb-3 mt-6 text-sm font-bold" style={{ color: colors.cream }}>
+          <p className="mb-3 mt-6 text-sm font-bold" style={{ color: colors.plum }}>
             Vad behöver du?
           </p>
-          <div className="flex flex-wrap gap-2.5">
+          <div className="flex flex-wrap gap-2">
             {CATEGORIES.map((c) => (
-              <CategoryChip key={c.id} active={party.categories.includes(c.id)} onClick={() => toggleCategory(c.id)} icon={c.icon} label={c.label} tone="dark" />
+              <LightChip key={c.id} active={party.categories.includes(c.id)} onClick={() => toggleCategory(c.id)} icon={c.icon} label={c.label} />
             ))}
           </div>
 
@@ -1897,93 +1971,83 @@ function HomeView({ party, setParty, onSubmit, howItWorksRef, onVendorIntro }) {
             disabled={!canSubmit}
             onClick={onSubmit}
             className="mt-8 flex w-full items-center justify-center gap-2 rounded-full py-4 text-base font-bold transition-opacity"
-            style={{
-              backgroundColor: colors.cream,
-              color: colors.coral,
-              boxShadow: "0 5px 0 #2E0A1D",
-              opacity: canSubmit ? 1 : 0.45,
-              cursor: canSubmit ? "pointer" : "not-allowed",
-            }}
+            style={{ backgroundColor: colors.coral, color: colors.white, opacity: canSubmit ? 1 : 0.45, cursor: canSubmit ? "pointer" : "not-allowed" }}
           >
             Visa leverantörer <ArrowRight size={18} />
           </button>
           {!canSubmit && (
-            <p className="mt-3 text-center text-xs" style={{ color: colors.cream, opacity: 0.8 }}>
+            <p className="mt-3 text-center text-xs" style={{ color: colors.plumSoft }}>
               Välj datum och minst en kategori för att komma igång.
             </p>
           )}
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-6 pt-16 sm:px-10">
-        <h2 style={{ fontFamily: serif, fontWeight: 700, letterSpacing: "-0.01em", color: colors.plum }} className="text-3xl sm:text-4xl">
-          Allt till festen
-        </h2>
-        <p className="mb-8 mt-2 text-base sm:text-lg" style={{ color: colors.plumSoft }}>
-          Hitta rätt leverantör i varje kategori.
-        </p>
-        <div className="grid grid-cols-2 gap-4 sm:gap-5 lg:grid-cols-4">
-          {CATEGORIES.map((c, i) => {
-            const bg = [colors.coralSoft, colors.peach, colors.lilacSoft, colors.syren][i % 4];
-            const on = party.categories.includes(c.id);
-            const Icon = c.icon;
-            return (
-              <button
-                key={c.id}
-                onClick={() => {
-                  toggleCategory(c.id);
-                  scrollToBuilder();
-                }}
-                aria-pressed={on}
-                className="flex flex-col items-center px-4 pb-6 pt-9 text-center transition-transform hover:-translate-y-1"
-                style={{ backgroundColor: bg, borderRadius: "999px 999px 28px 28px", border: `3px solid ${on ? colors.coral : "transparent"}` }}
-              >
-                <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-full" style={{ backgroundColor: on ? colors.coral : colors.cream }}>
-                  {on ? <Check size={26} color={colors.cream} /> : <Icon size={26} color={colors.coral} />}
-                </span>
-                <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 24, color: colors.plum }}>{c.label}</span>
-                <span className="mt-1 text-sm" style={{ color: colors.plumSoft, lineHeight: 1.4 }}>{c.tagline}</span>
-              </button>
-            );
-          })}
+      <section className="px-5 pt-10 sm:px-10">
+        <div className="mx-auto flex max-w-3xl flex-col gap-4 p-5 sm:flex-row sm:items-center sm:gap-8 sm:p-8" style={{ backgroundColor: colors.lilacSoft, borderRadius: 28 }}>
+          <div className="sm:flex-1">
+            <h2 style={sectionTitle} className="text-2xl">Hela festen på ett ställe</h2>
+            <p className="mt-1 text-sm leading-relaxed sm:text-base" style={{ color: colors.plumSoft }}>
+              Med ett gratis konto får du en egen planeringssida för din fest.
+            </p>
+            <button onClick={onPlanning} className="mt-4 inline-flex items-center gap-1.5 rounded-full px-5 py-3 text-sm font-bold" style={{ backgroundColor: colors.plum, color: colors.white }}>
+              {session ? "Till min planering" : "Börja planera gratis"} <ArrowRight size={16} />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:w-[300px]">
+            {[
+              { icon: ListChecks, label: "Checklista" },
+              { icon: Users, label: "Gästlista" },
+              { icon: Wallet, label: "Budget" },
+              { icon: Heart, label: "Leverantörer" },
+            ].map(({ icon: Icon, label }) => (
+              <span key={label} className="flex items-center gap-2 rounded-2xl px-3 py-3 text-sm font-semibold" style={{ backgroundColor: colors.white, color: colors.plum }}>
+                <Icon size={18} color={colors.coral} /> {label}
+              </span>
+            ))}
+          </div>
         </div>
       </section>
 
-      <section ref={howItWorksRef} className="mx-auto max-w-6xl px-6 pt-20 sm:px-10">
-        <h2 className="mb-10 text-center text-3xl sm:text-4xl" style={{ fontFamily: serif, fontWeight: 700, letterSpacing: "-0.01em", color: colors.plum }}>
-          Så fungerar det
-        </h2>
-        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+      {popular.length > 0 && (
+        <section className="mx-auto max-w-6xl px-5 pt-14 sm:px-10">
+          <h2 style={sectionTitle} className="mb-5 text-2xl sm:text-3xl">Populära just nu</h2>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:gap-x-5 lg:grid-cols-4">
+            {popular.map((p) => (
+              <VendorCard key={p.id} provider={p} party={null} compact onView={onViewProvider} onAdd={() => {}} onRemove={() => {}} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section ref={howItWorksRef} className="mx-auto max-w-6xl px-5 pt-14 sm:px-10" style={{ scrollMarginTop: 80 }}>
+        <h2 style={sectionTitle} className="mb-5 text-2xl sm:text-3xl">Så funkar det</h2>
+        <div className="grid gap-3 sm:grid-cols-3 sm:gap-5">
           {[
-            { n: 1, title: "Berätta om ditt event", text: "Datum, tid, antal gäster och vad du behöver.", bg: colors.korall, fg: colors.plum },
-            { n: 2, title: "Jämför", text: "Se priser, bilder, recensioner och tillgänglighet.", bg: colors.lilac, fg: colors.white },
-            { n: 3, title: "Bygg din fest", text: "Välj leverantörer, byt när du vill och se totalpriset.", bg: colors.coral, fg: colors.cream },
-            { n: 4, title: "Boka", text: "Boka och betala på ett ställe.", bg: colors.syren, fg: colors.plum },
+            { n: 1, title: "Bygg din fest", text: "Välj datum, antal gäster och vad du behöver – vi visar vilka som är lediga." },
+            { n: 2, title: "Jämför & fråga", text: "Kika på bilder och omdömen, chatta med leverantören eller begär offert." },
+            { n: 3, title: "Boka & fira", text: "Godkänn offerten, fira din dag och lämna ett omdöme efteråt." },
           ].map((st) => (
-            <div key={st.n} className="text-center">
-              <div
-                className="mx-auto mb-4 flex h-[72px] w-[72px] items-center justify-center rounded-full"
-                style={{ backgroundColor: st.bg, color: st.fg, fontFamily: serif, fontWeight: 700, fontSize: 32 }}
-              >
-                {st.n}
-              </div>
-              <h3 className="mb-2 text-lg font-bold" style={{ color: colors.plum }}>{st.title}</h3>
-              <p className="mx-auto max-w-[240px] text-base" style={{ color: colors.plumSoft, lineHeight: 1.5 }}>{st.text}</p>
+            <div key={st.n} className="flex items-start gap-4 p-5 sm:flex-col sm:gap-3 sm:p-7" style={{ backgroundColor: colors.coralSoft, borderRadius: 24 }}>
+              <span style={{ fontFamily: serif, fontStyle: "italic", fontWeight: 600, fontSize: 38, lineHeight: 1, color: colors.coral, minWidth: 24 }}>{st.n}</span>
+              <span className="flex flex-col gap-1">
+                <span className="text-base font-bold" style={{ color: colors.plum }}>{st.title}</span>
+                <span className="text-sm leading-relaxed" style={{ color: colors.plumSoft }}>{st.text}</span>
+              </span>
             </div>
           ))}
         </div>
       </section>
 
       {onVendorIntro && (
-        <section className="mx-auto max-w-6xl px-6 pb-16 pt-20 sm:px-10">
-          <div className="relative flex flex-col items-start justify-between gap-6 overflow-hidden p-8 sm:flex-row sm:items-center sm:p-14" style={{ backgroundColor: colors.coral, color: colors.cream, borderRadius: 44 }}>
-            <span aria-hidden="true" className="absolute" style={{ right: -40, top: -60, width: 220, height: 220, borderRadius: "50%", backgroundColor: colors.korall }} />
-            <span aria-hidden="true" className="absolute" style={{ right: 160, bottom: -50, width: 120, height: 120, borderRadius: "50%", backgroundColor: colors.lilac }} />
-            <div className="relative max-w-lg">
-              <h2 style={{ fontFamily: serif, fontWeight: 700, fontSize: 36 }}>Är du leverantör?</h2>
-              <p className="mt-2 text-lg" style={{ opacity: 0.88 }}>Bli en del av Planifest.</p>
+        <section className="mx-auto max-w-6xl px-5 pb-16 pt-14 sm:px-10">
+          <div className="flex flex-col items-start justify-between gap-5 p-6 sm:flex-row sm:items-center sm:p-12" style={{ backgroundColor: colors.peach, borderRadius: 28 }}>
+            <div className="max-w-lg">
+              <p className="text-xs font-bold uppercase" style={{ letterSpacing: "0.12em", color: colors.coral }}>För leverantörer</p>
+              <h2 style={sectionTitle} className="mt-1 text-2xl sm:text-3xl">Visa upp ditt arbete där festplanerarna letar</h2>
+              <p className="mt-2 text-sm sm:text-base" style={{ color: colors.plum, opacity: 0.85 }}>Precis som på Instagram – men här kan kunderna boka dig direkt.</p>
             </div>
-            <button onClick={onVendorIntro} className="relative rounded-full px-7 py-4 text-base font-bold" style={{ backgroundColor: colors.cream, color: colors.coral }}>
+            <button onClick={onVendorIntro} className="flex-shrink-0 rounded-full px-7 py-3.5 text-base font-bold" style={{ backgroundColor: colors.plum, color: colors.white }}>
               Bli leverantör
             </button>
           </div>
@@ -10179,6 +10243,26 @@ export default function App() {
   };
 
   const savedProviders = [...favoriteIds].map((id) => customerProviders.find((p) => p.vendorDbId === id)).filter(Boolean);
+  // Home page: the next upcoming party (or the latest one) and a few well-reviewed vendors.
+  const upcomingEvent = useMemo(() => {
+    if (!events.length) return null;
+    const today = todayStr();
+    const ahead = events.filter((e) => e.date && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+    return ahead[0] || events.find((e) => e.id === activeEventId) || events[0];
+  }, [events, activeEventId]);
+  const popularProviders = useMemo(() => {
+    const seen = new Set();
+    return customerProviders
+      .filter((p) => !p.quoteMessageId && p.image)
+      .sort((a, b) => (b.reviews || 0) - (a.reviews || 0) || (Number(b.rating) || 0) - (Number(a.rating) || 0))
+      .filter((p) => {
+        const key = p.vendorDbId || p.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 4);
+  }, [customerProviders]);
   const goPlanning = () => {
     setView("planning");
     setMobileMenuOpen(false);
@@ -11165,7 +11249,18 @@ export default function App() {
       </div>
 
       {view === "home" && (
-        <HomeView party={party} setParty={setParty} onSubmit={startBuilder} howItWorksRef={howItWorksRef} onVendorIntro={vendorMode ? null : goVendorIntro} />
+        <HomeView
+          party={party}
+          setParty={setParty}
+          onSubmit={startBuilder}
+          howItWorksRef={howItWorksRef}
+          onVendorIntro={vendorMode ? null : goVendorIntro}
+          session={session}
+          upcomingEvent={upcomingEvent}
+          onPlanning={goPlanning}
+          popular={popularProviders}
+          onViewProvider={viewProfile}
+        />
       )}
 
       {view === "results" && (
