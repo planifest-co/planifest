@@ -1393,6 +1393,115 @@ const sans = "'Figtree', system-ui, sans-serif";
 const SHOW_DEMO_DATA = false;
 
 // ---------------------------------------------------------------------------
+// Demo mode: invented example vendors, two per category, shown only to
+// someone who opens the site with ?demo (remembered for that browser tab).
+// Ordinary visitors never see them, and they can never be booked.
+//   ?demo       demo vendors next to the real ones, with a small banner
+//   ?demo=film  only the demo vendors and no banner (for recording videos)
+//   ?demo=av    turns demo mode off again
+// ---------------------------------------------------------------------------
+const DEMO_SETTING = (() => {
+  if (typeof window === "undefined") return "";
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (q.has("demo")) {
+      const v = q.get("demo");
+      const mode = v === "av" || v === "0" ? "" : v === "film" ? "film" : "on";
+      if (mode) window.sessionStorage.setItem("planifest-demo", mode);
+      else window.sessionStorage.removeItem("planifest-demo");
+      return mode;
+    }
+    return window.sessionStorage.getItem("planifest-demo") || "";
+  } catch (e) {
+    return "";
+  }
+})();
+const DEMO_MODE = !!DEMO_SETTING;
+const DEMO_FILM = DEMO_SETTING === "film";
+const DEMO_ICONS = {"dj": "<circle cx=\"8\" cy=\"18\" r=\"4\"></circle><path d=\"M12 18V2l7 4\"></path>", "lokal": "<path d=\"M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z\"></path><path d=\"M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2\"></path><path d=\"M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2\"></path><path d=\"M10 6h4\"></path><path d=\"M10 10h4\"></path><path d=\"M10 14h4\"></path><path d=\"M10 18h4\"></path>", "catering": "<path d=\"m16 2-2.3 2.3a3 3 0 0 0 0 4.2l1.8 1.8a3 3 0 0 0 4.2 0L22 8\"></path><path d=\"M15 15 3.3 3.3a4.2 4.2 0 0 0 0 6l7.3 7.3c.7.7 2 .7 2.8 0L15 15Zm0 0 7 7\"></path><path d=\"m2.1 21.8 6.4-6.3\"></path><path d=\"m19 5-7 7\"></path>", "dekor": "<path d=\"M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z\"></path><path d=\"M20 3v4\"></path><path d=\"M22 5h-4\"></path><path d=\"M4 17v2\"></path><path d=\"M5 18H3\"></path>", "fotograf": "<path d=\"M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z\"></path><circle cx=\"12\" cy=\"13\" r=\"3\"></circle>", "tarta": "<path d=\"M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8\"></path><path d=\"M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1\"></path><path d=\"M2 21h20\"></path><path d=\"M7 8v3\"></path><path d=\"M12 8v3\"></path><path d=\"M17 8v3\"></path><path d=\"M7 4h0.01\"></path><path d=\"M12 4h0.01\"></path><path d=\"M17 4h0.01\"></path>", "blommor": "<path d=\"M12 5a3 3 0 1 1 3 3m-3-3a3 3 0 1 0-3 3m3-3v1M9 8a3 3 0 1 0 3 3M9 8h1m5 0a3 3 0 1 1-3 3m3-3h-1m-2 3v-1\"></path><circle cx=\"12\" cy=\"8\" r=\"2\"></circle><path d=\"M12 10v12\"></path><path d=\"M12 22c4.2 0 7-1.667 7-5-4.2 0-7 1.667-7 5Z\"></path><path d=\"M12 22c-4.2 0-7-1.667-7-5 4.2 0 7 1.667 7 5Z\"></path>", "uthyrning": "<path d=\"M12 22v-9\"></path><path d=\"M15.17 2.21a1.67 1.67 0 0 1 1.63 0L21 4.57a1.93 1.93 0 0 1 0 3.36L8.82 14.79a1.655 1.655 0 0 1-1.64 0L3 12.43a1.93 1.93 0 0 1 0-3.36z\"></path><path d=\"M20 13v3.87a2.06 2.06 0 0 1-1.11 1.83l-6 3.08a1.93 1.93 0 0 1-1.78 0l-6-3.08A2.06 2.06 0 0 1 4 16.87V13\"></path><path d=\"M21 12.43a1.93 1.93 0 0 0 0-3.36L8.83 2.2a1.64 1.64 0 0 0-1.63 0L3 4.57a1.93 1.93 0 0 0 0 3.36l12.18 6.86a1.636 1.636 0 0 0 1.63 0z\"></path>", "av": "<path d=\"M5 7 3 5\"></path><path d=\"M9 6V3\"></path><path d=\"m13 7 2-2\"></path><circle cx=\"9\" cy=\"13\" r=\"3\"></circle><path d=\"M11.83 12H20a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h2.17\"></path><path d=\"M16 16h2\"></path>", "talare": "<path d=\"M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z\"></path><path d=\"M19 10v2a7 7 0 0 1-14 0v-2\"></path><line x1=\"12\" x2=\"12\" y1=\"19\" y2=\"22\"></line>", "teambuilding": "<path d=\"M6 9H4.5a2.5 2.5 0 0 1 0-5H6\"></path><path d=\"M18 9h1.5a2.5 2.5 0 0 0 0-5H18\"></path><path d=\"M4 22h16\"></path><path d=\"M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22\"></path><path d=\"M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22\"></path><path d=\"M18 2H6v7a6 6 0 0 0 12 0V2Z\"></path>"};
+const DEMO_PALETTES = [
+  ["#F8DDE3", "#F6D3D0"],
+  ["#FFEDE7", "#FFD0C6"],
+  ["#FCE9E6", "#F2B8C6"],
+  ["#FBF3E8", "#E7D5C2"],
+  ["#F6D3D0", "#D98BA8"],
+];
+const DEMO_ACCENTS = ["#7D2248", "#FF7F6B", "#D98BA8", "#F2B8C6", "#FFFFFF", "#FFD0C6"];
+// Simple illustrated pictures for the example vendors (no photos of anyone's real work)
+function demoArt(cat, seedText, variant) {
+  let h = 2166136261;
+  for (const ch of `${seedText}-${variant}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  const rnd = () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0), (h % 10000) / 10000);
+  const [c1, c2] = DEMO_PALETTES[Math.floor(rnd() * DEMO_PALETTES.length)];
+  const icon = DEMO_ICONS[cat] || DEMO_ICONS.dekor;
+  let deco = "";
+  for (let i = 0; i < 14; i++) {
+    const x = Math.round(rnd() * 600), y = Math.round(rnd() * 420), r = 3 + Math.round(rnd() * 7);
+    deco += `<circle cx="${x}" cy="${y}" r="${r}" fill="${DEMO_ACCENTS[i % DEMO_ACCENTS.length]}" opacity="0.55"/>`;
+  }
+  for (let i = 0; i < 3; i++) {
+    const x = 40 + Math.round(rnd() * 520), y = 40 + Math.round(rnd() * 200), c = DEMO_ACCENTS[(i + 1) % 4];
+    deco += `<ellipse cx="${x}" cy="${y}" rx="26" ry="32" fill="${c}" opacity="0.7"/><path d="M${x} ${y + 32} q 8 30 -4 60" stroke="${c}" stroke-width="2" fill="none" opacity="0.6"/>`;
+  }
+  let main;
+  if (variant % 3 === 1) {
+    main = `<circle cx="210" cy="230" r="130" fill="#fff" opacity="0.85"/><g transform="translate(126 146) scale(7)" fill="none" stroke="#4A1538" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${icon}</g>`;
+  } else if (variant % 3 === 2) {
+    main = "";
+    for (let row = 0; row < 3; row++)
+      for (let col = 0; col < 4; col++)
+        main += `<g transform="translate(${60 + col * 140} ${50 + row * 125}) scale(3.2) rotate(${(row + col) % 2 ? -8 : 8} 12 12)" fill="none" stroke="#7D2248" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="${(row + col) % 2 ? 0.35 : 0.8}">${icon}</g>`;
+  } else {
+    main = `<circle cx="300" cy="210" r="112" fill="#fff" opacity="0.9"/><g transform="translate(216 126) scale(7)" fill="none" stroke="#4A1538" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${icon}</g>`;
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 420" width="600" height="420"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs><rect width="600" height="420" fill="url(#g)"/>${deco}${main}</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+// Free photos from Pexels (pexels.com, free to use). If one doesn't load, the illustrated picture is shown instead.
+const DEMO_PHOTOS = {"DEMO-novasund":[1564668, 2111016, 332688],"DEMO-kvallsljud":[29263194, 13902049, 2381596],"DEMO-havsbris":[16859956, 5511124],"DEMO-magasin7":[2649771, 18447739],"DEMO-lagomsmak":[36318467, 34321369, 35247186],"DEMO-bordsdukat":[38110778, 35985198],"DEMO-rose":[14005784, 5701249],"DEMO-pastell":[4684169, 35001439],"DEMO-ljusfangst":[18999581, 30726403, 2479946],"DEMO-bildverkstan":[12906340, 14581845],"DEMO-fluff":[4110008, 3026803],"DEMO-glasyr":[19238270, 14677740, 6479548],"DEMO-kvistknopp":[5532810, 4238349],"DEMO-vinda":[1486677, 11794584],"DEMO-hyrhornan":[50675, 19351564],"DEMO-glasporslin":[6310606],"DEMO-teknikteamet":[13348768, 9005506, 5175355],"DEMO-skarmscen":[29708258, 29708266],"DEMO-scenvana":[29708260, 3321793],"DEMO-gnista":[10401267],"DEMO-kajak":[1252396, 12316141, 1682744],"DEMO-utmaningen":[7551757]};
+const pexelsUrl = (id) => `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&w=900`;
+const DEMO_IMAGE_FALLBACK = {};
+if (DEMO_MODE && typeof document !== "undefined") {
+  document.addEventListener(
+    "error",
+    (e) => {
+      const img = e.target;
+      if (img && img.tagName === "IMG" && DEMO_IMAGE_FALLBACK[img.getAttribute("src")]) img.src = DEMO_IMAGE_FALLBACK[img.getAttribute("src")];
+    },
+    true
+  );
+}
+const DEMO_VENDOR_DATA = [{"id": "DEMO-novasund", "cat": "dj", "companyName": "DJ Nova Sund", "tagline": "Mingel, middag och dansgolv – musiken följer kvällen", "description": "DJ i Göteborg för afterworks, kickoffs och kvällar med dans. Jag läser rummet och anpassar musiken efter gästerna.", "requestForms": {}, "services": [{"id": "DEMO-novasund-p1", "name": "Mingel & middag", "description": "Lugn musik som håller stämningen uppe utan att ta över samtalen.", "priceType": "per_hour", "price": 1200, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": 3, "includes": ["Diskret ljud för mingel och middag", "Trådlös mikrofon för tal"], "choiceGroups": [], "category": "dj"}, {"id": "DEMO-novasund-p2", "name": "Kvällspaket med dansgolv", "description": "", "priceType": "per_hour", "price": 1500, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": 4, "includes": ["Ljud och ljus för upp till 150 gäster", "Önskelista i förväg"], "choiceGroups": [{"id": "stil", "label": "Musikstil", "min": 1, "max": 2, "options": [{"id": "o1", "label": "Hits & pop"}, {"id": "o2", "label": "80- och 90-tal"}, {"id": "o3", "label": "House"}, {"id": "o4", "label": "Svenska klassiker"}]}], "category": "dj"}], "addons": [{"id": "DEMO-novasund-a1", "name": "Rökmaskin", "price": 500, "priceType": "fixed", "serviceIds": ["DEMO-novasund-p2"]}, {"id": "DEMO-novasund-a2", "name": "Extra högtalare för talen", "price": 600, "priceType": "fixed", "serviceIds": ["DEMO-novasund-p1", "DEMO-novasund-p2"]}]}, {"id": "DEMO-kvallsljud", "cat": "dj", "companyName": "Kvällsljud DJ-duo", "tagline": "Två DJ:er, ett dansgolv som aldrig blir tomt", "description": "DJ-duo med eget ljud- och ljussystem. Vi spelar på afterworks, julbord och sommarevent.", "requestForms": {}, "services": [{"id": "DEMO-kvallsljud-p1", "name": "Afterwork-set", "description": "", "priceType": "fixed", "price": 6500, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "16:00", "timeTo": "21:00", "minHours": "", "includes": ["3 timmar musik", "Eget ljudsystem"], "choiceGroups": [], "category": "dj"}, {"id": "DEMO-kvallsljud-p2", "name": "DJ-paket kväll", "description": "", "priceType": "per_hour", "price": 1800, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": 4, "includes": ["Två DJ:er", "Ljus och ljud ingår"], "choiceGroups": [], "category": "dj"}], "addons": [{"id": "DEMO-kvallsljud-a1", "name": "Ljusshow", "price": 900, "priceType": "fixed", "serviceIds": ["DEMO-kvallsljud-p1", "DEMO-kvallsljud-p2"]}]}, {"id": "DEMO-havsbris", "cat": "lokal", "companyName": "Salong Havsbris", "tagline": "Ljus konferenslokal vid vattnet med plats för 80", "description": "En ljus lokal vid kajen med stora fönster mot älven. Konferens på dagen, middag och mingel på kvällen.", "requestForms": {}, "services": [{"id": "DEMO-havsbris-p1", "name": "Konferensdag", "description": "", "priceType": "fixed", "price": 9500, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": 60, "timeFrom": "08:00", "timeTo": "17:00", "minHours": "", "includes": ["Projektor och skärm", "Wifi och whiteboard", "Möblering efter önskemål"], "choiceGroups": [], "category": "lokal"}, {"id": "DEMO-havsbris-p2", "name": "Kvällsbokning", "description": "", "priceType": "fixed", "price": 16000, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": 80, "timeFrom": "17:00", "timeTo": "01:00", "minHours": "", "includes": ["Ljudanläggning", "Bar och garderob"], "choiceGroups": [], "category": "lokal"}], "addons": [{"id": "DEMO-havsbris-a1", "name": "Extra grupprum", "price": 1500, "priceType": "fixed", "serviceIds": ["DEMO-havsbris-p1"]}, {"id": "DEMO-havsbris-a2", "name": "Städning efteråt", "price": 2000, "priceType": "fixed", "serviceIds": ["DEMO-havsbris-p1", "DEMO-havsbris-p2"]}]}, {"id": "DEMO-magasin7", "cat": "lokal", "companyName": "Magasin 7 Kajen", "tagline": "Industriell charm, plats för 120 gäster", "description": "Ett gammalt hamnmagasin med högt i tak, tegelväggar och egen scen.", "requestForms": {}, "services": [{"id": "DEMO-magasin7-p1", "name": "Halvdag", "description": "", "priceType": "fixed", "price": 6000, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": 40, "timeFrom": "08:00", "timeTo": "12:30", "minHours": "", "includes": ["Möblering för möte", "Kaffe och vatten"], "choiceGroups": [], "category": "lokal"}, {"id": "DEMO-magasin7-p2", "name": "Hel dag", "description": "", "priceType": "fixed", "price": 10500, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": 40, "timeFrom": "08:00", "timeTo": "17:00", "minHours": "", "includes": ["Möblering för möte", "Kaffe och vatten hela dagen"], "choiceGroups": [], "category": "lokal"}, {"id": "DEMO-magasin7-p3", "name": "Kväll", "description": "", "priceType": "fixed", "price": 14000, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": 120, "timeFrom": "18:00", "timeTo": "02:00", "minHours": "", "includes": ["Scen och ljud", "Bardisk"], "choiceGroups": [], "category": "lokal"}], "addons": [{"id": "DEMO-magasin7-a1", "name": "Scenljus", "price": 1500, "priceType": "fixed", "serviceIds": ["DEMO-magasin7-p3"]}]}, {"id": "DEMO-lagomsmak", "cat": "catering", "companyName": "Lagom Smak Catering", "tagline": "Konferensmat och mingel som alla blir glada av", "description": "Vi lagar luncher, fika och mingelbuffé till konferenser och företagsevent i hela Göteborg. Vegetariskt och allergianpassat ingår alltid.", "requestForms": {}, "services": [{"id": "DEMO-lagomsmak-p1", "name": "Konferenspaket heldag", "description": "", "priceType": "per_person", "price": 395, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": 10, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Förmiddagsfika", "Lunch med sallad och bröd", "Eftermiddagsfika"], "choiceGroups": [{"id": "lunch", "label": "Lunch", "min": 1, "max": 1, "options": [{"id": "o1", "label": "Kycklinggryta med jasminris"}, {"id": "o2", "label": "Laxfilé med dillpotatis"}, {"id": "o3", "label": "Vegetarisk lasagne"}, {"id": "o4", "label": "Halloumisallad med bulgur"}]}], "category": "catering"}, {"id": "DEMO-lagomsmak-p2", "name": "Lunch & fika", "description": "", "priceType": "per_person", "price": 225, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": 10, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Lunch med sallad och bröd", "Kaffe och kaka"], "choiceGroups": [{"id": "lunch", "label": "Lunch", "min": 1, "max": 1, "options": [{"id": "o1", "label": "Kycklinggryta med jasminris"}, {"id": "o2", "label": "Laxfilé med dillpotatis"}, {"id": "o3", "label": "Vegetarisk lasagne"}, {"id": "o4", "label": "Halloumisallad med bulgur"}]}], "category": "catering"}, {"id": "DEMO-lagomsmak-p3", "name": "Mingelbuffé", "description": "", "priceType": "per_person", "price": 345, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": 20, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Bröd och smör", "Ostbricka"], "choiceGroups": [{"id": "smaratter", "label": "Smårätter", "min": 4, "max": 4, "options": [{"id": "o1", "label": "Bruschetta"}, {"id": "o2", "label": "Kycklingspett"}, {"id": "o3", "label": "Västkustsallad på knäcke"}, {"id": "o4", "label": "Caprese"}, {"id": "o5", "label": "Grillade grönsaker", "price": 15}, {"id": "o6", "label": "Rökt lax på blini", "price": 25}]}], "category": "catering"}], "addons": [{"id": "DEMO-lagomsmak-a1", "name": "Alkoholfri dryck", "price": 35, "priceType": "per_person", "serviceIds": ["DEMO-lagomsmak-p1", "DEMO-lagomsmak-p2", "DEMO-lagomsmak-p3"]}, {"id": "DEMO-lagomsmak-a2", "name": "Vinpaket", "price": 195, "priceType": "per_person", "serviceIds": ["DEMO-lagomsmak-p3"]}]}, {"id": "DEMO-bordsdukat", "cat": "catering", "companyName": "Bordsdukat Catering", "tagline": "Sittande middagar med vita dukar", "description": "Trerättersmiddagar och frukostar för företag. Vi kommer med personal, porslin och allt som behövs.", "requestForms": {}, "services": [{"id": "DEMO-bordsdukat-p1", "name": "Trerättersmiddag", "description": "", "priceType": "per_person", "price": 595, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": 20, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": [], "choiceGroups": [{"id": "forratt", "label": "Förrätt", "min": 1, "max": 1, "options": [{"id": "o1", "label": "Toast skagen"}, {"id": "o2", "label": "Burrata med tomat"}, {"id": "o3", "label": "Svampsoppa"}]}, {"id": "varmratt", "label": "Varmrätt", "min": 1, "max": 1, "options": [{"id": "o1", "label": "Oxfilé med rödvinssås", "price": 60}, {"id": "o2", "label": "Torskrygg med beurre blanc"}, {"id": "o3", "label": "Svamprisotto"}]}, {"id": "dessert", "label": "Dessert", "min": 1, "max": 1, "options": [{"id": "o1", "label": "Chokladfondant"}, {"id": "o2", "label": "Pannacotta"}, {"id": "o3", "label": "Ostar och marmelad"}]}], "category": "catering"}, {"id": "DEMO-bordsdukat-p2", "name": "Frukostbuffé", "description": "", "priceType": "per_person", "price": 165, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": 10, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Bröd, pålägg och ägg", "Yoghurt och frukt", "Kaffe och te"], "choiceGroups": [], "category": "catering"}], "addons": [{"id": "DEMO-bordsdukat-a1", "name": "Champagne vid ankomst", "price": 120, "priceType": "per_person", "serviceIds": ["DEMO-bordsdukat-p1"]}, {"id": "DEMO-bordsdukat-a2", "name": "Serveringspersonal", "price": 4500, "priceType": "fixed", "serviceIds": ["DEMO-bordsdukat-p1"]}]}, {"id": "DEMO-rose", "cat": "dekor", "companyName": "Ballongateljén Rosé", "tagline": "Ballongbågar och bordsdekor i dina färger", "description": "Ballongdekor och bordsdekor för företag och privatpersoner. Vi sätter upp och tar ner.", "requestForms": {"dekor": {"direct": true, "fields": []}}, "services": [{"id": "DEMO-rose-p1", "name": "Ballongbåge", "description": "", "priceType": "fixed", "price": 2500, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Upp till 2,5 meter", "Valfria färger", "Uppsättning och nedmontering"], "choiceGroups": [], "category": "dekor"}, {"id": "DEMO-rose-p2", "name": "Bordsdekor", "description": "", "priceType": "per_unit", "price": 180, "priceNote": "", "fromPrice": "", "unitLabel": "bord", "minGuests": 2, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Löpare, ljus och små ballonger"], "choiceGroups": [], "category": "dekor"}, {"id": "DEMO-rose-q1", "name": "", "description": "Större dekor efter önskemål, tema och lokal.", "priceType": "quote", "price": 0, "priceNote": "", "fromPrice": 3500, "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": [], "choiceGroups": [], "category": "dekor"}], "addons": []}, {"id": "DEMO-pastell", "cat": "dekor", "companyName": "Studio Pastell Dekor", "tagline": "Helhetsdekor efter tema och färger", "description": "Vi tar fram ett förslag utifrån er lokal, er grafiska profil och känslan ni vill skapa.", "requestForms": {}, "services": [{"id": "DEMO-pastell-q1", "name": "", "description": "Helhetsdekor efter tema, färger och lokal. Berätta vad ni behöver så får ni ett förslag.", "priceType": "quote", "price": 0, "priceNote": "", "fromPrice": 4000, "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": [], "choiceGroups": [], "category": "dekor"}], "addons": []}, {"id": "DEMO-ljusfangst", "cat": "fotograf", "companyName": "Ljusfångst Foto", "tagline": "Eventfoto och porträtt för företag", "description": "Fotograf för konferenser, kickoffs och mässor. Bilderna får ni använda fritt i företagets kanaler.", "requestForms": {}, "services": [{"id": "DEMO-ljusfangst-p1", "name": "Eventfoto 3 timmar", "description": "", "priceType": "fixed", "price": 7500, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["150 redigerade bilder", "Leverans inom 7 dagar", "Fria för företagets kanaler"], "choiceGroups": [], "category": "fotograf"}, {"id": "DEMO-ljusfangst-p2", "name": "Porträttstation", "description": "", "priceType": "fixed", "price": 4900, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["2 timmar", "Enhetliga porträtt till hemsida och LinkedIn"], "choiceGroups": [], "category": "fotograf"}], "addons": [{"id": "DEMO-ljusfangst-a1", "name": "Expressleverans 48 h", "price": 1500, "priceType": "fixed", "serviceIds": ["DEMO-ljusfangst-p1", "DEMO-ljusfangst-p2"]}]}, {"id": "DEMO-bildverkstan", "cat": "fotograf", "companyName": "Bildverkstan Väst", "tagline": "Foto och film som berättar om er dag", "description": "Vi fotograferar och filmar, och klipper en kort film ni kan dela samma vecka.", "requestForms": {}, "services": [{"id": "DEMO-bildverkstan-p1", "name": "Halvdag foto & film", "description": "", "priceType": "fixed", "price": 14500, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["4 timmar", "100 redigerade bilder", "Film på 60 sekunder"], "choiceGroups": [], "category": "fotograf"}, {"id": "DEMO-bildverkstan-p2", "name": "Heldag foto & film", "description": "", "priceType": "fixed", "price": 24000, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["8 timmar", "250 redigerade bilder", "Film på 2 minuter"], "choiceGroups": [], "category": "fotograf"}], "addons": []}, {"id": "DEMO-fluff", "cat": "tarta", "companyName": "Tårtateljé Fluff", "tagline": "Tårtor med er logga", "description": "Tårtor och bakverk till jubileum, lansering och fredagsfika.", "requestForms": {"tarta": {"direct": true, "fields": []}}, "services": [{"id": "DEMO-fluff-p1", "name": "Tårta med logga", "description": "", "priceType": "per_unit", "price": 65, "priceNote": "", "fromPrice": "", "unitLabel": "bit", "minGuests": 12, "maxGuests": 200, "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Logga i ätbart tryck"], "choiceGroups": [{"id": "smak", "label": "Smak", "min": 1, "max": 1, "options": [{"id": "o1", "label": "Choklad & hallon"}, {"id": "o2", "label": "Vanilj & jordgubb"}, {"id": "o3", "label": "Citron & passionsfrukt"}]}], "category": "tarta"}, {"id": "DEMO-fluff-q1", "name": "", "description": "Specialtårtor efter önskemål.", "priceType": "quote", "price": 0, "priceNote": "", "fromPrice": 900, "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": [], "choiceGroups": [], "category": "tarta"}], "addons": []}, {"id": "DEMO-glasyr", "cat": "tarta", "companyName": "Bagarstugan Glasyr", "tagline": "Bakat från grunden, varje gång", "description": "Tårtor, cupcakes och småkakor. Berätta vad ni vill ha så skickar vi en offert.", "requestForms": {}, "services": [{"id": "DEMO-glasyr-q1", "name": "", "description": "Tårtor och bakverk efter önskemål.", "priceType": "quote", "price": 0, "priceNote": "", "fromPrice": 900, "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": [], "choiceGroups": [], "category": "tarta"}], "addons": []}, {"id": "DEMO-kvistknopp", "cat": "blommor", "companyName": "Kvist & Knopp", "tagline": "Säsongens blommor till bord och entré", "description": "Bordsarrangemang, entréblommor och buketter efter säsong.", "requestForms": {}, "services": [{"id": "DEMO-kvistknopp-q1", "name": "", "description": "Bordsarrangemang, entréblommor och buketter efter säsong.", "priceType": "quote", "price": 0, "priceNote": "", "fromPrice": 1200, "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": [], "choiceGroups": [], "category": "blommor"}], "addons": []}, {"id": "DEMO-vinda", "cat": "blommor", "companyName": "Blomsterkollektivet Vinda", "tagline": "Gröna, vilda arrangemang", "description": "Lösa, naturliga arrangemang med det som växer just nu.", "requestForms": {"blommor": {"direct": true, "fields": []}}, "services": [{"id": "DEMO-vinda-p1", "name": "Bordsarrangemang", "description": "", "priceType": "per_unit", "price": 350, "priceNote": "", "fromPrice": "", "unitLabel": "bord", "minGuests": 3, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Säsongens blommor", "Leverans ingår"], "choiceGroups": [], "category": "blommor"}, {"id": "DEMO-vinda-q1", "name": "", "description": "Större blomsterdekor efter önskemål.", "priceType": "quote", "price": 0, "priceNote": "", "fromPrice": 2000, "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": [], "choiceGroups": [], "category": "blommor"}], "addons": []}, {"id": "DEMO-hyrhornan", "cat": "uthyrning", "companyName": "Hyrhörnan Bord & Stol", "tagline": "Bord, stolar och ståbord", "description": "Vi hyr ut möbler till event i Göteborg och levererar dit ni är.", "requestForms": {}, "services": [{"id": "DEMO-hyrhornan-p1", "name": "Runt bord, 8 personer", "description": "", "priceType": "per_unit", "price": 95, "priceNote": "", "fromPrice": "", "unitLabel": "bord", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Vit duk ingår"], "choiceGroups": [], "category": "uthyrning"}, {"id": "DEMO-hyrhornan-p2", "name": "Stol med dyna", "description": "", "priceType": "per_unit", "price": 25, "priceNote": "", "fromPrice": "", "unitLabel": "stol", "minGuests": 10, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": [], "choiceGroups": [], "category": "uthyrning"}, {"id": "DEMO-hyrhornan-p3", "name": "Ståbord med klädsel", "description": "", "priceType": "per_unit", "price": 140, "priceNote": "", "fromPrice": "", "unitLabel": "ståbord", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": [], "choiceGroups": [], "category": "uthyrning"}], "addons": [{"id": "DEMO-hyrhornan-a1", "name": "Leverans och hämtning i Göteborg", "price": 650, "priceType": "fixed", "serviceIds": ["DEMO-hyrhornan-p1", "DEMO-hyrhornan-p2", "DEMO-hyrhornan-p3"]}]}, {"id": "DEMO-glasporslin", "cat": "uthyrning", "companyName": "Glas & Porslin Uthyrning", "tagline": "Dukat för 10 eller 300", "description": "Porslin, bestick och glas. Ni lämnar tillbaka det odiskat.", "requestForms": {}, "services": [{"id": "DEMO-glasporslin-p1", "name": "Kuvert: tallrikar, bestick och glas", "description": "", "priceType": "per_unit", "price": 39, "priceNote": "", "fromPrice": "", "unitLabel": "kuvert", "minGuests": 10, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Diskas av oss"], "choiceGroups": [], "category": "uthyrning"}, {"id": "DEMO-glasporslin-p2", "name": "Champagneglas", "description": "", "priceType": "per_unit", "price": 8, "priceNote": "", "fromPrice": "", "unitLabel": "glas", "minGuests": 24, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": [], "choiceGroups": [], "category": "uthyrning"}], "addons": [{"id": "DEMO-glasporslin-a1", "name": "Leverans och hämtning", "price": 450, "priceType": "fixed", "serviceIds": ["DEMO-glasporslin-p1", "DEMO-glasporslin-p2"]}]}, {"id": "DEMO-teknikteamet", "cat": "av", "companyName": "Teknikteamet Ljud & Bild", "tagline": "Teknik som bara fungerar", "description": "Ljud, bild och streaming för konferenser. En tekniker är med på plats så att ni kan fokusera på innehållet.", "requestForms": {}, "services": [{"id": "DEMO-teknikteamet-p1", "name": "Konferenspaket", "description": "", "priceType": "fixed", "price": 5900, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Projektor och duk", "2 trådlösa mikrofoner", "Tekniker på plats i 2 timmar"], "choiceGroups": [], "category": "av"}, {"id": "DEMO-teknikteamet-p2", "name": "Hybridmöte med streaming", "description": "", "priceType": "fixed", "price": 12500, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Kamera och streaming", "Ljud för deltagare på distans", "Tekniker hela dagen"], "choiceGroups": [], "category": "av"}], "addons": [{"id": "DEMO-teknikteamet-a1", "name": "Extra tekniktimme", "price": 850, "priceType": "fixed", "serviceIds": ["DEMO-teknikteamet-p1"]}]}, {"id": "DEMO-skarmscen", "cat": "av", "companyName": "Skärm & Scen AV", "tagline": "Scen, LED-skärm och ljud", "description": "Vi bygger scen och sätter upp skärmar och ljud för större event.", "requestForms": {}, "services": [{"id": "DEMO-skarmscen-p1", "name": "Scen och ljud", "description": "", "priceType": "fixed", "price": 8900, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Scen 4 x 3 meter", "Ljud för upp till 200"], "choiceGroups": [], "category": "av"}, {"id": "DEMO-skarmscen-p2", "name": "LED-skärm", "description": "", "priceType": "fixed", "price": 6500, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Skärm 3 x 2 meter", "Uppsättning och nedmontering"], "choiceGroups": [], "category": "av"}], "addons": []}, {"id": "DEMO-scenvana", "cat": "talare", "companyName": "Scenvana Moderatorer", "tagline": "Moderatorer som håller tiden och stämningen", "description": "Erfarna moderatorer för konferenser, paneler och interna dagar.", "requestForms": {}, "services": [{"id": "DEMO-scenvana-p1", "name": "Moderator halvdag", "description": "", "priceType": "fixed", "price": 12000, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Förmöte och körschema", "Leder samtal och paneler"], "choiceGroups": [], "category": "talare"}, {"id": "DEMO-scenvana-p2", "name": "Moderator heldag", "description": "", "priceType": "fixed", "price": 19500, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Förmöte och körschema", "Leder hela dagen"], "choiceGroups": [], "category": "talare"}], "addons": []}, {"id": "DEMO-gnista", "cat": "talare", "companyName": "Talarbyrån Gnista", "tagline": "Föreläsningar som ger energi", "description": "Inspirationsföreläsningar för kickoffs och konferenser.", "requestForms": {}, "services": [{"id": "DEMO-gnista-p1", "name": "Inspirationsföreläsning 45 min", "description": "", "priceType": "fixed", "price": 18000, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": "", "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": [], "choiceGroups": [{"id": "tema", "label": "Tema", "min": 1, "max": 1, "options": [{"id": "o1", "label": "Hållbart ledarskap"}, {"id": "o2", "label": "Kreativitet i vardagen"}, {"id": "o3", "label": "Stress och återhämtning"}]}], "category": "talare"}], "addons": []}, {"id": "DEMO-kajak", "cat": "teambuilding", "companyName": "Kajak & Kompass Aktiviteter", "tagline": "Aktiviteter i skärgården och i stan", "description": "Teambuilding utomhus med guide. Vi anpassar efter gruppen.", "requestForms": {}, "services": [{"id": "DEMO-kajak-p1", "name": "Kajakpaddling i skärgården", "description": "", "priceType": "per_person", "price": 690, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": 8, "maxGuests": 40, "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Guide och utrustning", "Fika på en ö"], "choiceGroups": [], "category": "teambuilding"}, {"id": "DEMO-kajak-p2", "name": "Stadsorientering", "description": "", "priceType": "per_person", "price": 395, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": 10, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Kartor och uppdrag", "Pris till vinnarlaget"], "choiceGroups": [], "category": "teambuilding"}], "addons": []}, {"id": "DEMO-utmaningen", "cat": "teambuilding", "companyName": "Utmaningen Teambuilding", "tagline": "Tävlingar som får gruppen att skratta", "description": "Escape room, matlagningsdueller och quiz för företag.", "requestForms": {}, "services": [{"id": "DEMO-utmaningen-p1", "name": "Escape room-tävling", "description": "", "priceType": "per_person", "price": 450, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": 8, "maxGuests": "", "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["60 minuter", "Prisutdelning"], "choiceGroups": [], "category": "teambuilding"}, {"id": "DEMO-utmaningen-p2", "name": "Matlagningsduell", "description": "", "priceType": "per_person", "price": 795, "priceNote": "", "fromPrice": "", "unitLabel": "", "minGuests": 10, "maxGuests": 30, "timeFrom": "", "timeTo": "", "minHours": "", "includes": ["Kock som leder", "Middagen ni lagar"], "choiceGroups": [], "category": "teambuilding"}], "addons": []}];
+const DEMO_VENDORS = DEMO_MODE
+  ? DEMO_VENDOR_DATA.map((v) => ({
+      id: v.id,
+      createdAt: "2026-10-01T00:00:00Z",
+      requestForms: v.requestForms,
+      companyName: v.companyName,
+      baseLocation: "goteborg",
+      serviceArea: { type: "city", value: "Göteborg" },
+      categories: [v.cat],
+      status: "approved",
+      blockedTimes: [],
+      profile: {
+        tagline: v.tagline,
+        description: v.description,
+        images: [
+          ...(DEMO_PHOTOS[v.id] || []).map((id, n) => {
+            const url = pexelsUrl(id);
+            DEMO_IMAGE_FALLBACK[url] = demoArt(v.cat, v.id, n);
+            return url;
+          }),
+          demoArt(v.cat, v.id, 2),
+        ],
+        services: v.services.map((x) => ({ ...x, category: v.cat })),
+        addons: v.addons,
+      },
+    }))
+  : [];
+const DEMO_NO_BOOKING = "Det här är påhittade exempel i demoläget och går inte att boka.";
+
+// ---------------------------------------------------------------------------
 // Mock data
 // ---------------------------------------------------------------------------
 const CATEGORIES = [
@@ -1413,11 +1522,11 @@ const catMap = Object.fromEntries(CATEGORIES.map((c) => [c.id, c]));
 
 const OCCASIONS = [
   { id: "babyshower", label: "Babyshower", emoji: "🍼", boardLabel: "Babyshower" },
-  { id: "birthday", label: "Födelsedag", emoji: "🎂", boardLabel: "Födelsedagsfest" },
+  { id: "birthday", label: "Födelsedag", emoji: "🎂", boardLabel: "Födelsedag" },
   { id: "wedding", label: "Bröllop", emoji: "💍", boardLabel: "Bröllop" },
   { id: "baptism", label: "Dop", emoji: "👶", boardLabel: "Dop" },
-  { id: "graduation", label: "Student", emoji: "🎓", boardLabel: "Studentfest" },
-  { id: "party", label: "Fest", emoji: "🎉", boardLabel: "Fest" },
+  { id: "graduation", label: "Student", emoji: "🎓", boardLabel: "Student" },
+  { id: "party", label: "Kalas", emoji: "🎉", boardLabel: "Kalas" },
   { id: "corporate", label: "Företagsevent & konferens", emoji: "🏢", boardLabel: "Företagsevent" },
   { id: "other", label: "Annat", emoji: "✨", boardLabel: "Mitt event" },
 ];
@@ -1888,8 +1997,9 @@ function getCustomerVisibleProviders(vendorApplications, customerReviews, bookin
       distanceKm: getMockDistance(p.seed, "goteborg"),
     };
   });
-  const approvedListings = vendorApplications.filter((v) => v.status === "approved").flatMap((v) => mapVendorToProviders(v, bookings, busyByVendor));
-  return [...mockListings, ...approvedListings].map((p) => applyCustomerReviews(p, customerReviews));
+  const approvedListings = DEMO_FILM ? [] : vendorApplications.filter((v) => v.status === "approved").flatMap((v) => mapVendorToProviders(v, bookings, busyByVendor));
+  const demoListings = DEMO_VENDORS.flatMap((v) => mapVendorToProviders(v, [], {})).map((p) => ({ ...p, vendorDbId: null, isDemo: true }));
+  return [...mockListings, ...approvedListings, ...demoListings].map((p) => applyCustomerReviews(p, customerReviews));
 }
 
 // --- Pricing helpers -------------------------------------------------------
@@ -2792,9 +2902,9 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
         <section className="mx-auto max-w-5xl px-5 pt-10 sm:px-8">
           <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:gap-8 sm:p-8" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 24 }}>
             <div className="sm:flex-1">
-              <h2 className="text-2xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Hela festen på ett ställe</h2>
+              <h2 className="text-2xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Hela eventet på ett ställe</h2>
               <p className="mt-1 text-sm leading-relaxed sm:text-base" style={{ color: colors.plumSoft }}>
-                Oavsett om det är en fest eller ett företagsevent får du en egen planeringssida – gratis.
+                Oavsett om det är ett kalas eller ett företagsevent får du en egen planeringssida – gratis.
               </p>
               <button onClick={onPlanning} className="mt-4 inline-flex items-center gap-1.5 text-sm font-bold" style={{ color: colors.coral }}>
                 Se hur det fungerar <ArrowRight size={15} />
@@ -2840,7 +2950,7 @@ function HomeView({ party, setParty, onBuild, onExplore, onExploreCategory, howI
           <SectionTitle>Så funkar det</SectionTitle>
           <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
             {[
-              { n: 1, title: "Bygg ditt event", text: "Fest, kickoff eller konferens – välj datum, antal gäster och vad du behöver, så visar vi vilka som är lediga." },
+              { n: 1, title: "Bygg ditt event", text: "Kalas, kickoff eller konferens – välj datum, antal gäster och vad du behöver, så visar vi vilka som är lediga." },
               { n: 2, title: "Jämför & fråga", text: "Kika på bilder och omdömen, chatta med leverantören eller begär offert." },
               { n: 3, title: "Boka & fira", text: "Godkänn offerten, fira din dag och lämna ett omdöme efteråt." },
             ].map((st) => (
@@ -12075,6 +12185,10 @@ export default function App() {
   };
 
   const confirmBooking = async (company = null) => {
+    if (cart.some((p) => p.isDemo)) {
+      showToast(DEMO_NO_BOOKING);
+      return;
+    }
     const companyFields = company && typeof company === "object" && company.company_name ? company : {};
     const pkgProblem = cartPackageProblem();
     if (pkgProblem) {
@@ -12174,6 +12288,10 @@ export default function App() {
 
   const submitGuestBooking = async ({ name, email, phone }) => {
     setGuestError("");
+    if (cart.some((p) => p.isDemo)) {
+      setGuestError(DEMO_NO_BOOKING);
+      return;
+    }
     const pkgProblem = cartPackageProblem();
     if (pkgProblem) {
       setGuestError(pkgProblem);
@@ -12912,6 +13030,10 @@ export default function App() {
   };
 
   const openProviderChat = async (provider) => {
+    if (provider.isDemo) {
+      showToast("Det här är en påhittad exempelleverantör och går inte att kontakta.");
+      return;
+    }
     if (!provider.vendorDbId) {
       setChatTarget({ kind: "provider", provider });
       return;
@@ -12993,6 +13115,10 @@ export default function App() {
   // A request: the customer answers the vendor's own questions, the vendor replies in the chat and
   // sends a quote with the final price, and accepting that quote is what puts it in Mina event.
   const sendRequest = async (provider, brief) => {
+    if (provider.isDemo) {
+      showToast("Det här är en påhittad exempelleverantör och går inte att kontakta.");
+      return false;
+    }
     if (!provider.vendorDbId) {
       showToast("Den här leverantören går inte att kontakta än.");
       return false;
@@ -14395,6 +14521,14 @@ export default function App() {
       />
       <SupportModal open={supportOpen} onClose={() => setSupportOpen(false)} onSubmit={submitSupportMessage} defaultEmail={session?.user?.email || ""} />
       <Toast message={toast} />
+      {DEMO_MODE && !DEMO_FILM && (
+        <div className="fixed left-1/2 top-2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold shadow" style={{ backgroundColor: colors.plum, color: colors.white }}>
+          Demoläge: påhittade exempelleverantörer
+          <a href="?demo=av" className="underline" style={{ color: colors.peach }}>
+            Avsluta
+          </a>
+        </div>
+      )}
       {cookieConsent === null && (
         <CookieConsentBanner onAcceptAll={() => setConsent("all")} onNecessaryOnly={() => setConsent("necessary")} onOpenPolicy={goCookiePolicy} />
       )}
