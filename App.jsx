@@ -8,6 +8,7 @@ import {
   Cake,
   ClipboardList,
   Flower2,
+  Gift,
   PackageOpen,
   Star,
   MapPin,
@@ -316,6 +317,13 @@ const REQUEST_TEMPLATES = {
     { id: "count", label: "Antal", type: "number" },
     { id: "delivery", label: "Hämtning eller leverans", type: "single", options: choices(["Hämtar själv", "Leverans"]) },
     { id: "setup", label: "Uppsättning", type: "single", options: choices(["Ni sätter upp", "Jag sätter upp själv"]) },
+  ],
+  trycksaker: [
+    { id: "items", label: "Vad vill ni ha?", type: "long", required: true },
+    { id: "count", label: "Antal", type: "number" },
+    { id: "text", label: "Namn eller text som ska stå på", type: "short" },
+    { id: "colors", label: "Färger och stil", type: "short" },
+    { id: "delivery", label: "Hämtning eller leverans", type: "single", options: choices(["Hämtar själv", "Leverans"]) },
   ],
 };
 const newFieldId = () => `n${Date.now().toString(36)}${Math.floor(Math.random() * 36).toString(36)}`.slice(0, 16);
@@ -1513,6 +1521,7 @@ const CATEGORIES = [
   { id: "tarta", label: "Tårta", icon: Cake, tagline: "Den söta höjdpunkten", tint: "peachSoft" },
   { id: "blommor", label: "Blommor", icon: Flower2, tagline: "Naturliga detaljer som lyfter känslan", tint: "pinkSoft" },
   { id: "uthyrning", label: "Uthyrning", icon: PackageOpen, tagline: "Allt praktiskt på plats", tint: "coralSoft" },
+  { id: "trycksaker", label: "Trycksaker & personliga gåvor", icon: Gift, tagline: "Inbjudningar, namnskyltar, ljus och gåvor med ditt namn på", tint: "pinkSoft" },
   { id: "av", label: "AV & teknik", icon: Projector, tagline: "Ljud, bild och teknik som bara fungerar", tint: "lilacSoft" },
   { id: "talare", label: "Talare & moderator", icon: Mic, tagline: "Någon som leder, inspirerar och håller tiden", tint: "peachSoft" },
   { id: "teambuilding", label: "Teambuilding", icon: Trophy, tagline: "Aktiviteter som samlar gruppen", tint: "pinkSoft" },
@@ -2082,6 +2091,7 @@ const PACKAGE_TEMPLATES = {
   lokal: { name: "Kvällsbokning", priceType: "fixed", timeFrom: "18:00", timeTo: "01:00", includes: [""] },
   fotograf: { name: "Fotopaket", priceType: "fixed", includes: [""] },
   uthyrning: { name: "", priceType: "per_unit", unitLabel: "st" },
+  trycksaker: { name: "", priceType: "per_unit", unitLabel: "st", includes: [""] },
   av: { name: "Teknikpaket", priceType: "fixed", includes: [""] },
 };
 const PACKAGE_HINTS = {
@@ -2090,6 +2100,7 @@ const PACKAGE_HINTS = {
   lokal: { name: "T.ex. Stora lokalen, kväll", include: "T.ex. Ljudanläggning och scen", group: "T.ex. Uppställning", option: "T.ex. Sittande middag" },
   fotograf: { name: "T.ex. Bröllop heldag", include: "T.ex. 150 redigerade bilder", group: "T.ex. Leverans", option: "T.ex. Fotobok" },
   uthyrning: { name: "T.ex. Runt bord, 8 personer", include: "T.ex. Duk ingår", group: "T.ex. Färg", option: "T.ex. Vit" },
+  trycksaker: { name: "T.ex. Personliga ljus, 20 st", include: "T.ex. Valfritt namn och datum", group: "T.ex. Färg", option: "T.ex. Vit" },
 };
 const packageHint = (cat) => PACKAGE_HINTS[cat] || { name: "T.ex. Standardpaket", include: "T.ex. Vad som ingår", group: "T.ex. Välj variant", option: "T.ex. Alternativ 1" };
 
@@ -3039,7 +3050,6 @@ function BuilderView({ party, setParty, onSubmit, onClose, events = [], activeEv
       <div className="mt-4 flex items-center justify-between gap-3 px-4 py-3" style={{ backgroundColor: colors.white, border: `1px solid ${colors.beige}`, borderRadius: 18 }}>
         <span className="flex flex-col">
           <span className="text-[15px] font-bold" style={{ color: colors.plum }}>Antal gäster</span>
-          <span className="text-[13px]" style={{ color: colors.plumSoft }}>Ungefär räcker</span>
         </span>
         <span className="flex items-center gap-2">
           <button onClick={() => setGuests(guestsNum - 5)} aria-label="Färre gäster" className="flex h-11 w-11 items-center justify-center rounded-full text-xl" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.cream, color: colors.plum }}>
@@ -11107,11 +11117,11 @@ function Footer({ onGoHome, onBrowse, onHowItWorks, onBecomeVendor, onOpenTerms,
               <Wordmark fontSize={28} />
             </div>
             <p className="mt-4 max-w-sm text-sm leading-relaxed" style={{ color: colors.plumSoft }}>
-              Planifest föddes ur en enkel idé: att festen förtjänar lika mycket omtanke som planeringen
-              bakom den. Istället för att leta leverantörer i tio olika flikar och samtal samlar vi allt
-              du behöver – lokal, catering, DJ, dekor, foto och mer – på ett ställe, så att du kan bygga
-              hela ditt event i din egen takt. Vi startade i Göteborg med en övertygelse om att bra fester
-              börjar med bra idéer, och att rätt verktyg gör hela skillnaden.
+              Planifest samlar allt du behöver för ditt event på ett ställe: lokal, catering, DJ, dekor,
+              foto och mer. Istället för att leta leverantörer i tio olika flikar och samtal bygger du
+              hela ditt event i din egen takt, från första idé till färdig fest, oavsett om det är en
+              födelsedag, ett bröllop eller ett företagsevent. Vi startade i Göteborg med en övertygelse
+              om att bra event börjar med bra idéer, och att rätt verktyg gör hela skillnaden.
             </p>
             <a
               href="https://www.instagram.com/planifest.se/"
