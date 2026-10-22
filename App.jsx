@@ -1949,6 +1949,8 @@ function mapVendorToProviders(vendor, bookings, busyByVendor = {}) {
     return {
       id: `${vendor.id}-${categoryId}`,
       vendorDbId: vendor.id.startsWith("VND-") ? null : vendor.id, // only real (Supabase) vendors get a real FK id
+      orgNumber: vendor.publicOrgNumber || null,
+      orgKind: vendor.orgKind || "unknown",
       category: categoryId,
       alsoOffers: vendor.categories.filter((c) => c !== categoryId),
       name: vendor.companyName,
@@ -3866,7 +3868,7 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                   Välj ett eller flera paket. Priset räknas på din tid och ditt antal gäster.
                 </p>
                 <p className="mt-1 text-xs" style={{ color: colors.plumSoft }}>
-                  Du bokar direkt hos {provider.name}, som är en näringsidkare. Planifest förmedlar bokningen. Avbokningsreglerna är lika för alla leverantörer och visas innan du bokar.
+                  Du bokar direkt hos {provider.name}{vendorLegalLine(provider) ? ` (${vendorLegalLine(provider)})` : ""}, som är en näringsidkare. Planifest förmedlar bokningen. Avbokningsreglerna är lika för alla leverantörer och visas innan du bokar.
                 </p>
               </div>
               {provider.packages.map((pkg) => {
@@ -4503,6 +4505,9 @@ function CartDrawer({ open, onClose, cart, party, onSwap, onRemove, onToggleAddo
   );
 }
 
+// Who the customer books with: a company shows its organisation number; a sole trader is never shown with a personal number.
+const vendorLegalLine = (p) => (!p.vendorDbId ? "" : p.orgNumber ? `org.nr ${p.orgNumber}` : p.orgKind === "sole" ? "enskild firma" : "");
+
 function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConfirm, onLogin, guestError, guestSubmitting, guestBlockReason, onOpenTerms, events = [], eventChoice, onEventChoice }) {
   const [forCompany, setForCompany] = useState(party.occasion === "corporate");
   const [company, setCompany] = useState({ name: "", org: "", address: "", reference: "" });
@@ -4544,6 +4549,22 @@ function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConf
         </p>
         <p className="mb-3">
           Du bokar direkt hos respektive leverantör, som är en näringsidkare. Avtalet om tjänsten ingår du med leverantören, som ansvarar för att tjänsten utförs. Planifest förmedlar bokningen, är inte part i avtalet och ansvarar inte för leverantörens utförande.
+        </p>
+        {cart.some((p) => p.vendorDbId) && (
+          <ul className="mb-3 list-disc pl-5">
+            {cart.filter((p) => p.vendorDbId).map((p) => (
+              <li key={p.id}>
+                {p.name}
+                {vendorLegalLine(p) ? ` (${vendorLegalLine(p)})` : ""}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mb-1 font-semibold" style={{ color: colors.plum }}>
+          Ångerrätt
+        </p>
+        <p className="mb-3">
+          Ångerrätt gäller normalt inte för tjänster som ska utföras på en bestämd dag, till exempel lokal, catering och andra tjänster till ditt event, eller för varor som tillverkas efter dina önskemål, som trycksaker med ditt namn. Hyr du saker som levereras till dig före eventet kan du ha 14 dagars ångerrätt. Avbokar du gäller avbokningsreglerna nedan.
         </p>
         <p className="mb-1 font-semibold" style={{ color: colors.plum }}>
           Bokningsvillkor & avbokningsregler
@@ -10978,6 +10999,7 @@ const TERMS_SECTIONS = [
     after: [
       "Kund och Leverantör kan också komma överens om en avbokning via chatten på Planifest. Då bestämmer de tillsammans hur mycket som betalas tillbaka.",
       "Återbetalningar görs till det betalsätt som användes vid betalningen.",
+      "Ångerrätt: Enligt distansavtalslagen gäller normalt ingen ångerrätt för tjänster som ska utföras på en bestämd dag, till exempel lokal, catering och andra tjänster till ditt event. Det gäller också varor som tillverkats efter Kundens anvisningar eller fått en tydlig personlig prägel, som trycksaker med ditt namn. Hyr Kunden saker som levereras före eventet kan Kunden ha 14 dagars ångerrätt. Kontakta Leverantören eller Planifest vid frågor.",
     ],
   },
   {
@@ -11005,7 +11027,6 @@ const TERMS_SECTIONS = [
       "Avbokar Leverantören eller ställer in en bokning får Kunden alltid tillbaka allt som betalats, oavsett när avbokningen sker. Planifest föreslår lediga Leverantörer i samma kategori som Kunden kan välja bland.",
       "En sen avbokning registreras som en varning på Leverantörens konto. Avbokningar som beror på samma händelse eller orsak, inom en kort tidsperiod, räknas som en varning. Planifest avgör vad som räknas som samma orsak.",
       "Upprepade sena avbokningar kan leda till att kontot stängs av från Planifest.",
-      "Vid upprepade sena avbokningar kan en avgift motsvarande provisionen komma att dras från Leverantörens nästa utbetalning.",
     ],
   },
   {
@@ -11613,9 +11634,10 @@ export default function App() {
   // logged in or not, and merge them in alongside the seed/demo listings.
   useEffect(() => {
     const refreshApproved = () =>
-    fetchApprovedVendors(session?.access_token).then(({ data, error }) => {
+    Promise.all([fetchApprovedVendors(session?.access_token), rpcAnon("vendor_org_info", {})]).then(([{ data, error }, orgRes]) => {
       if (error || !data) return;
-      const localList = data.map(mapDbVendorToLocal);
+      const orgInfo = new Map((Array.isArray(orgRes?.data) ? orgRes.data : []).map((o) => [o.vendor_id, o]));
+      const localList = data.map(mapDbVendorToLocal).map((l) => ({ ...l, publicOrgNumber: orgInfo.get(l.id)?.org_number || null, orgKind: orgInfo.get(l.id)?.kind || "unknown" }));
       const freshIds = new Set(localList.map((l) => l.id));
       setVendorApplications((apps) => {
         // Approved vendors that are no longer in the fresh list were denied, suspended or deleted: drop them.
