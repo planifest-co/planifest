@@ -10253,7 +10253,7 @@ function PackageDetails({ name, details }) {
   );
 }
 
-function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime, onRemoveBlockedTime, onShowToast, onFetchGuestContact }) {
+function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime, onRemoveBlockedTime, onShowToast, onFetchGuestContact, onCancelItem = null }) {
   const [blockDate, setBlockDate] = useState("");
   const [blockStart, setBlockStart] = useState("09:00");
   const [blockEnd, setBlockEnd] = useState("17:00");
@@ -10265,7 +10265,7 @@ function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime,
 
   const pending = bookingItems.filter((i) => i.status === "pending");
   const completed = bookingItems.filter((i) => i.status === "completed");
-  const declined = bookingItems.filter((i) => i.status === "declined");
+  const declined = bookingItems.filter((i) => i.status === "declined" || i.status === "cancelled");
 
   const upcomingEntries = [
     ...bookingItems
@@ -10430,6 +10430,22 @@ function VendorBookingsView({ vendor, bookingItems, onRespond, onAddBlockedTime,
                   </div>
                   <PackageDetails name={e.item.packageName} details={e.item.packageDetails} />
                   {e.item.isGuest && onFetchGuestContact && <GuestContact bookingId={e.item.bookingId} fetchContact={onFetchGuestContact} />}
+                  {onCancelItem && e.item.status === "confirmed" && (
+                    <button
+                      onClick={() => {
+                        const days = dayNumber(e.item.date) - dayNumber(todayISO());
+                        const text =
+                          days >= 30
+                            ? "Vill du avboka den här bokningen? Kunden får tillbaka allt som betalats och meddelas direkt. Du kan avboka utan följder fram till 30 dagar före eventet."
+                            : "Du avbokar med mindre än 30 dagar kvar. Enligt leverantörsavtalet registreras det som en varning. Kunden får tillbaka allt som betalats och meddelas direkt. Vill du ändå avboka?";
+                        if (window.confirm(text)) onCancelItem(e.item.bookingNumber, e.item.id);
+                      }}
+                      className="mt-2 rounded-full px-3 py-1.5 text-xs font-medium"
+                      style={{ border: `1.5px solid ${colors.coral}`, color: colors.coralDeep, backgroundColor: colors.white }}
+                    >
+                      Avboka bokningen
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div key={`x-${i}`} className="flex items-center justify-between rounded-xl p-3 text-sm" style={{ backgroundColor: colors.beige }}>
@@ -10581,6 +10597,7 @@ function AdminBookingsTab({ token, vendorApplications }) {
                       </span>
                       <span className="text-xs" style={{ color: colors.plumSoft }}>
                         {formatKr(Number(i.price) || 0)} · {ADMIN_BOOKING_STATUS[i.status] || i.status}
+                        {i.status === "cancelled" && i.cancelled_at ? ` (${String(i.cancelled_at).slice(0, 10)}, ${dayNumber(b.date) - dayNumber(String(i.cancelled_at).slice(0, 10))} dagar före)` : ""}
                       </span>
                     </li>
                   ))}
@@ -14157,6 +14174,32 @@ export default function App() {
     }
   };
 
+  // Leverantören avbokar en redan bekräftad bokning: kunden får alltid tillbaka allt som betalats.
+  const cancelConfirmedItem = async (bookingNumber, itemId) => {
+    if (!session?.access_token) return;
+    const b = bookings.find((x) => x.bookingNumber === bookingNumber);
+    const setStatus = (status) =>
+      setBookings((bs) => bs.map((x) => (x.bookingNumber === bookingNumber ? { ...x, items: x.items.map((i) => (i.id === itemId ? { ...i, status } : i)) } : x)));
+    setStatus("cancelled");
+    const { error } = await supabaseRestRequest(`/booking_items?id=eq.${itemId}`, session.access_token, { method: "PATCH", body: JSON.stringify({ status: "cancelled" }) });
+    if (error) {
+      setStatus("confirmed");
+      showToast("Det gick inte att avboka. Försök igen.");
+      setPollTick((t) => t + 1);
+      return;
+    }
+    showToast("Bokningen är avbokad och kunden meddelas.");
+    if (PAYMENTS_UI && b?.bookingId) {
+      const r = await callStripeFn("stripe-jobs", session.access_token, { action: "refund_booking", booking_id: b.bookingId });
+      const results = r.ok ? r.results || [] : [];
+      if (results.some((x) => x.error) || (!r.ok && !String(r.error || "").includes("finns inte"))) {
+        showToast("Bokningen är avbokad, men återbetalningen till kunden kunde inte göras automatiskt. Vi löser det och hör av oss.");
+      }
+      setPayTick((t) => t + 1);
+    }
+    setPollTick((t) => t + 1);
+  };
+
   const addBlockedTime = async (block) => {
     if (!submittedVendor) return;
     if (session?.access_token) {
@@ -14912,6 +14955,7 @@ export default function App() {
           vendor={submittedVendor}
           bookingItems={vendorBookingItems}
           onRespond={respondToBookingItem}
+          onCancelItem={cancelConfirmedItem}
           onAddBlockedTime={addBlockedTime}
           onRemoveBlockedTime={removeBlockedTime}
           onFetchGuestContact={fetchGuestContact}
