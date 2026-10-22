@@ -3865,6 +3865,9 @@ function ProfileView({ provider, party, inCart, cartAddons, onBack, onAdd, onRem
                 <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>
                   Välj ett eller flera paket. Priset räknas på din tid och ditt antal gäster.
                 </p>
+                <p className="mt-1 text-xs" style={{ color: colors.plumSoft }}>
+                  Du bokar direkt hos {provider.name}, som är en näringsidkare. Planifest förmedlar bokningen. Avbokningsreglerna är lika för alla leverantörer och visas innan du bokar.
+                </p>
               </div>
               {provider.packages.map((pkg) => {
                 const entry = cartPackages.find((ci) => ci.pkg.serviceId === pkg.id);
@@ -4536,6 +4539,12 @@ function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConf
     <div className="mx-auto max-w-2xl px-6 pb-24 pt-10 sm:px-10">
       <h1 style={{ fontFamily: serif, fontSize: 28, color: colors.plum }}>Din bokning</h1>
       <div className="mt-6 rounded-2xl p-4 text-sm leading-relaxed" style={{ backgroundColor: colors.cream, color: colors.plumSoft }}>
+        <p className="mb-1 font-semibold" style={{ color: colors.plum }}>
+          Vem du bokar hos
+        </p>
+        <p className="mb-3">
+          Du bokar direkt hos respektive leverantör, som är en näringsidkare. Avtalet om tjänsten ingår du med leverantören, som ansvarar för att tjänsten utförs. Planifest förmedlar bokningen, är inte part i avtalet och ansvarar inte för leverantörens utförande.
+        </p>
         <p className="mb-1 font-semibold" style={{ color: colors.plum }}>
           Bokningsvillkor & avbokningsregler
         </p>
@@ -10833,7 +10842,7 @@ function AdminVendorDetailView({ vendor, onBack, onApprove, onReject }) {
 // ---------------------------------------------------------------------------
 // Shown as "Senast uppdaterad" at the bottom of each legal page — update this
 // one line whenever the texts change. Must stay above the section lists below.
-const LEGAL_LAST_UPDATED = "15 oktober 2026";
+const LEGAL_LAST_UPDATED = "22 oktober 2026";
 
 const PRIVACY_POLICY_SECTIONS = [
   {
@@ -10867,8 +10876,19 @@ const PRIVACY_POLICY_SECTIONS = [
     heading: "4. Vem delar vi dina uppgifter med?",
     paragraphs: [
       "Leverantörer du väljer att boka får del av de uppgifter som krävs för att genomföra bokningen (namn, kontaktuppgifter, eventdetaljer).",
+      "Leverantören är själv personuppgiftsansvarig för sin behandling av de kunduppgifter den får för att genomföra bokningen.",
       "Har du laddat upp en profilbild visas den för de leverantörer du skickar meddelanden eller bokningsförfrågningar till. Du kan byta eller ta bort bilden när du vill.",
-      "När betalning införs på plattformen kommer nödvändiga uppgifter att delas med vår betaltjänstleverantör.",
+      "Vi anlitar följande tjänsteleverantörer, som behandlar personuppgifter för vår räkning:",
+    ],
+    bullets: [
+      "Supabase: databas, inloggning och lagring av bilder.",
+      "Vercel: drift och leverans av webbplatsen.",
+      "Cloudflare: skydd mot automatiserade anrop och domäntjänster.",
+      "Resend och Zoho: utskick och hantering av e-post.",
+      "Stripe: betalning, när betalning införs på plattformen.",
+    ],
+    after: [
+      "Vissa av dessa tjänsteleverantörer kan behandla uppgifter utanför EU/EES. I så fall säkerställer vi att det finns lämpliga skyddsåtgärder, till exempel EU–US Data Privacy Framework eller EU-kommissionens standardavtalsklausuler.",
       "Vi säljer aldrig dina uppgifter till tredje part för marknadsföringsändamål.",
     ],
   },
@@ -10917,7 +10937,8 @@ const TERMS_SECTIONS = [
   {
     heading: "1. Om Planifest",
     paragraphs: [
-      "Planifest (\"vi\", \"oss\") är en digital marknadsplats som förmedlar kontakt mellan privatpersoner som planerar events (\"Kund\") och företag som erbjuder eventrelaterade tjänster (\"Leverantör\"). Avtalet om den bokade tjänsten ingås direkt mellan Kund och Leverantör. Planifest är inte part i det avtalet och ansvarar inte för Leverantörens utförande av tjänsten, om inget annat anges.",
+      "Planifest (\"vi\", \"oss\") är en digital marknadsplats som förmedlar kontakt mellan privatpersoner och företag som planerar events (\"Kund\") och företag som erbjuder eventrelaterade tjänster (\"Leverantör\"). Leverantörerna är näringsidkare. Avtalet om den bokade tjänsten ingås direkt mellan Kund och Leverantör. Planifest är inte part i det avtalet och ansvarar inte för Leverantörens utförande av tjänsten, om inget annat anges.",
+      "Ansvaret är fördelat så här: Leverantören ansvarar för tjänsten, för priser och för informationen i sin profil. Planifest ansvarar för att plattformen fungerar och för att förmedla bokningar och meddelanden mellan Kund och Leverantör.",
     ],
   },
   {
@@ -10962,7 +10983,7 @@ const TERMS_SECTIONS = [
       "Leverantören ansvarar själv för de tillstånd och licenser som krävs för sin verksamhet.",
       "Kunduppgifter som delas via Planifest får endast användas för att genomföra den aktuella bokningen.",
       "Leverantören ska bemöta kunder professionellt, utan diskriminering eller trakasserier.",
-      "Leverantören är ensam ansvarig för den bokade tjänstens genomförande. Planifest är enbart förmedlare och part inte i avtalet mellan Leverantör och Kund.",
+      "Leverantören är ensam ansvarig för den bokade tjänstens genomförande. Planifest är enbart förmedlare och inte part i avtalet mellan Leverantör och Kund.",
       "Leverantören godkänner att Planifest tar en provision på 10 % av den del av beloppet som tillfaller Leverantören. Det gäller även vid avbokning. Provisionen dras vid utbetalning, och Leverantören betalar ingen avgift för betalningen i övrigt.",
       "För att få utbetalningar behöver Leverantören koppla ett utbetalningskonto via Planifests betalpartner Stripe.",
     ],
@@ -11369,6 +11390,8 @@ export default function App() {
   const [vendorSubmitting, setVendorSubmitting] = useState(false);
   const [vendorApplications, setVendorApplications] = useState(SHOW_DEMO_DATA ? SEED_VENDOR_APPLICATIONS : []);
   const [submittedVendorId, setSubmittedVendorId] = useState(null);
+  const submittedVendorIdRef = useRef(null);
+  submittedVendorIdRef.current = submittedVendorId;
   const [vendorCaptchaToken, setVendorCaptchaToken] = useState("");
   const [vendorCaptchaKey, setVendorCaptchaKey] = useState(0);
   // Declared early (not just where it's conceptually used) because several
@@ -11583,11 +11606,14 @@ export default function App() {
   // Approved vendors are publicly readable — load them for anyone browsing,
   // logged in or not, and merge them in alongside the seed/demo listings.
   useEffect(() => {
+    const refreshApproved = () =>
     fetchApprovedVendors(session?.access_token).then(({ data, error }) => {
       if (error || !data) return;
       const localList = data.map(mapDbVendorToLocal);
+      const freshIds = new Set(localList.map((l) => l.id));
       setVendorApplications((apps) => {
-        const next = [...apps];
+        // Approved vendors that are no longer in the fresh list were denied, suspended or deleted: drop them.
+        const next = apps.filter((v) => v.status !== "approved" || freshIds.has(v.id) || v.id === submittedVendorIdRef.current);
         localList.forEach((l) => {
           const idx = next.findIndex((v) => v.id === l.id);
           if (idx >= 0) next[idx] = l;
@@ -11596,6 +11622,13 @@ export default function App() {
         return next;
       });
     });
+    refreshApproved();
+    // Coming back to the tab re-reads the list, so a vendor that was denied or deleted disappears without a manual reload.
+    const onVisible = () => {
+      if (!document.hidden) refreshApproved();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -11746,7 +11779,7 @@ export default function App() {
     (async () => {
       const [q, b] = await Promise.all([
         supabaseRestRequest(
-          `/messages?message_type=eq.quote&quote_status=eq.accepted&select=id,quote_amount,quote_description,conversations!inner(vendor_id,category_id,customer_id,vendors(company_name))&conversations.customer_id=eq.${session.user.id}`,
+          `/messages?message_type=eq.quote&quote_status=eq.accepted&select=id,quote_amount,quote_description,conversations!inner(vendor_id,category_id,customer_id,vendors!inner(company_name,status))&conversations.customer_id=eq.${session.user.id}&conversations.vendors.status=eq.approved`,
           session.access_token
         ),
         supabaseRestRequest(`/bookings?customer_id=eq.${session.user.id}&cancelled=eq.false&select=booking_items(quote_message_id)`, session.access_token),
