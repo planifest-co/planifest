@@ -4555,8 +4555,8 @@ function CheckoutView({ cart, party, session, onOpenCart, onConfirm, onGuestConf
           : "Betalning via Planifest är inte aktiverat än, så ingen betalning sker nu. "}
         Avbokar du själv mer än 14 dagar före eventet får du tillbaka allt. Därefter minskar
         återbetalningen: 14–7 dagar före behålls depositionen, 6–1 dagar före 50 % och samma dag 100 %.
-        Avbokar leverantören får du alltid tillbaka allt du betalat. Reglerna är lika för alla
-        leverantörer. Fullständiga villkor finns i Planifests allmänna villkor.
+        Avbokar leverantören får du alltid tillbaka allt du betalat. Det är plattformens
+        gemensamma avbokningsregler och de gäller lika för alla leverantörer. Fullständiga villkor finns i Planifests allmänna villkor.
       </div>
 
       {isGuest && (
@@ -10876,12 +10876,11 @@ const PRIVACY_POLICY_SECTIONS = [
     heading: "4. Vem delar vi dina uppgifter med?",
     paragraphs: [
       "Leverantörer du väljer att boka får del av de uppgifter som krävs för att genomföra bokningen (namn, kontaktuppgifter, eventdetaljer).",
-      "Leverantören är själv personuppgiftsansvarig för sin behandling av de kunduppgifter den får för att genomföra bokningen.",
       "Har du laddat upp en profilbild visas den för de leverantörer du skickar meddelanden eller bokningsförfrågningar till. Du kan byta eller ta bort bilden när du vill.",
       "Vi anlitar följande tjänsteleverantörer, som behandlar personuppgifter för vår räkning:",
     ],
     bullets: [
-      "Supabase: databas, inloggning och lagring av bilder.",
+      "Supabase: databas, inloggning och lagring av bilder (data lagras i EU).",
       "Vercel: drift och leverans av webbplatsen.",
       "Cloudflare: skydd mot automatiserade anrop och domäntjänster.",
       "Resend och Zoho: utskick och hantering av e-post.",
@@ -10893,14 +10892,20 @@ const PRIVACY_POLICY_SECTIONS = [
     ],
   },
   {
-    heading: "5. Hur länge sparar vi dina uppgifter?",
+    heading: "5. Leverantörer som personuppgiftsansvariga",
+    paragraphs: [
+      "När du bokar en leverantör får leverantören dina uppgifter för att kunna genomföra bokningen. Leverantören är själv personuppgiftsansvarig för sin egen kundrelation och för den behandling av dina uppgifter som sker hos leverantören. Vänd dig till leverantören med frågor om den behandlingen.",
+    ],
+  },
+  {
+    heading: "6. Hur länge sparar vi dina uppgifter?",
     paragraphs: [
       "Vi sparar dina uppgifter så länge det behövs för ändamålen ovan, eller så länge lagen kräver — till exempel kräver bokföringslagen att räkenskapsinformation sparas i sju år. Kontouppgifter raderas eller anonymiseras på begäran, om vi inte är skyldiga att spara dem enligt lag.",
       "Stories som leverantörer lägger upp visas i 24 timmar och raderas därefter automatiskt, om leverantören inte har sparat dem i en höjdpunkt på sin profil.",
     ],
   },
   {
-    heading: "6. Dina rättigheter",
+    heading: "7. Dina rättigheter",
     paragraphs: ["Du har rätt att:"],
     bullets: [
       "Begära ett registerutdrag (rätt till tillgång)",
@@ -10912,19 +10917,19 @@ const PRIVACY_POLICY_SECTIONS = [
     ],
   },
   {
-    heading: "7. Säkerhet",
+    heading: "8. Säkerhet",
     paragraphs: ["Vi vidtar rimliga tekniska och organisatoriska åtgärder för att skydda dina uppgifter mot obehörig åtkomst, förlust eller missbruk."],
   },
   {
-    heading: "8. Cookies",
+    heading: "9. Cookies",
     paragraphs: ["Se vår separata cookiepolicy för information om hur vi använder cookies på Planifest."],
   },
   {
-    heading: "9. Ändringar av denna policy",
+    heading: "10. Ändringar av denna policy",
     paragraphs: ["Vi kan komma att uppdatera denna integritetspolicy. Väsentliga ändringar meddelas på webbplatsen."],
   },
   {
-    heading: "10. Kontakt",
+    heading: "11. Kontakt",
     paragraphs: ["Har du frågor om hur vi behandlar dina personuppgifter? Kontakta oss på info@planifest.se.", `Senast uppdaterad: ${LEGAL_LAST_UPDATED}`],
   },
 ];
@@ -10939,6 +10944,7 @@ const TERMS_SECTIONS = [
     paragraphs: [
       "Planifest (\"vi\", \"oss\") är en digital marknadsplats som förmedlar kontakt mellan privatpersoner och företag som planerar events (\"Kund\") och företag som erbjuder eventrelaterade tjänster (\"Leverantör\"). Leverantörerna är näringsidkare. Avtalet om den bokade tjänsten ingås direkt mellan Kund och Leverantör. Planifest är inte part i det avtalet och ansvarar inte för Leverantörens utförande av tjänsten, om inget annat anges.",
       "Ansvaret är fördelat så här: Leverantören ansvarar för tjänsten, för priser och för informationen i sin profil. Planifest ansvarar för att plattformen fungerar och för att förmedla bokningar och meddelanden mellan Kund och Leverantör.",
+      "Tjänsterna vänder sig till både konsumenter och företag. Konsumentskyddslagstiftning, som distansavtalslagen och konsumenttjänstlagen, gäller för avtal med konsumenter men inte när både Kund och Leverantör är näringsidkare. I övrigt gäller dessa villkor lika för alla.",
     ],
   },
   {
@@ -10961,13 +10967,13 @@ const TERMS_SECTIONS = [
   {
     heading: "5. Kundens avbokning",
     paragraphs: [
-      "Samma avbokningsregler gäller för alla Leverantörer. Hur mycket Kunden får tillbaka beror på hur många dagar som återstår till eventet när avbokningen görs:",
+      "Samma avbokningsregler gäller för alla Leverantörer. De är plattformens gemensamma standard för Leverantörernas avbokningsvillkor. Hur mycket Kunden får tillbaka beror på hur många dagar som återstår till eventet när avbokningen görs:",
     ],
     bullets: [
       "Mer än 14 dagar före eventet: Kunden får tillbaka allt som betalats, inklusive depositionen.",
       "14 till 7 dagar före eventet: Leverantören behåller depositionen (15 %). Kunden får tillbaka resten.",
       "6 till 1 dag före eventet: Leverantören får 50 % av totalbeloppet. Kunden får tillbaka resten.",
-      "Samma dag som eventet: Leverantören får 100 % av totalbeloppet.",
+      "Samma dag som eventet: Leverantören får 100 % av totalbeloppet. Skälet är att Leverantören då i regel redan har lagt ner kostnader och inte kan omboka. Kan Leverantören inte visa sådana kostnader kan Kunden begära att beloppet jämkas.",
     ],
     after: [
       "Kund och Leverantör kan också komma överens om en avbokning via chatten på Planifest. Då bestämmer de tillsammans hur mycket som betalas tillbaka.",
@@ -10984,7 +10990,7 @@ const TERMS_SECTIONS = [
       "Kunduppgifter som delas via Planifest får endast användas för att genomföra den aktuella bokningen.",
       "Leverantören ska bemöta kunder professionellt, utan diskriminering eller trakasserier.",
       "Leverantören är ensam ansvarig för den bokade tjänstens genomförande. Planifest är enbart förmedlare och inte part i avtalet mellan Leverantör och Kund.",
-      "Leverantören godkänner att Planifest tar en provision på 10 % av den del av beloppet som tillfaller Leverantören. Det gäller även vid avbokning. Provisionen dras vid utbetalning, och Leverantören betalar ingen avgift för betalningen i övrigt.",
+      "Leverantören godkänner att Planifest tar en provision på 10 % av den del av beloppet som Leverantören får behålla. Det gäller även när Kunden avbokar, men aldrig när Leverantören själv avbokar eller när Leverantören inte får behålla något belopp. Provisionen dras vid utbetalning, och Leverantören betalar ingen avgift för betalningen i övrigt.",
       "För att få utbetalningar behöver Leverantören koppla ett utbetalningskonto via Planifests betalpartner Stripe.",
     ],
   },
@@ -11008,7 +11014,7 @@ const TERMS_SECTIONS = [
   },
   {
     heading: "10. Ansvarsbegränsning",
-    paragraphs: ["Planifest ansvarar inte för Leverantörens utförande av bokade tjänster eller för skador i samband med ett event. Planifests ansvar är i alla händelser begränsat till den provision som Planifest erhållit för den aktuella bokningen."],
+    paragraphs: ["Planifest ansvarar inte för Leverantörens utförande av bokade tjänster eller för skador i samband med ett event. Planifests ansvar för skada som uppstår när Planifest brister i sitt uppdrag som förmedlare är begränsat till bokningens värde. Begränsningen gäller inte vid uppsåt eller grov vårdslöshet, och inte i den mån tvingande konsumentlagstiftning ger Kunden rätt till mer."],
   },
   {
     heading: "11. Reklamation och tvist",
