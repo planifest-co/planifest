@@ -1088,6 +1088,7 @@ function mapDbVendorToLocal(dbVendor) {
     serviceArea: dbVendor.service_area_type ? { type: dbVendor.service_area_type, value: dbVendor.service_area_value } : null,
     categories: (dbVendor.vendor_categories || []).map((vc) => vc.category_id),
     status: dbVendor.status,
+    agreementVersion: dbVendor.agreement_version || null,
     rejectionReason: dbVendor.rejection_reason || "",
     resubmittedAt: dbVendor.resubmitted_at || null,
     blockedTimes: (dbVendor.blocked_times || []).map((bt) => ({
@@ -1171,18 +1172,19 @@ async function findOrCreateConversation({ vendorId, customerId, categoryId, acce
 // confirmed account. Returns the mapped local-shape vendor on success.
 async function createVendorApplication(session, form) {
   const areaOption = SERVICE_AREA_OPTIONS.find((o) => o.type === form.serviceArea);
-  const { data, error } = await supabaseRestRequest("/vendors", session.access_token, {
-    method: "POST",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify({
-      profile_id: session.user.id,
-      company_name: form.companyName,
-      base_location: form.baseLocation,
-      service_area_type: areaOption?.type || null,
-      service_area_value: areaOption?.label || null,
-      status: "pending",
-    }),
-  });
+  const vendorBody = {
+    profile_id: session.user.id,
+    company_name: form.companyName,
+    base_location: form.baseLocation,
+    service_area_type: areaOption?.type || null,
+    service_area_value: areaOption?.label || null,
+    status: "pending",
+  };
+  const postVendor = (body) =>
+    supabaseRestRequest("/vendors", session.access_token, { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(body) });
+  let { data, error } = await postVendor({ ...vendorBody, agreement_version: VENDOR_AGREEMENT_VERSION });
+  // If the agreement column does not exist yet (SQL not run), save the application without it rather than blocking sign-ups.
+  if (error && /agreement/i.test(error.message || "")) ({ data, error } = await postVendor(vendorBody));
   if (error || !data?.[0]) return { error: error || { message: "Kunde inte skapa leverantörsprofilen." } };
   const vendorRow = data[0];
   // Email, phone, organisation number and contact person go in their own locked table (only she and admins can read it).
@@ -6048,7 +6050,7 @@ function GeographyPicker({ baseLocation, serviceAreaType, onBaseLocation, onServ
   );
 }
 
-function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNext, onBack, onSubmit, onShowToast, submitError, submitting, onOpenTerms, hasAccount, accountEmail, onCaptchaToken, captchaKey }) {
+function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNext, onBack, onSubmit, onShowToast, submitError, submitting, onOpenTerms, onOpenAgreement, hasAccount, accountEmail, onCaptchaToken, captchaKey }) {
   const stepTitles = { 1: hasAccount ? "Om ditt företag" : "Skapa konto", 2: "Geografi", 3: "Vad erbjuder du?" };
 
   return (
@@ -6143,10 +6145,14 @@ function VendorSignupView({ step, form, errors, onField, onToggleCategory, onNex
               <input type="checkbox" checked={form.acceptedTerms} onChange={(e) => onField("acceptedTerms", e.target.checked)} className="mt-1" />
               <span>
                 Jag har läst och godkänner{" "}
+                <button type="button" onClick={onOpenAgreement} className="font-semibold underline" style={{ color: colors.lilacDeep }}>
+                  leverantörsavtalet
+                </button>{" "}
+                och{" "}
                 <button type="button" onClick={onOpenTerms} className="font-semibold underline" style={{ color: colors.lilacDeep }}>
-                  Planifests villkor för leverantörer
+                  Planifests allmänna villkor
                 </button>
-                , inklusive reglerna om avbokning.
+                , inklusive reglerna om avbokning och provision.
               </span>
             </label>
             {errors.acceptedTerms && (
@@ -6451,12 +6457,15 @@ function MyAccountView({ profile, email, onSaveProfile, onChangePassword, onBack
 }
 
 // A slim footer for vendors: the legal pages and a way to reach us, nothing aimed at customers.
-function VendorFooter({ onOpenTerms, onOpenPrivacy, onOpenCookies, onSupport }) {
+function VendorFooter({ onOpenTerms, onOpenAgreement, onOpenPrivacy, onOpenCookies, onSupport }) {
   return (
     <footer className="mt-16 border-t px-6 pb-8 pt-6 text-center text-xs" style={{ borderColor: colors.beige, color: colors.plumSoft }}>
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
         <button onClick={onOpenTerms} className="underline">
           Villkor
+        </button>
+        <button onClick={onOpenAgreement} className="underline">
+          Leverantörsavtal
         </button>
         <button onClick={onOpenPrivacy} className="underline">
           Integritetspolicy
@@ -6710,7 +6719,7 @@ const SEED_BOOKINGS = [
   },
 ];
 
-function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditProfile, onPreview, onBookings, onInbox, onRespond, storyManager = null, onChangeAvatar, avatarUploading = false, onSaveDescription }) {
+function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditProfile, onPreview, onBookings, onInbox, onRespond, storyManager = null, onChangeAvatar, avatarUploading = false, onSaveDescription, onOpenAgreement, onAcceptAgreement }) {
   const avatarInput = useRef(null);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState("");
@@ -6788,6 +6797,23 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
           Se min profil
         </button>
       </div>
+
+      {vendor.agreementVersion !== VENDOR_AGREEMENT_VERSION && onAcceptAgreement && (
+        <div className="mt-5 p-5" style={{ backgroundColor: colors.lilacSoft, borderRadius: 22 }}>
+          <p className="font-semibold" style={{ color: colors.plum }}>Godkänn leverantörsavtalet</p>
+          <p className="mt-2 text-sm" style={{ color: colors.plum }}>
+            Vi har ett leverantörsavtal som beskriver provision, bokningar och avbokning. Läs igenom det och godkänn det för att fortsätta använda Planifest som leverantör.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={onOpenAgreement} className="rounded-full px-4 py-2.5 text-sm font-semibold" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.white, color: colors.plum }}>
+              Läs avtalet
+            </button>
+            <button onClick={onAcceptAgreement} className="rounded-full px-4 py-2.5 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+              Jag godkänner
+            </button>
+          </div>
+        </div>
+      )}
 
       {banner && (
         <div className="mt-5 p-5" style={{ backgroundColor: banner.bg, borderRadius: 22 }}>
@@ -11080,6 +11106,105 @@ const COOKIE_POLICY_SECTIONS = [
   },
 ];
 
+const VENDOR_AGREEMENT_VERSION = "2026-10-22";
+
+const VENDOR_AGREEMENT_SECTIONS = [
+  {
+    heading: "1. Parter och bakgrund",
+    paragraphs: [
+      "Detta avtal gäller mellan Planifest (\"Planifest\") och det företag som registrerar sig som leverantör (\"Leverantören\"). Uppgifter om den som driver Planifest finns på webbplatsen och i integritetspolicyn.",
+      "Planifest driver en digital marknadsplats där kunder planerar event och bokar tjänster hos leverantörer. Avtalet om själva tjänsten ingås direkt mellan kunden och Leverantören. Planifest förmedlar bokningen och är inte part i det avtalet.",
+      "Avtalet gäller tillsammans med Planifests allmänna villkor. Om de skiljer sig åt går detta avtal före när det gäller förhållandet mellan Planifest och Leverantören.",
+    ],
+  },
+  {
+    heading: "2. Leverantörens uppgifter och status",
+    paragraphs: [
+      "Leverantören bekräftar att den är näringsidkare och att uppgifterna vid registreringen är riktiga och hålls uppdaterade, inklusive företagsnamn, organisationsnummer och kontaktuppgifter.",
+      "Leverantören ska ha F-skatt eller vara ett bolag som är skyldigt att redovisa skatter och avgifter, och ska vara momsregistrerad i den mån verksamheten kräver det.",
+      "Leverantören ansvarar själv för tillstånd, licenser och försäkringar som verksamheten kräver, och för skatter och sociala avgifter på det Leverantören får utbetalt. Planifest ansvarar inte för Leverantörens skatter eller avgifter.",
+      "Planifest visar Leverantörens företagsnamn, och organisationsnummer för bolag, för kunder innan de bokar. För enskilda firmor visas inget personnummer.",
+    ],
+  },
+  {
+    heading: "3. Bokningar",
+    paragraphs: [
+      "Leverantören bestämmer själv sina tjänster, priser och tillgänglighet och ansvarar för att uppgifterna i profilen är korrekta. Planifest sätter inte Leverantörens priser.",
+      "En bokningsförfrågan ska bekräftas eller avböjas inom 24 timmar. Ett bindande avtal mellan kunden och Leverantören uppstår när Leverantören bekräftat bokningen.",
+      "Leverantören är ensam ansvarig för att tjänsten utförs enligt avtalet med kunden, med rätt kvalitet och vid rätt tidpunkt. Kunden riktar reklamationer till Leverantören i första hand.",
+      "Krav från en kund mot Planifest som beror på Leverantörens utförande, eller uteblivna utförande, ska Leverantören ersätta Planifest för, inklusive rimliga kostnader.",
+    ],
+  },
+  {
+    heading: "4. Betalning och kommissionsuppdrag",
+    paragraphs: [
+      "Det här avsnittet gäller när betalning via Planifest är aktiverad. Tills dess sker ingen betalning via Planifest.",
+      "Leverantören uppdrar åt Planifest att, i Leverantörens namn och för Leverantörens räkning, ta emot kundens betalning för bokningar som görs via Planifest (kommissionsuppdrag). För uppdraget gäller:",
+    ],
+    bullets: [
+      "Planifest förvärvar ingen fordran på kunden och tar ingen kreditrisk. Planifest garanterar inte att kunden betalar.",
+      "Betalningen hanteras av betaltjänstleverantören Stripe och betalas ut till Leverantörens Stripe-konto. Pengarna tillhör aldrig Planifest.",
+      "Leverantören måste koppla ett Stripe-konto och godkänna Stripes villkor för att kunna få betalt.",
+      "Provisionen är Leverantörens ersättning till Planifest för förmedlingen, och är inte en avgift för betalningen.",
+    ],
+    after: [
+      "Kunden betalar en deposition på 15 % av totalbeloppet när Leverantören bekräftat bokningen, och resten senast 14 dagar före eventet. Bokas ett event med mindre än 14 dagar kvar betalar kunden hela beloppet direkt. Utbetalning till Leverantören sker 48 timmar efter att eventet ägt rum.",
+    ],
+  },
+  {
+    heading: "5. Provision",
+    paragraphs: [
+      "Planifest tar en provision på 10 % av den del av beloppet som Leverantören får behålla.",
+      "Provision tas även när kunden avbokar, men bara på det belopp Leverantören får behålla enligt avbokningsreglerna. Provision tas aldrig när Leverantören själv avbokar eller när Leverantören inte får behålla något belopp.",
+      "Planifest står för Stripes avgifter på betalningarna. Leverantören betalar ingen annan avgift till Planifest än provisionen.",
+      "Hur provisionen faktureras eller redovisas, och hur moms hanteras, anges närmare innan betalning via Planifest aktiveras. Leverantören får besked i förväg.",
+    ],
+  },
+  {
+    heading: "6. Avbokning",
+    paragraphs: [
+      "Kundens avbokning. Planifests gemensamma avbokningsregler gäller för alla leverantörer: mer än 14 dagar före eventet får kunden tillbaka allt, 14 till 7 dagar före behåller Leverantören depositionen (15 %), 6 till 1 dag före får Leverantören 50 % av totalbeloppet och samma dag får Leverantören 100 %. Reglerna visas för kunden innan bokning. Begär en kund jämkning samma dag och Leverantören inte haft kostnader motsvarande beloppet ska Leverantören medverka till en skälig lösning.",
+      "Leverantörens avbokning. Leverantören kan avboka en bekräftad bokning utan följder fram till 30 dagar före eventet. Avbokar Leverantören senare, eller ställer in en bokning, får kunden alltid tillbaka allt som betalats. Planifest föreslår då lediga leverantörer i samma kategori.",
+      "Varning och avstängning. En sen avbokning från Leverantörens sida registreras som en varning. Avbokningar som beror på samma händelse eller orsak inom kort tid räknas som en varning. Leverantören får besked om varje varning och kan invända inom 14 dagar. Upprepade sena avbokningar kan leda till att kontot stängs av. Ingen avgift tas ut för sena avbokningar.",
+    ],
+  },
+  {
+    heading: "7. Kunduppgifter och personuppgifter",
+    paragraphs: [
+      "Leverantören får kundens uppgifter för att genomföra bokningen och får inte använda dem för annat. Leverantören är själv personuppgiftsansvarig för sin behandling av kunduppgifter och ansvarar för att följa dataskyddsreglerna. Planifest är personuppgiftsansvarig för behandlingen på plattformen enligt integritetspolicyn.",
+    ],
+  },
+  {
+    heading: "8. Innehåll och rättigheter",
+    paragraphs: [
+      "Leverantören behåller rättigheterna till sina bilder och texter. Leverantören ger Planifest rätt att visa dem på plattformen och i Planifests marknadsföring av plattformen. Leverantören ansvarar för att den har rätt att använda materialet.",
+    ],
+  },
+  {
+    heading: "9. Planifests ansvar",
+    paragraphs: [
+      "Planifest tillhandahåller plattformen i befintligt skick och garanterar inte oavbruten drift eller att Leverantören får ett visst antal bokningar. Planifests ansvar mot Leverantören är begränsat till den provision Leverantören betalat de senaste 12 månaderna, utom vid uppsåt eller grov vårdslöshet.",
+    ],
+  },
+  {
+    heading: "10. Avtalstid och avslut",
+    paragraphs: [
+      "Avtalet gäller tills vidare. Leverantören kan avsluta sitt konto när som helst. Redan bekräftade bokningar ska då genomföras eller avbokas enligt avsnitt 6. Planifest kan stänga av eller avsluta kontot vid väsentligt avtalsbrott, vilseledande uppgifter eller upprepade varningar.",
+    ],
+  },
+  {
+    heading: "11. Ändringar och överlåtelse",
+    paragraphs: [
+      "Planifest kan ändra avtalet. Väsentliga ändringar meddelas minst 30 dagar innan de börjar gälla, och Leverantören kan då avsluta kontot utan kostnad.",
+      "Planifest får överlåta avtalet till ett bolag som tar över verksamheten, till exempel när verksamheten flyttas från enskild firma till aktiebolag. Leverantören får besked om bytet och datum för det.",
+    ],
+  },
+  {
+    heading: "12. Lag och tvist",
+    paragraphs: ["Svensk lag gäller. Tvister avgörs av allmän domstol i Sverige.", "Frågor om detta avtal? Kontakta oss på info@planifest.se.", `Version ${VENDOR_AGREEMENT_VERSION}`],
+  },
+];
+
 function LegalPageView({ title, sections, onBack }) {
   return (
     <div className="mx-auto max-w-3xl px-6 pb-24 pt-8 sm:px-10">
@@ -12043,6 +12168,10 @@ export default function App() {
     setView("terms");
     setMobileMenuOpen(false);
   };
+  const goVendorAgreement = () => {
+    setView("vendorAgreement");
+    setMobileMenuOpen(false);
+  };
   const goCookiePolicy = () => {
     setView("cookiePolicy");
     setMobileMenuOpen(false);
@@ -12865,6 +12994,16 @@ export default function App() {
     }
     patchOwnVendor((v) => ({ ...v, profile: { ...v.profile, images } }));
     showToast("Ny profilbild ✓");
+  };
+  const acceptVendorAgreement = async () => {
+    if (!submittedVendor || !session?.access_token) return;
+    const { error } = await supabaseRestRequest(`/vendors?id=eq.${submittedVendor.id}`, session.access_token, { method: "PATCH", body: JSON.stringify({ agreement_version: VENDOR_AGREEMENT_VERSION }) });
+    if (error) {
+      showToast("Kunde inte spara ditt godkännande. Försök igen.");
+      return;
+    }
+    patchOwnVendor((v) => ({ ...v, agreementVersion: VENDOR_AGREEMENT_VERSION }));
+    showToast("Tack, avtalet är godkänt ✓");
   };
   const saveVendorDescription = async (text) => {
     if (!submittedVendor || !session?.access_token) return false;
@@ -14285,6 +14424,7 @@ export default function App() {
           submitError={vendorSubmitError}
           submitting={vendorSubmitting}
           onOpenTerms={goTerms}
+          onOpenAgreement={goVendorAgreement}
           hasAccount={!!session}
           accountEmail={session?.user?.email}
           onCaptchaToken={setVendorCaptchaToken}
@@ -14325,6 +14465,8 @@ export default function App() {
           onChangeAvatar={changeVendorAvatar}
           avatarUploading={avatarUploading}
           onSaveDescription={saveVendorDescription}
+          onOpenAgreement={goVendorAgreement}
+          onAcceptAgreement={acceptVendorAgreement}
           storyManager={
             <StoryManager
               approved={submittedVendor?.status === "approved"}
@@ -14417,11 +14559,12 @@ export default function App() {
 
       {view === "privacyPolicy" && <LegalPageView title="Integritetspolicy" sections={PRIVACY_POLICY_SECTIONS} onBack={leavePage} />}
       {view === "terms" && <LegalPageView title="Allmänna villkor" sections={TERMS_SECTIONS} onBack={leavePage} />}
+      {view === "vendorAgreement" && <LegalPageView title="Leverantörsavtal" sections={VENDOR_AGREEMENT_SECTIONS} onBack={() => (session && submittedVendor ? goVendorDashboard() : leavePage())} />}
       {view === "cookiePolicy" && <LegalPageView title="Cookiepolicy" sections={COOKIE_POLICY_SECTIONS} onBack={leavePage} />}
 
-      {vendorMode && <VendorFooter onOpenTerms={goTerms} onOpenPrivacy={goPrivacyPolicy} onOpenCookies={goCookiePolicy} onSupport={() => setSupportOpen(true)} />}
+      {vendorMode && <VendorFooter onOpenTerms={goTerms} onOpenAgreement={goVendorAgreement} onOpenPrivacy={goPrivacyPolicy} onOpenCookies={goCookiePolicy} onSupport={() => setSupportOpen(true)} />}
 
-      {!isVendorPortalView && !isAdminView && !["builder", "checkout", "confirmation", "vendorSignup", "vendorAwaitingConfirmation", "resetPassword", "privacyPolicy", "terms", "cookiePolicy"].includes(view) && (
+      {!isVendorPortalView && !isAdminView && !["builder", "checkout", "confirmation", "vendorSignup", "vendorAwaitingConfirmation", "resetPassword", "privacyPolicy", "terms", "vendorAgreement", "cookiePolicy"].includes(view) && (
         <Footer
           onGoHome={goHome}
           onBrowse={() => {
