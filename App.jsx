@@ -4963,7 +4963,7 @@ function ConfirmationView({ booking, onRestart, onMinaBokningar }) {
   );
 }
 
-function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem, events = [] }) {
+function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem, events = [], payments = [], onPay }) {
   const [tab, setTab] = useState("upcoming");
   const tabs = [
     { id: "upcoming", label: "Kommande" },
@@ -4972,6 +4972,31 @@ function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem
   ];
   const getTab = (b) => (b.cancelled ? "cancelled" : b.completed ? "completed" : "upcoming");
   const filtered = bookings.filter((b) => getTab(b) === tab);
+
+  // Är något betalt i bokningen? Då visas vad avbokningen kostar innan den görs.
+  const askCancel = (b) => {
+    if (PAYMENTS_UI) {
+      let paid = 0;
+      let refund = 0;
+      let keep = 0;
+      b.items.forEach((i) => {
+        const paidKr = payments.filter((p) => p.booking_item_id === i.id && p.status === "paid").reduce((s, p) => s + p.amount_ore, 0) / 100;
+        if (paidKr > 0) {
+          const pv = cancelPreview(b.date, i.price, paidKr);
+          paid += paidKr;
+          refund += pv.refund;
+          keep += pv.keep;
+        }
+      });
+      if (paid > 0) {
+        const ok = window.confirm(
+          `Du har betalat ${formatKr(paid)}. Om du avbokar nu får du tillbaka ${formatKr(refund)}${keep > 0 ? ` och leverantören behåller ${formatKr(keep)} enligt avbokningsreglerna` : ""}. Vill du avboka?`
+        );
+        if (!ok) return;
+      }
+    }
+    onCancelBooking(b.bookingNumber);
+  };
 
   return (
     <div className="mx-auto max-w-3xl px-6 pb-24 pt-10 sm:px-10">
@@ -5035,8 +5060,12 @@ function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem
                 {b.items.map((item) => {
                   const Icon = catMap[item.category]?.icon;
                   const meta = BOOKING_STATUS_META[item.status] || BOOKING_STATUS_META.pending;
+                  const paidList = payments.filter((p) => p.booking_item_id === item.id && p.status === "paid");
+                  const paidKr = paidList.reduce((sum, p) => sum + p.amount_ore, 0) / 100;
+                  const next = PAYMENTS_UI && item.status === "confirmed" && !b.cancelled && tab === "upcoming" ? payNextStep(b.date, item.price, paidList.map((p) => p.kind)) : null;
                   return (
-                    <div key={item.id} className="flex items-center justify-between gap-2 text-sm">
+                    <div key={item.id}>
+                    <div className="flex items-center justify-between gap-2 text-sm">
                       <span className="flex items-center gap-2" style={{ color: colors.plum }}>
                         {Icon && <Icon size={14} color={colors.lilacDeep} />} {item.name}
                         {item.packageName ? <span style={{ color: colors.plumSoft }}> · {item.packageName}</span> : null}
@@ -5058,6 +5087,23 @@ function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem
                         )}
                       </div>
                     </div>
+                    {PAYMENTS_UI && item.status === "confirmed" && !b.cancelled && tab === "upcoming" && (
+                      <div className="mt-2 rounded-2xl px-3 py-2.5 text-xs" style={{ backgroundColor: colors.lilacSoft, color: colors.plum }}>
+                        {paidKr > 0 && <p className="font-semibold">Betalat {formatKr(paidKr)} av {formatKr(item.price)}</p>}
+                        {next?.kind === "deposit" && <p className="mt-0.5">Handpenning {PAY_DEPOSIT_PCT} % ({formatKr(next.amountKr)}) betalas nu. Resten ({formatKr(next.restKr)}) senast {addDaysISO(b.date, -PAY_BALANCE_DAYS)}.</p>}
+                        {next?.kind === "remainder" && <p className="mt-0.5">Resterande {formatKr(next.amountKr)} ska vara betalt senast {addDaysISO(b.date, -PAY_BALANCE_DAYS)}.</p>}
+                        {next?.kind === "full" && <p className="mt-0.5">Eventet är snart, så hela beloppet ({formatKr(next.amountKr)}) betalas nu.</p>}
+                        {!next && paidKr > 0 && <p className="mt-0.5 flex items-center gap-1"><Check size={12} color={colors.green} /> Allt är betalt</p>}
+                        {!next && paidKr === 0 && <p className="mt-0.5">Det går inte att betala den här tjänsten just nu.</p>}
+                        {next && (
+                          <button onClick={() => onPay(item.id, next.kind)} className="mt-2 rounded-full px-4 py-2 text-xs font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+                            {next.kind === "deposit" ? `Betala handpenning ${formatKr(next.amountKr)}` : next.kind === "remainder" ? `Betala resten ${formatKr(next.amountKr)}` : `Betala ${formatKr(next.amountKr)}`}
+                          </button>
+                        )}
+                        {!PAYMENTS_LIVE && <p className="mt-2" style={{ color: colors.plumSoft }}>Testläge: inga riktiga pengar. Använd testkortet 4242 4242 4242 4242, valfritt framtida datum och valfri CVC.</p>}
+                      </div>
+                    )}
+                    </div>
                   );
                 })}
               </div>
@@ -5072,7 +5118,7 @@ function MinaBokningarView({ bookings, onCancelBooking, onReviewItem, onChatItem
               {tab === "upcoming" && (
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
-                    onClick={() => onCancelBooking(b.bookingNumber)}
+                    onClick={() => askCancel(b)}
                     className="rounded-full px-4 py-2 text-xs font-medium"
                     style={{ border: `1.5px solid ${colors.coral}`, color: colors.coralDeep }}
                   >
@@ -6719,7 +6765,7 @@ const SEED_BOOKINGS = [
   },
 ];
 
-function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditProfile, onPreview, onBookings, onInbox, onRespond, storyManager = null, onChangeAvatar, avatarUploading = false, onSaveDescription, onOpenAgreement, onAcceptAgreement }) {
+function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditProfile, onPreview, onBookings, onInbox, onRespond, storyManager = null, onChangeAvatar, avatarUploading = false, onSaveDescription, onOpenAgreement, onAcceptAgreement, stripeInfo = null, stripePayments = [], onStripeConnect = null, onStripeRefresh = null, onStripeDashboard = null }) {
   const avatarInput = useRef(null);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState("");
@@ -6850,6 +6896,79 @@ function VendorDashboardView({ vendor, bookingItems, conversationCount, onEditPr
           </button>
         ))}
       </div>
+
+      {PAYMENTS_UI && vendor.status === "approved" && onStripeConnect && (
+        <section className="mt-6 p-5" style={card}>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-xl" style={{ fontFamily: serif, fontWeight: 700, color: colors.plum }}>Utbetalningar</h2>
+            {!PAYMENTS_LIVE && (
+              <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: colors.peachSoft, color: colors.plum }}>Testläge</span>
+            )}
+          </div>
+          {!stripeInfo?.connected ? (
+            <>
+              <p className="mt-2 text-sm" style={{ color: colors.plum }}>
+                För att få betalt via Planifest kopplar du ett utbetalningskonto hos vår betalpartner Stripe. Det tar några minuter och du anger dina uppgifter direkt hos Stripe.
+              </p>
+              <button onClick={onStripeConnect} className="mt-3 rounded-full px-4 py-2.5 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+                Koppla utbetalningskonto
+              </button>
+            </>
+          ) : !stripeInfo.charges_enabled ? (
+            <>
+              <p className="mt-2 text-sm" style={{ color: colors.plum }}>
+                Nästan klart. Stripe behöver några fler uppgifter innan du kan ta emot betalningar.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={onStripeConnect} className="rounded-full px-4 py-2.5 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white }}>
+                  Fortsätt hos Stripe
+                </button>
+                <button onClick={onStripeRefresh} className="rounded-full px-4 py-2.5 text-sm font-semibold" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.white, color: colors.plum }}>
+                  Uppdatera status
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold" style={{ color: colors.plum }}>
+                <Check size={15} color={colors.green} /> Ditt utbetalningskonto är klart
+              </p>
+              <p className="mt-1 text-sm" style={{ color: colors.plumSoft }}>
+                Kundens betalning hamnar på ditt Stripe-konto. Pengarna betalas ut 48 timmar efter eventet, efter Planifests provision på 10 % av det du behåller.
+              </p>
+              {stripeInfo.manual_payouts === false && (
+                <p className="mt-2 rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: colors.coralSoft, color: colors.plum }}>
+                  Obs: ditt konto har automatiska utbetalningar. Skriv till info@planifest.se så ställer vi in det.
+                </p>
+              )}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={onStripeDashboard} className="rounded-full px-4 py-2.5 text-sm font-semibold" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.white, color: colors.plum }}>
+                  Öppna Stripe-panelen
+                </button>
+                <button onClick={onStripeRefresh} className="rounded-full px-4 py-2.5 text-sm font-semibold" style={{ border: `1px solid ${colors.beige}`, backgroundColor: colors.white, color: colors.plum }}>
+                  Uppdatera status
+                </button>
+              </div>
+            </>
+          )}
+          {stripePayments.length > 0 && (
+            <div className="mt-4 border-t pt-3" style={{ borderColor: colors.beige }}>
+              <p className="text-xs font-semibold uppercase" style={{ color: colors.plumSoft, letterSpacing: "0.08em" }}>Senaste betalningar</p>
+              <ul className="mt-2 space-y-1.5 text-sm" style={{ color: colors.plum }}>
+                {stripePayments.map((p, idx) => {
+                  const left = p.amount_ore - p.refunded_ore - (p.application_fee_ore - p.refunded_fee_ore);
+                  return (
+                    <li key={idx} className="flex items-center justify-between gap-2">
+                      <span>{p.booking_number} · {p.kind === "deposit" ? "Handpenning" : p.kind === "remainder" ? "Rest" : "Hela beloppet"}</span>
+                      <span style={{ color: colors.plumSoft }}>{formatKr(left / 100)} efter provision</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
 
       {storyManager}
 
@@ -10475,6 +10594,89 @@ function AdminBookingsTab({ token, vendorApplications }) {
   );
 }
 
+const PAY_KIND_LABEL = { deposit: "Handpenning", remainder: "Rest", full: "Hela beloppet" };
+const PAY_STATUS_LABEL = { pending: "Väntar", paid: "Betald", expired: "Utgången", failed: "Misslyckades" };
+const PAYOUT_STATUS_LABEL = { pending: "Väntar på utbetalning", paid: "Utbetald", failed: "Misslyckades", nothing: "Inget att betala ut" };
+
+function AdminPaymentsTab({ token, vendorApplications, onShowToast }) {
+  const [tick, setTick] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+  const payments = useAdminList("/payments?select=*&order=created_at.desc&limit=100", token, tick);
+  const settlements = useAdminList("/item_settlements?select=*&order=updated_at.desc&limit=100", token, tick);
+  const vendorName = (id) => vendorApplications.find((v) => v.id === id)?.companyName || "Okänd leverantör";
+  const kr = (ore) => formatKr((ore || 0) / 100);
+
+  const run = async () => {
+    setRunning(true);
+    const r = await callStripeFn("stripe-jobs", token, { action: "run" });
+    setRunning(false);
+    if (!r.ok) {
+      onShowToast(r.error);
+      return;
+    }
+    setResult(r);
+    setTick((t) => t + 1);
+    onShowToast(`Klart: ${r.refunds.length} återbetalningar, ${r.payouts.length} utbetalningar.`);
+  };
+
+  return (
+    <div>
+      <div className="mt-5 rounded-2xl p-4" style={{ backgroundColor: colors.lilacSoft }}>
+        <p className="text-sm font-semibold" style={{ color: colors.plum }}>Återbetalningar och utbetalningar</p>
+        <p className="mt-1 text-xs" style={{ color: colors.plumSoft }}>
+          Gör väntande återbetalningar för avbokade bokningar och betalar ut till leverantörer 48 timmar efter eventet. Kör så ofta du vill, samma sak görs aldrig två gånger.
+        </p>
+        <button onClick={run} disabled={running} className="mt-3 rounded-full px-4 py-2 text-sm font-semibold" style={{ backgroundColor: colors.coral, color: colors.white, opacity: running ? 0.6 : 1 }}>
+          {running ? "Kör…" : "Kör nu"}
+        </button>
+        {result && (
+          <p className="mt-2 text-xs" style={{ color: colors.plum }}>
+            Senaste körning: {result.checked} betalda tjänster kontrollerade, {result.refunds.length} återbetalningar, {result.payouts.length} utbetalningar.
+          </p>
+        )}
+      </div>
+
+      <h2 className="mb-2 mt-6 font-semibold" style={{ color: colors.plum }}>Avräkningar</h2>
+      <AdminListShell state={settlements} empty="Inga avräkningar än.">
+        <div className="space-y-2">
+          {settlements.rows.map((s) => (
+            <div key={s.id} className="rounded-2xl p-3 text-sm" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}`, color: colors.plum }}>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="font-semibold">{s.booking_number} · {vendorName(s.vendor_id)}</span>
+                <span className="text-xs" style={{ color: colors.plumSoft }}>
+                  {s.outcome === "completed" ? "Genomförd" : s.outcome === "customer_cancelled" ? `Kund avbokade (${s.days_before} dgr före)` : "Leverantör avbokade"}
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs" style={{ color: colors.plumSoft }}>
+                Betalt {kr(s.paid_ore)} · Återbetalt {kr(s.refunded_ore)} · Behålls {kr(s.retained_ore)}
+                {s.outstanding_ore > 0 ? ` · Kunden är skyldig ${kr(s.outstanding_ore)}` : ""}
+              </p>
+              <p className="mt-0.5 text-xs" style={{ color: s.payout_status === "failed" || s.refund_status === "failed" ? colors.coralDeep : colors.plumSoft }}>
+                {PAYOUT_STATUS_LABEL[s.payout_status]}{s.payout_ore ? ` ${kr(s.payout_ore)}` : ""}{s.refund_status === "failed" ? " · Återbetalning misslyckades" : ""}{s.error ? ` · ${s.error}` : ""}
+              </p>
+            </div>
+          ))}
+        </div>
+      </AdminListShell>
+
+      <h2 className="mb-2 mt-6 font-semibold" style={{ color: colors.plum }}>Betalningar</h2>
+      <AdminListShell state={payments} empty="Inga betalningar än.">
+        <div className="space-y-2">
+          {payments.rows.map((p) => (
+            <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl p-3 text-sm" style={{ backgroundColor: colors.white, border: `1.5px solid ${colors.lilac}`, color: colors.plum }}>
+              <span>{p.booking_number} · {PAY_KIND_LABEL[p.kind]} · {vendorName(p.vendor_id)}</span>
+              <span className="text-xs" style={{ color: colors.plumSoft }}>
+                {kr(p.amount_ore)} (provision {kr(p.application_fee_ore)}){p.refunded_ore > 0 ? ` · återbetalt ${kr(p.refunded_ore)}` : ""} · {PAY_STATUS_LABEL[p.status]}
+              </span>
+            </div>
+          ))}
+        </div>
+      </AdminListShell>
+    </div>
+  );
+}
+
 function AdminSupportTab({ token }) {
   const msgs = useAdminList("/support_messages?select=*&order=created_at.desc&limit=200", token);
   return (
@@ -10549,6 +10751,7 @@ function AdminDashboardView({ vendorApplications, filter, onFilterChange, onOpen
     { id: "bookings", label: "Bokningar" },
     { id: "support", label: "Support" },
     { id: "reviews", label: "Recensioner" },
+    ...(PAYMENTS_UI ? [{ id: "payments", label: "Betalningar" }] : []),
   ];
   return (
     <div>
@@ -10573,6 +10776,7 @@ function AdminDashboardView({ vendorApplications, filter, onFilterChange, onOpen
           {tab === "bookings" && <AdminBookingsTab token={token} vendorApplications={vendorApplications} />}
           {tab === "support" && <AdminSupportTab token={token} />}
           {tab === "reviews" && <AdminReviewsTab token={token} vendorApplications={vendorApplications} onShowToast={onShowToast} />}
+          {tab === "payments" && <AdminPaymentsTab token={token} vendorApplications={vendorApplications} onShowToast={onShowToast} />}
         </div>
       )}
     </div>
@@ -10984,6 +11188,65 @@ const PRIVACY_POLICY_SECTIONS = [
 // Sätts till true först när Stripe-betalningen är byggd, testad och live.
 // Styr texterna i kassan och i villkoren så att sidan aldrig lovar betalning som inte finns.
 const PAYMENTS_LIVE = false;
+
+// Stripe i testläge: betalknapparna syns bara när PAYMENTS_LIVE är true, eller när sidan öppnats med ?betaltest=1
+// (sparas i webbläsaren; ?betaltest=0 stänger av igen). Riktiga besökare ser ingenting av det.
+const PAYMENTS_TEST_UI = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search).get("betaltest");
+    if (q === "1") localStorage.setItem("planifest-betaltest", "1");
+    if (q === "0") localStorage.removeItem("planifest-betaltest");
+    return localStorage.getItem("planifest-betaltest") === "1";
+  } catch (e) {
+    return false;
+  }
+})();
+const PAYMENTS_UI = PAYMENTS_LIVE || PAYMENTS_TEST_UI;
+
+const PAY_DEPOSIT_PCT = 15;
+const PAY_BALANCE_DAYS = 14;
+
+// Anropar en av Planifests Stripe-funktioner i Supabase. Svaret är alltid { ok, ... } eller { ok:false, error }.
+async function callStripeFn(slug, accessToken, body) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/${slug}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ ...body, origin: window.location.origin }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 404) return { ok: false, error: "Betalningsfunktionen finns inte uppe än." };
+    if (!res.ok || data.ok === false) return { ok: false, error: data.error || "Något gick fel. Försök igen." };
+    return data;
+  } catch (e) {
+    return { ok: false, error: "Nådde inte servern. Kontrollera din uppkoppling och försök igen." };
+  }
+}
+
+// Vad kan kunden betala härnäst för en bekräftad tjänst? Samma regler som på servern (som alltid avgör).
+function payNextStep(date, priceKr, paidKinds) {
+  const days = dayNumber(date) - dayNumber(todayISO());
+  const paid = new Set(paidKinds);
+  if (days < 0 || paid.has("full") || (paid.has("deposit") && paid.has("remainder"))) return null;
+  const total = Math.round(Number(priceKr) * 100);
+  const dep = Math.round((total * PAY_DEPOSIT_PCT) / 100);
+  if (paid.has("deposit")) return { kind: "remainder", amountKr: (total - dep) / 100, days };
+  if (days <= PAY_BALANCE_DAYS) return { kind: "full", amountKr: total / 100, days };
+  return { kind: "deposit", amountKr: dep / 100, days, restKr: (total - dep) / 100 };
+}
+
+// Förhandsvisning av avbokningstrappan, för bekräftelsen innan en betald bokning avbokas.
+function cancelPreview(date, priceKr, paidKr) {
+  const days = dayNumber(date) - dayNumber(todayISO());
+  const total = Number(priceKr);
+  let keepTarget = 0;
+  if (days > 14) keepTarget = 0;
+  else if (days >= 7) keepTarget = Math.round(total * PAY_DEPOSIT_PCT) / 100;
+  else if (days >= 1) keepTarget = total / 2;
+  else keepTarget = total;
+  const keep = Math.min(paidKr, keepTarget);
+  return { days, keep, refund: paidKr - keep };
+}
 
 const TERMS_SECTIONS = [
   {
@@ -11406,6 +11669,10 @@ export default function App() {
   const [guestBooking, setGuestBooking] = useState({ loading: false, error: "", data: null, justVerified: false, token: "" });
   const [busyByVendor, setBusyByVendor] = useState({});
   const [busyRefresh, setBusyRefresh] = useState(0);
+  const [myPayments, setMyPayments] = useState([]); // kundens egna betalningar (testläge)
+  const [payTick, setPayTick] = useState(0);
+  const [vendorStripe, setVendorStripe] = useState(null); // leverantörens Stripe-status
+  const [vendorStripePayments, setVendorStripePayments] = useState([]);
   const [pollTick, setPollTick] = useState(0); // bumps every 20 s while a vendor view is open, to refresh requests and conversations
   useEffect(() => {
     if (!["vendorDashboard", "vendorBookings", "vendorInbox"].includes(view)) return;
@@ -11810,6 +12077,7 @@ export default function App() {
       ({ data, error }) => {
         if (error || !data) return;
         const real = data.map((b) => ({
+          bookingId: b.id,
           eventId: b.event_id || null,
           bookingNumber: b.booking_number,
           date: b.date,
@@ -11843,7 +12111,63 @@ export default function App() {
         });
       }
     );
+  }, [session, payTick]);
+
+  // Betalningar i testläge: kundens egna betalningar, återkomst från Stripe och leverantörens utbetalningskonto.
+  useEffect(() => {
+    if (!PAYMENTS_UI || !session?.user) return;
+    supabaseRestRequest(`/payments?customer_id=eq.${session.user.id}&select=booking_item_id,kind,status,amount_ore,refunded_ore,paid_at&order=created_at.asc`, session.access_token).then(({ data }) => {
+      if (Array.isArray(data)) setMyPayments(data);
+    });
+  }, [session, payTick]);
+
+  const stripeReturnHandled = useRef(false);
+  useEffect(() => {
+    if (!PAYMENTS_UI || !session?.access_token || stripeReturnHandled.current) return;
+    let params;
+    try {
+      params = new URLSearchParams(window.location.search);
+    } catch (e) {
+      return;
+    }
+    const pay = params.get("betalning");
+    const st = params.get("stripe");
+    if (!pay && !st) return;
+    stripeReturnHandled.current = true;
+    try {
+      window.history.replaceState({}, "", window.location.pathname);
+    } catch (e) {
+      // fine
+    }
+    (async () => {
+      if (pay === "klar" && params.get("session_id")) {
+        const r = await callStripeFn("stripe-pay", session.access_token, { action: "sync", session_id: params.get("session_id") });
+        showToast(r.ok && r.paid ? "Tack! Din betalning är genomförd ✓" : r.ok ? "Betalningen är inte bekräftad än. Ladda om om en liten stund." : r.error);
+        setPayTick((t) => t + 1);
+        setView("minaBokningar");
+      } else if (pay === "avbruten") {
+        showToast("Betalningen avbröts. Inget har dragits.");
+        setView("minaBokningar");
+      } else if (st) {
+        const r = await callStripeFn("stripe-pay", session.access_token, { action: "connect_status" });
+        if (r.ok) setVendorStripe(r);
+        showToast(r.ok && r.charges_enabled ? "Ditt utbetalningskonto är klart ✓" : r.ok ? "Stripe behöver fler uppgifter innan du kan ta emot betalningar." : r.error);
+        setView("vendorDashboard");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
+
+  useEffect(() => {
+    const vid = submittedVendor?.id;
+    if (!PAYMENTS_UI || !vid || String(vid).startsWith("VND-") || !session?.access_token || view !== "vendorDashboard") return;
+    supabaseRestRequest(`/vendor_stripe?vendor_id=eq.${vid}&select=*`, session.access_token).then(({ data }) => {
+      if (Array.isArray(data)) setVendorStripe(data[0] ? { connected: true, ...data[0] } : { connected: false });
+    });
+    supabaseRestRequest(`/payments?vendor_id=eq.${vid}&status=eq.paid&select=booking_number,kind,amount_ore,application_fee_ore,refunded_ore,refunded_fee_ore,paid_at&order=paid_at.desc&limit=8`, session.access_token).then(({ data }) => {
+      if (Array.isArray(data)) setVendorStripePayments(data);
+    });
+  }, [submittedVendor?.id, session, view, payTick]);
 
   // A vendor's own incoming booking requests (Fas 7) — folded into the same
   // `bookings` array so the existing getVendorBookingItems() keeps working.
@@ -13169,6 +13493,8 @@ export default function App() {
   };
 
   const cancelBooking = async (bookingNumber) => {
+    const target = bookings.find((b) => b.bookingNumber === bookingNumber);
+    const hadPaid = PAYMENTS_UI && myPayments.some((p) => p.status === "paid" && (target?.items || []).some((i) => i.id === p.booking_item_id));
     setBookings((bs) =>
       bs.map((b) =>
         b.bookingNumber === bookingNumber ? { ...b, cancelled: true, items: b.items.map((i) => ({ ...i, status: "cancelled" })) } : b
@@ -13176,11 +13502,60 @@ export default function App() {
     );
     showToast("Bokningen är avbokad.");
     if (session?.access_token) {
-      await supabaseRestRequest(`/bookings?booking_number=eq.${bookingNumber}`, session.access_token, {
+      const { error } = await supabaseRestRequest(`/bookings?booking_number=eq.${bookingNumber}`, session.access_token, {
         method: "PATCH",
         body: JSON.stringify({ cancelled: true }),
       });
+      if (!error && hadPaid && target?.bookingId) {
+        // Återbetalningen räknas ut och görs på servern enligt avbokningstrappan.
+        const r = await callStripeFn("stripe-jobs", session.access_token, { action: "refund_booking", booking_id: target.bookingId });
+        const results = r.ok ? r.results || [] : [];
+        if (results.length) {
+          const refunded = results.reduce((s, x) => s + (x.refunded_ore || 0), 0) / 100;
+          const retained = results.reduce((s, x) => s + (x.retained_ore || 0), 0) / 100;
+          const failed = results.some((x) => x.error);
+          showToast(
+            failed
+              ? "Bokningen är avbokad, men återbetalningen kunde inte genomföras automatiskt. Vi löser det och hör av oss."
+              : `Bokningen är avbokad. ${formatKr(refunded)} betalas tillbaka till ditt kort.${retained > 0 ? ` ${formatKr(retained)} behålls enligt avbokningsreglerna.` : ""}`
+          );
+        } else if (!r.ok) {
+          showToast("Bokningen är avbokad, men återbetalningen kunde inte genomföras automatiskt. Vi löser det och hör av oss.");
+        }
+        setPayTick((t) => t + 1);
+      }
     }
+  };
+
+  // --- Stripe (testläge) ---
+  const goStripe = (r, fallback) => {
+    if (r.ok && r.url) {
+      window.location.href = r.url;
+    } else {
+      showToast(r.error || fallback);
+    }
+  };
+  const payBookingItem = async (itemId, kind) => {
+    if (!session?.access_token) return;
+    showToast("Öppnar betalningen…");
+    goStripe(await callStripeFn("stripe-pay", session.access_token, { action: "checkout", booking_item_id: itemId, kind }), "Betalningen kunde inte startas.");
+  };
+  const startStripeOnboarding = async () => {
+    if (!session?.access_token) return;
+    showToast("Öppnar Stripe…");
+    goStripe(await callStripeFn("stripe-pay", session.access_token, { action: "connect_start" }), "Det gick inte att öppna Stripe.");
+  };
+  const openStripeDashboard = async () => {
+    if (!session?.access_token) return;
+    goStripe(await callStripeFn("stripe-pay", session.access_token, { action: "connect_dashboard" }), "Det gick inte att öppna Stripe-panelen.");
+  };
+  const refreshStripeStatus = async () => {
+    if (!session?.access_token) return;
+    const r = await callStripeFn("stripe-pay", session.access_token, { action: "connect_status" });
+    if (r.ok) {
+      setVendorStripe(r);
+      showToast(r.charges_enabled ? "Ditt utbetalningskonto är klart ✓" : "Stripe behöver fler uppgifter innan du kan ta emot betalningar.");
+    } else showToast(r.error);
   };
 
   const openReview = (bookingNumber, item) => setReviewTarget({ bookingNumber, item });
@@ -14404,7 +14779,7 @@ export default function App() {
               onRemoveAvatar={removeCustomerAvatar}
             />
           )}
-          <MinaBokningarView bookings={bookings} onCancelBooking={cancelBooking} onReviewItem={openReview} onChatItem={openBookingChat} events={events} />
+          <MinaBokningarView bookings={bookings} onCancelBooking={cancelBooking} onReviewItem={openReview} onChatItem={openBookingChat} events={events} payments={myPayments} onPay={payBookingItem} />
         </>
       )}
 
@@ -14467,6 +14842,11 @@ export default function App() {
           onSaveDescription={saveVendorDescription}
           onOpenAgreement={goVendorAgreement}
           onAcceptAgreement={acceptVendorAgreement}
+          stripeInfo={vendorStripe}
+          stripePayments={vendorStripePayments}
+          onStripeConnect={PAYMENTS_UI ? startStripeOnboarding : null}
+          onStripeRefresh={refreshStripeStatus}
+          onStripeDashboard={openStripeDashboard}
           storyManager={
             <StoryManager
               approved={submittedVendor?.status === "approved"}
